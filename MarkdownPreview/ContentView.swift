@@ -1,0 +1,427 @@
+import SwiftUI
+import UniformTypeIdentifiers
+import Foundation
+
+struct ContentView: View {
+    @State private var isImporterPresented = false
+    @State private var currentFile: MarkdownFile?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationSplitView {
+            sourcePanel
+        } detail: {
+            previewPanel
+        }
+        .navigationTitle(currentFile?.fileName ?? "Markdown Preview")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Open") { isImporterPresented = true }
+            }
+        }
+        .fileImporter(
+            isPresented: $isImporterPresented,
+            allowedContentTypes: MarkdownFile.supportedTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handleImport(result)
+        }
+        #if os(macOS)
+        .onDrop(of: [.fileURL], isTargeted: nil, perform: handleDrop)
+        #endif
+        .alert("Unable to Open File", isPresented: .constant(errorMessage != nil)) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "Unknown error")
+        }
+    }
+
+    private var sourcePanel: some View {
+        Group {
+            if let file = currentFile {
+                ScrollView {
+                    Text(file.contents)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .textSelection(.enabled)
+                }
+            } else {
+                placeholder("Open a .md file to view source")
+            }
+        }
+    }
+
+    private var previewPanel: some View {
+        Group {
+            if let file = currentFile {
+                MarkdownBlocksView(source: file.contents)
+            } else {
+                placeholder("Preview will appear here")
+            }
+        }
+    }
+
+    private func handleImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            load(url: url)
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func load(url: URL) {
+        do {
+            currentFile = try MarkdownFile.load(from: url)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    #if os(macOS)
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) else {
+            return false
+        }
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+            guard let data = item as? Data,
+                  let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+            DispatchQueue.main.async {
+                load(url: url)
+            }
+        }
+        return true
+    }
+    #endif
+
+    private func placeholder(_ text: String) -> some View {
+        ContentUnavailableView {
+            Label("No File", systemImage: "doc.text")
+        } description: {
+            Text(text)
+        } actions: {
+            Button("Open Markdown File") {
+                isImporterPresented = true
+            }
+        }
+    }
+}
+
+private struct MarkdownBlocksView: View {
+    let source: String
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                ForEach(MarkdownBlockParser.parse(source), id: \.id) { block in
+                    switch block.kind {
+                    case .heading(let level, let text):
+                        Text(inlineAttributed(text))
+                            .font(headingFont(level: level))
+                            .fontWeight(.semibold)
+                    case .paragraph(let text):
+                        Text(inlineAttributed(text))
+                            .fixedSize(horizontal: false, vertical: true)
+                    case .list(let items):
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(items) { item in
+                                HStack(alignment: .top, spacing: 8) {
+                                    if let checked = item.checkbox {
+                                        Image(systemName: checked ? "checkmark.square.fill" : "square")
+                                            .foregroundColor(checked ? Color.accentColor : Color.secondary)
+                                    } else {
+                                        Text("•")
+                                    }
+                                    Text(inlineAttributed(item.text))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .padding(.leading, CGFloat(item.indent) * 18)
+                            }
+                        }
+                    case .orderedList(let items):
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("\(item.order ?? (index + 1)).")
+                                        .monospacedDigit()
+                                    Text(inlineAttributed(item.text))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .padding(.leading, CGFloat(item.indent) * 18)
+                            }
+                        }
+                    case .blockquote(let text):
+                        HStack(alignment: .top, spacing: 10) {
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.4))
+                                .frame(width: 4)
+                            Text(inlineAttributed(text))
+                                .italic()
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    case .rule:
+                        Divider()
+                    case .code(let code):
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            Text(code)
+                                .font(.system(.body, design: .monospaced))
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .background(Color.secondary.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+        }
+    }
+
+    private func headingFont(level: Int) -> Font {
+        switch level {
+        case 1: return .largeTitle
+        case 2: return .title
+        case 3: return .title2
+        case 4: return .headline
+        default: return .body
+        }
+    }
+
+    private func inlineAttributed(_ text: String) -> AttributedString {
+        if let attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return attributed
+        }
+        return AttributedString(text)
+    }
+}
+
+private struct MarkdownBlock: Identifiable {
+    enum Kind {
+        case heading(level: Int, text: String)
+        case paragraph(String)
+        case list([MarkdownListItem])
+        case orderedList([MarkdownListItem])
+        case blockquote(String)
+        case rule
+        case code(String)
+    }
+
+    let id = UUID()
+    let kind: Kind
+}
+
+private struct MarkdownListItem: Identifiable {
+    let id = UUID()
+    let text: String
+    let indent: Int
+    let checkbox: Bool?
+    let order: Int?
+}
+
+private enum MarkdownBlockParser {
+    static func parse(_ source: String) -> [MarkdownBlock] {
+        let lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var blocks: [MarkdownBlock] = []
+        var paragraph: [String] = []
+        var listItems: [MarkdownListItem] = []
+        var orderedListItems: [MarkdownListItem] = []
+        var quoteLines: [String] = []
+        var code: [String] = []
+        var inCodeFence = false
+
+        func flushParagraph() {
+            guard !paragraph.isEmpty else { return }
+            blocks.append(.init(kind: .paragraph(paragraph.joined(separator: " "))))
+            paragraph.removeAll()
+        }
+
+        func flushList() {
+            guard !listItems.isEmpty else { return }
+            blocks.append(.init(kind: .list(listItems)))
+            listItems.removeAll()
+        }
+
+        func flushOrderedList() {
+            guard !orderedListItems.isEmpty else { return }
+            blocks.append(.init(kind: .orderedList(orderedListItems)))
+            orderedListItems.removeAll()
+        }
+
+        func flushQuote() {
+            guard !quoteLines.isEmpty else { return }
+            blocks.append(.init(kind: .blockquote(quoteLines.joined(separator: "\n"))))
+            quoteLines.removeAll()
+        }
+
+        func flushAll() {
+            flushParagraph()
+            flushList()
+            flushOrderedList()
+            flushQuote()
+        }
+
+        for line in lines {
+            if line.hasPrefix("```") {
+                flushAll()
+                if inCodeFence {
+                    blocks.append(.init(kind: .code(code.joined(separator: "\n"))))
+                    code.removeAll()
+                }
+                inCodeFence.toggle()
+                continue
+            }
+
+            if inCodeFence {
+                code.append(line)
+                continue
+            }
+
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                flushAll()
+                continue
+            }
+
+            if let heading = parseHeading(line) {
+                flushAll()
+                blocks.append(.init(kind: .heading(level: heading.level, text: heading.text)))
+                continue
+            }
+
+            if let item = parseListItem(line) {
+                flushParagraph()
+                flushOrderedList()
+                flushQuote()
+                listItems.append(item)
+                continue
+            }
+
+            if let item = parseOrderedListItem(line) {
+                flushParagraph()
+                flushList()
+                flushQuote()
+                orderedListItems.append(item)
+                continue
+            }
+
+            if let quote = parseBlockquote(line) {
+                flushParagraph()
+                flushList()
+                flushOrderedList()
+                quoteLines.append(quote)
+                continue
+            }
+
+            if parseRule(line) {
+                flushAll()
+                blocks.append(.init(kind: .rule))
+                continue
+            }
+
+            flushList()
+            flushOrderedList()
+            flushQuote()
+            paragraph.append(line.trimmingCharacters(in: .whitespaces))
+        }
+
+        flushAll()
+        if !code.isEmpty {
+            blocks.append(.init(kind: .code(code.joined(separator: "\n"))))
+        }
+        return blocks
+    }
+
+    private static func parseHeading(_ line: String) -> (level: Int, text: String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let hashes = trimmed.prefix { $0 == "#" }
+        let level = hashes.count
+        guard (1...6).contains(level) else { return nil }
+        let text = trimmed.dropFirst(level).trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return nil }
+        return (level, text)
+    }
+
+    private static func parseListItem(_ line: String) -> MarkdownListItem? {
+        let indent = indentLevel(in: line)
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 3 else { return nil }
+        let first = trimmed.first
+        guard first == "-" || first == "*" || first == "+" else { return nil }
+        guard trimmed.dropFirst().first == " " else { return nil }
+        let rawText = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+        let (text, checkbox) = parseCheckbox(rawText)
+        return MarkdownListItem(text: text, indent: indent, checkbox: checkbox, order: nil)
+    }
+
+    private static func parseOrderedListItem(_ line: String) -> MarkdownListItem? {
+        let indent = indentLevel(in: line)
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let dotIndex = trimmed.firstIndex(of: ".") else { return nil }
+        let number = trimmed[..<dotIndex]
+        guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
+        let afterDot = trimmed[trimmed.index(after: dotIndex)...]
+        guard afterDot.first == " " else { return nil }
+        let rawText = String(afterDot.dropFirst()).trimmingCharacters(in: .whitespaces)
+        let (text, checkbox) = parseCheckbox(rawText)
+        return MarkdownListItem(
+            text: text,
+            indent: indent,
+            checkbox: checkbox,
+            order: Int(number)
+        )
+    }
+
+    private static func parseBlockquote(_ line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.first == ">" else { return nil }
+        let remaining = trimmed.dropFirst()
+        return String(remaining.first == " " ? remaining.dropFirst() : remaining)
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func parseRule(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        let chars = Array(trimmed)
+        guard chars.count >= 3 else { return false }
+        let allowed = chars.filter { $0 == "-" || $0 == "*" || $0 == "_" }
+        return allowed.count == chars.count && Set(chars).count == 1
+    }
+
+    private static func indentLevel(in line: String) -> Int {
+        var width = 0
+        for ch in line {
+            if ch == " " {
+                width += 1
+            } else if ch == "\t" {
+                width += 4
+            } else {
+                break
+            }
+        }
+        return max(0, width / 2)
+    }
+
+    private static func parseCheckbox(_ text: String) -> (String, Bool?) {
+        if text.hasPrefix("[ ] ") {
+            return (String(text.dropFirst(4)), false)
+        }
+        if text.hasPrefix("[x] ") || text.hasPrefix("[X] ") {
+            return (String(text.dropFirst(4)), true)
+        }
+        return (text, nil)
+    }
+}
+
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+    }
+}
