@@ -3,20 +3,58 @@ import UniformTypeIdentifiers
 import Foundation
 
 struct ContentView: View {
+    private enum DetailMode {
+        case preview
+        case source
+    }
+
+    private struct OpenedDocument: Identifiable {
+        let id: String
+        var file: MarkdownFile
+        var lastOpened: Date
+    }
+
     @State private var isImporterPresented = false
-    @State private var currentFile: MarkdownFile?
+    @State private var openedDocuments: [OpenedDocument] = []
+    @State private var selectedDocumentID: OpenedDocument.ID?
+    @State private var detailMode: DetailMode = .preview
+    @State private var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationSplitView {
-            sourcePanel
+        NavigationSplitView(preferredCompactColumn: $preferredCompactColumn) {
+            NavigationStack {
+                sidebarPanel
+                    .navigationTitle("Files")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                isImporterPresented = true
+                            } label: {
+                                Image(systemName: "plus")
+                            }
+                            .accessibilityLabel("Open")
+                            .accessibilityIdentifier("Open")
+                        }
+                    }
+            }
         } detail: {
-            previewPanel
-        }
-        .navigationTitle(currentFile?.fileName ?? "Markdown Preview")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Open") { isImporterPresented = true }
+            NavigationStack {
+                detailPanel
+                    .navigationTitle(currentDocument?.file.fileName ?? "Markdown Preview")
+                    .toolbar {
+                        ToolbarItemGroup(placement: .topBarTrailing) {
+                            if currentDocument != nil {
+                                Button {
+                                    detailMode = detailMode == .preview ? .source : .preview
+                                } label: {
+                                    Image(systemName: "rectangle.2.swap")
+                                }
+                                .accessibilityLabel("View")
+                                .accessibilityIdentifier("View")
+                            }
+                        }
+                    }
             }
         }
         .fileImporter(
@@ -34,11 +72,43 @@ struct ContentView: View {
         } message: {
             Text(errorMessage ?? "Unknown error")
         }
+        .onChange(of: selectedDocumentID) { _, selectedID in
+            guard selectedID != nil else { return }
+            preferredCompactColumn = .detail
+        }
+    }
+
+    private var sidebarPanel: some View {
+        Group {
+            if sortedDocuments.isEmpty {
+                placeholder("Open a .md file")
+            } else {
+                List(selection: $selectedDocumentID) {
+                    ForEach(sortedDocuments) { document in
+                        Text(document.file.fileName)
+                            .lineLimit(1)
+                            .tag(document.id)
+                    }
+                    .onDelete(perform: deleteDocuments)
+                }
+            }
+        }
+    }
+
+    private var detailPanel: some View {
+        Group {
+            switch detailMode {
+            case .preview:
+                previewPanel
+            case .source:
+                sourcePanel
+            }
+        }
     }
 
     private var sourcePanel: some View {
         Group {
-            if let file = currentFile {
+            if let file = currentDocument?.file {
                 ScrollView {
                     Text(file.contents)
                         .font(.system(.body, design: .monospaced))
@@ -54,7 +124,7 @@ struct ContentView: View {
 
     private var previewPanel: some View {
         Group {
-            if let file = currentFile {
+            if let file = currentDocument?.file {
                 MarkdownBlocksView(source: file.contents)
             } else {
                 placeholder("Preview will appear here")
@@ -74,10 +144,40 @@ struct ContentView: View {
 
     private func load(url: URL) {
         do {
-            currentFile = try MarkdownFile.load(from: url)
+            upsertDocument(try MarkdownFile.load(from: url))
+            detailMode = .preview
+            preferredCompactColumn = .detail
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func upsertDocument(_ file: MarkdownFile) {
+        let id = file.url.standardizedFileURL.path
+        if let index = openedDocuments.firstIndex(where: { $0.id == id }) {
+            openedDocuments[index].file = file
+            openedDocuments[index].lastOpened = Date()
+        } else {
+            openedDocuments.append(.init(id: id, file: file, lastOpened: Date()))
+        }
+        selectedDocumentID = id
+    }
+
+    private var sortedDocuments: [OpenedDocument] {
+        openedDocuments.sorted { $0.lastOpened > $1.lastOpened }
+    }
+
+    private var currentDocument: OpenedDocument? {
+        guard let selectedDocumentID else { return nil }
+        return openedDocuments.first(where: { $0.id == selectedDocumentID })
+    }
+
+    private func deleteDocuments(at offsets: IndexSet) {
+        let idsToDelete = offsets.map { sortedDocuments[$0].id }
+        openedDocuments.removeAll(where: { idsToDelete.contains($0.id) })
+        if let selectedDocumentID, idsToDelete.contains(selectedDocumentID) {
+            self.selectedDocumentID = sortedDocuments.first?.id
         }
     }
 
