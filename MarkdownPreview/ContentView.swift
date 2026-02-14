@@ -1,9 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import Foundation
-#if os(macOS)
-import AppKit
-#endif
 
 struct ContentView: View {
     private enum DetailMode {
@@ -37,15 +34,13 @@ struct ContentView: View {
     @State private var errorMessage: String?
     @State private var didRestoreDocuments = false
     @State private var isRestoringDocuments = true
-    #if os(macOS)
-    @State private var detailTitleAvailableWidth: CGFloat = 320
-    #endif
 
     var body: some View {
         NavigationSplitView(preferredCompactColumn: $preferredCompactColumn) {
             NavigationStack {
                 sidebarPanel
                     .navigationTitle("Files")
+                    #if !os(macOS)
                     .toolbar {
                         ToolbarItem(placement: openButtonPlacement) {
                             Button {
@@ -57,15 +52,24 @@ struct ContentView: View {
                             .accessibilityIdentifier("Open")
                         }
                     }
+                    #endif
             }
         } detail: {
             NavigationStack {
                 detailPanel
                     .navigationTitle(detailNavigationTitle)
                     .modifier(InlineTitleOnIOS())
-                    .background(detailWidthReader)
                     .toolbar {
                         ToolbarItemGroup(placement: viewButtonPlacement) {
+                            #if os(macOS)
+                            Button {
+                                isImporterPresented = true
+                            } label: {
+                                Image(systemName: "plus")
+                            }
+                            .accessibilityLabel("Open")
+                            .accessibilityIdentifier("Open")
+                            #endif
                             if currentDocument != nil {
                                 Button {
                                     detailMode = detailMode == .preview ? .source : .preview
@@ -111,21 +115,6 @@ struct ContentView: View {
 
     private var sidebarPanel: some View {
         VStack(spacing: 0) {
-            #if os(macOS)
-            HStack {
-                Spacer()
-                Button {
-                    isImporterPresented = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("Open")
-                .accessibilityIdentifier("Open")
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-            }
-            #endif
-
             Group {
                 if isRestoringDocuments {
                     ProgressView("Loading Files")
@@ -134,9 +123,16 @@ struct ContentView: View {
                 } else {
                     List(selection: $selectedDocumentID) {
                         ForEach(sortedDocuments) { document in
-                            Text(document.file.fileName)
-                                .lineLimit(1)
-                                .tag(document.id)
+                            HStack {
+                                Text(document.file.fileName)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
+                            .tag(document.id)
+                                #if os(macOS)
+                                .help(tooltipPath(for: document.file.url))
+                                #endif
                         }
                         .onDelete(perform: deleteDocuments)
                     }
@@ -278,61 +274,31 @@ struct ContentView: View {
     }
 
     private var detailNavigationTitle: String {
+        guard let currentDocument else { return "Markdown Preview" }
         #if os(macOS)
-        return macDetailPathTitle
+        return disambiguatedTitle(for: currentDocument)
         #else
-        return currentDocument?.file.fileName ?? "Markdown Preview"
+        return currentDocument.file.fileName
         #endif
     }
 
-    #if os(macOS)
-    private var macDetailPathTitle: String {
-        guard let currentDocument else { return "Markdown Preview" }
-        return elidedPathTitle(for: currentDocument.file.url.path, maxWidth: detailTitleAvailableWidth)
-    }
-
-    private var detailWidthReader: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .onAppear {
-                    detailTitleAvailableWidth = max(120, proxy.size.width - 140)
-                }
-                .onChange(of: proxy.size.width) { _, newWidth in
-                    detailTitleAvailableWidth = max(120, newWidth - 140)
-                }
+    private func disambiguatedTitle(for document: OpenedDocument) -> String {
+        let baseName = document.file.fileName
+        let parentName = document.file.url.deletingLastPathComponent().lastPathComponent
+        if parentName.isEmpty {
+            return baseName
         }
+        return "\(baseName) – \(parentName)"
     }
 
-    private func elidedPathTitle(for fullPath: String, maxWidth: CGFloat) -> String {
-        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        if measuredWidth(fullPath, font: font) <= maxWidth {
+    private func tooltipPath(for url: URL) -> String {
+        let fullPath = url.path
+        let homePath = NSHomeDirectory()
+        guard fullPath == homePath || fullPath.hasPrefix(homePath + "/") else {
             return fullPath
         }
-
-        let components = fullPath.split(separator: "/").map(String.init)
-        guard !components.isEmpty else { return fullPath }
-
-        var start = 1
-        while start < components.count {
-            let candidate = "…/" + components[start...].joined(separator: "/")
-            if measuredWidth(candidate, font: font) <= maxWidth {
-                return candidate
-            }
-            start += 1
-        }
-
-        return "…/" + components.last!
+        return "~" + fullPath.dropFirst(homePath.count)
     }
-
-    private func measuredWidth(_ text: String, font: NSFont) -> CGFloat {
-        let attributes: [NSAttributedString.Key: Any] = [.font: font]
-        return (text as NSString).size(withAttributes: attributes).width
-    }
-    #else
-    private var detailWidthReader: some View {
-        Color.clear
-    }
-    #endif
 
     private var openButtonPlacement: ToolbarItemPlacement {
         #if os(macOS)
