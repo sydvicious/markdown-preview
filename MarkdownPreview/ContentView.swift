@@ -34,6 +34,8 @@ struct ContentView: View {
     @State private var errorMessage: String?
     @State private var didRestoreDocuments = false
     @State private var isRestoringDocuments = true
+    @State private var isInitialOpenSheetPresented = false
+    @State private var hasPresentedInitialOpenSheet = false
 
     init(
         previewFiles: [MarkdownFile] = [],
@@ -57,13 +59,13 @@ struct ContentView: View {
         _detailMode = State(initialValue: showsSourceInPreview ? .source : .preview)
         _isRestoringDocuments = State(initialValue: !disablePersistenceRestore)
         _didRestoreDocuments = State(initialValue: disablePersistenceRestore)
+        _hasPresentedInitialOpenSheet = State(initialValue: disablePersistenceRestore)
     }
 
     var body: some View {
         NavigationSplitView(preferredCompactColumn: $preferredCompactColumn) {
             NavigationStack {
                 sidebarPanel
-                    .navigationTitle("Files")
                     #if !os(macOS)
                     .toolbar {
                         ToolbarItem(placement: openButtonPlacement) {
@@ -114,6 +116,11 @@ struct ContentView: View {
         ) { result in
             handleImport(result)
         }
+        #if !os(macOS)
+        .sheet(isPresented: $isInitialOpenSheetPresented) {
+            initialOpenSheet
+        }
+        #endif
         #if os(macOS)
         .onDrop(of: [.fileURL], isTargeted: nil, perform: handleDrop)
         #endif
@@ -124,12 +131,17 @@ struct ContentView: View {
         }
         .onChange(of: openedDocuments) { _, _ in
             persistDocuments()
+            presentInitialOpenSheetIfNeeded()
         }
         .onChange(of: selectedDocumentID) { _, _ in
             persistSelectedDocument()
         }
+        .onChange(of: isRestoringDocuments) { _, _ in
+            presentInitialOpenSheetIfNeeded()
+        }
         .onAppear {
             restorePersistedDocumentsIfNeeded()
+            presentInitialOpenSheetIfNeeded()
         }
         .onReceive(fileOpenState.$openedURL.compactMap { $0 }) { url in
             load(url: url)
@@ -144,7 +156,10 @@ struct ContentView: View {
                 if isRestoringDocuments {
                     ProgressView("Loading Files")
                 } else if sortedDocuments.isEmpty {
-                    placeholder("Open a .md file")
+                    Text("No files loaded")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
                     List(selection: $selectedDocumentID) {
                         ForEach(sortedDocuments) { document in
@@ -168,15 +183,45 @@ struct ContentView: View {
     }
 
     private var detailPanel: some View {
-        Group {
-            switch detailMode {
-            case .preview:
-                previewPanel
-            case .source:
-                sourcePanel
+        guard currentDocument != nil else {
+            return AnyView(
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            )
+        }
+        return AnyView(
+            Group {
+                switch detailMode {
+                case .preview:
+                    previewPanel
+                case .source:
+                    sourcePanel
+                }
+            }
+        )
+    }
+
+    #if !os(macOS)
+    private var initialOpenSheet: some View {
+        NavigationStack {
+            ContentUnavailableView {
+                Label("No files loaded", systemImage: "doc.text")
+            } description: {
+                Text("Open a .md file")
+            } actions: {
+                Button("Open Markdown File") {
+                    isInitialOpenSheetPresented = false
+                    isImporterPresented = true
+                }
+                Button("Not now", role: .cancel) {
+                    isInitialOpenSheetPresented = false
+                }
             }
         }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
+    #endif
 
     private var sourcePanel: some View {
         Group {
@@ -188,8 +233,6 @@ struct ContentView: View {
                         .padding(16)
                         .textSelection(.enabled)
                 }
-            } else {
-                placeholder("Open a .md file to view source")
             }
         }
     }
@@ -198,8 +241,6 @@ struct ContentView: View {
         Group {
             if let file = currentDocument?.file {
                 MarkdownBlocksView(source: file.contents)
-            } else {
-                placeholder("Preview will appear here")
             }
         }
     }
@@ -300,11 +341,23 @@ struct ContentView: View {
     }
 
     private var detailNavigationTitle: String {
-        guard let currentDocument else { return "Markdown Preview" }
+        guard let currentDocument else { return "" }
         #if os(macOS)
         return disambiguatedTitle(for: currentDocument)
         #else
         return currentDocument.file.fileName
+        #endif
+    }
+
+    private func presentInitialOpenSheetIfNeeded() {
+        #if os(macOS)
+        return
+        #else
+        guard !hasPresentedInitialOpenSheet else { return }
+        guard !isRestoringDocuments else { return }
+        guard openedDocuments.isEmpty else { return }
+        hasPresentedInitialOpenSheet = true
+        isInitialOpenSheetPresented = true
         #endif
     }
 
@@ -409,17 +462,6 @@ struct ContentView: View {
     }
     #endif
 
-    private func placeholder(_ text: String) -> some View {
-        ContentUnavailableView {
-            Label("No File", systemImage: "doc.text")
-        } description: {
-            Text(text)
-        } actions: {
-            Button("Open Markdown File") {
-                isImporterPresented = true
-            }
-        }
-    }
 }
 
 private struct InlineTitleOnIOS: ViewModifier {
@@ -804,11 +846,7 @@ private struct DetailPreviewPane: View {
                     }
                 }
             } else {
-                ContentUnavailableView {
-                    Label("No File", systemImage: "doc.text")
-                } description: {
-                    Text("Open a .md file")
-                }
+                Color.clear
             }
         }
         .dynamicTypeSize(.xSmall ... .accessibility5)
