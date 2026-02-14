@@ -9,6 +9,7 @@ This document tracks planned work for MarkdownPreviewApp.
 - If the file moves, simply update the reference.
 
 ## 3) Allow editing of the text in the Source view.
+- On iPad and Mac, investigate showing both preview and source at the same time.
 
 ## 4) File menu (macOS and iPad)
 - Open (Cmd-O): Present a file picker filtering for .md files
