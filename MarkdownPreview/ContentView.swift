@@ -25,6 +25,7 @@ struct ContentView: View {
     private let persistedSelectionKey = "selectedMarkdownDocumentID"
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @EnvironmentObject private var fileOpenState: FileOpenState
     @State private var isImporterPresented = false
     @State private var openedDocuments: [OpenedDocument] = []
     @State private var selectedDocumentID: OpenedDocument.ID?
@@ -94,6 +95,10 @@ struct ContentView: View {
         }
         .onAppear {
             restorePersistedDocumentsIfNeeded()
+        }
+        .onReceive(fileOpenState.$openedURL.compactMap { $0 }) { url in
+            load(url: url)
+            fileOpenState.openedURL = nil
         }
     }
 
@@ -684,5 +689,6 @@ private enum MarkdownBlockParser {
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()
+            .environmentObject(FileOpenState())
     }
 }
