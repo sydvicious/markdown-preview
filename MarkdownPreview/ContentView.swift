@@ -35,6 +35,30 @@ struct ContentView: View {
     @State private var didRestoreDocuments = false
     @State private var isRestoringDocuments = true
 
+    init(
+        previewFiles: [MarkdownFile] = [],
+        selectedPreviewFileID: String? = nil,
+        showsSourceInPreview: Bool = false,
+        disablePersistenceRestore: Bool = false
+    ) {
+        let now = Date()
+        let opened = previewFiles.map {
+            OpenedDocument(
+                id: $0.url.standardizedFileURL.path,
+                file: $0,
+                lastOpened: now,
+                bookmarkData: Data()
+            )
+        }
+        let selectedID = selectedPreviewFileID ?? opened.first?.id
+
+        _openedDocuments = State(initialValue: opened)
+        _selectedDocumentID = State(initialValue: selectedID)
+        _detailMode = State(initialValue: showsSourceInPreview ? .source : .preview)
+        _isRestoringDocuments = State(initialValue: !disablePersistenceRestore)
+        _didRestoreDocuments = State(initialValue: disablePersistenceRestore)
+    }
+
     var body: some View {
         NavigationSplitView(preferredCompactColumn: $preferredCompactColumn) {
             NavigationStack {
@@ -111,6 +135,7 @@ struct ContentView: View {
             load(url: url)
             fileOpenState.openedURL = nil
         }
+        .dynamicTypeSize(.xSmall ... .accessibility5)
     }
 
     private var sidebarPanel: some View {
@@ -125,6 +150,7 @@ struct ContentView: View {
                         ForEach(sortedDocuments) { document in
                             HStack {
                                 Text(document.file.fileName)
+                                    .font(.body)
                                     .lineLimit(1)
                                 Spacer(minLength: 0)
                             }
@@ -420,6 +446,7 @@ private struct MarkdownBlocksView: View {
                             .fontWeight(.semibold)
                     case .paragraph(let text):
                         Text(inlineAttributed(text))
+                            .font(.body)
                             .fixedSize(horizontal: false, vertical: true)
                     case .list(let items):
                         VStack(alignment: .leading, spacing: 8) {
@@ -430,8 +457,10 @@ private struct MarkdownBlocksView: View {
                                             .foregroundColor(checked ? Color.accentColor : Color.secondary)
                                     } else {
                                         Text("•")
+                                            .font(.body)
                                     }
                                     Text(inlineAttributed(item.text))
+                                        .font(.body)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                                 .padding(.leading, CGFloat(item.indent) * 18)
@@ -443,7 +472,9 @@ private struct MarkdownBlocksView: View {
                                 HStack(alignment: .top, spacing: 8) {
                                     Text("\(item.order ?? (index + 1)).")
                                         .monospacedDigit()
+                                        .font(.body)
                                     Text(inlineAttributed(item.text))
+                                        .font(.body)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                                 .padding(.leading, CGFloat(item.indent) * 18)
@@ -455,6 +486,7 @@ private struct MarkdownBlocksView: View {
                                 .fill(Color.secondary.opacity(0.4))
                                 .frame(width: 4)
                             Text(inlineAttributed(text))
+                                .font(.body)
                                 .italic()
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -716,9 +748,104 @@ private enum MarkdownBlockParser {
     }
 }
 
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-            .environmentObject(FileOpenState())
+private enum ContentViewPreviewData {
+    static let fullFile: MarkdownFile = {
+        MarkdownFile(url: previewReadmeURL, contents: fullContents)
+    }()
+
+    static let excerptFile: MarkdownFile = {
+        MarkdownFile(url: previewReadmeURL, contents: excerptContents)
+    }()
+
+    private static let fullContents: String = {
+        let fallback = "# Markdown Preview\n\nPreview content file could not be loaded."
+        guard let text = try? String(contentsOf: previewReadmeURL, encoding: .utf8) else {
+            return fallback
+        }
+        return text
+    }()
+
+    private static let excerptContents: String = {
+        let lines = fullContents.components(separatedBy: .newlines)
+        return lines.prefix(120).joined(separator: "\n")
+    }()
+
+    private static var previewReadmeURL: URL {
+        let swiftFileURL = URL(fileURLWithPath: #filePath)
+        return swiftFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("README.md")
+    }
+}
+
+private struct DetailPreviewPane: View {
+    enum Mode {
+        case preview
+        case source
+    }
+
+    let file: MarkdownFile?
+    let mode: Mode
+
+    var body: some View {
+        Group {
+            if let file {
+                switch mode {
+                case .preview:
+                    MarkdownBlocksView(source: file.contents)
+                case .source:
+                    ScrollView {
+                        Text(file.contents)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                            .textSelection(.enabled)
+                    }
+                }
+            } else {
+                ContentUnavailableView {
+                    Label("No File", systemImage: "doc.text")
+                } description: {
+                    Text("Open a .md file")
+                }
+            }
+        }
+        .dynamicTypeSize(.xSmall ... .accessibility5)
+    }
+}
+
+#Preview("App - Loaded") {
+    ContentView(
+        previewFiles: [ContentViewPreviewData.fullFile],
+        selectedPreviewFileID: ContentViewPreviewData.fullFile.url.standardizedFileURL.path,
+        disablePersistenceRestore: true
+    )
+    .environmentObject(FileOpenState())
+}
+
+#Preview("App - Empty") {
+    ContentView(disablePersistenceRestore: true)
+        .environmentObject(FileOpenState())
+}
+
+#Preview("Detail - Preview") {
+    NavigationStack {
+        DetailPreviewPane(file: ContentViewPreviewData.excerptFile, mode: .preview)
+            .navigationTitle(ContentViewPreviewData.excerptFile.fileName)
+    }
+}
+
+#Preview("Detail - Source") {
+    NavigationStack {
+        DetailPreviewPane(file: ContentViewPreviewData.excerptFile, mode: .source)
+            .navigationTitle(ContentViewPreviewData.excerptFile.fileName)
+    }
+}
+
+#Preview("Detail - Empty") {
+    NavigationStack {
+        DetailPreviewPane(file: nil, mode: .preview)
+            .navigationTitle("Markdown Preview")
     }
 }
