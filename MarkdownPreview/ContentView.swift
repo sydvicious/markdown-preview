@@ -1,6 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import Foundation
+#if os(macOS)
+import AppKit
+#endif
 
 struct ContentView: View {
     private enum DetailMode {
@@ -34,6 +37,9 @@ struct ContentView: View {
     @State private var errorMessage: String?
     @State private var didRestoreDocuments = false
     @State private var isRestoringDocuments = true
+    #if os(macOS)
+    @State private var detailTitleAvailableWidth: CGFloat = 320
+    #endif
 
     var body: some View {
         NavigationSplitView(preferredCompactColumn: $preferredCompactColumn) {
@@ -55,8 +61,9 @@ struct ContentView: View {
         } detail: {
             NavigationStack {
                 detailPanel
-                    .navigationTitle(currentDocument?.file.fileName ?? "Markdown Preview")
+                    .navigationTitle(detailNavigationTitle)
                     .modifier(InlineTitleOnIOS())
+                    .background(detailWidthReader)
                     .toolbar {
                         ToolbarItemGroup(placement: viewButtonPlacement) {
                             if currentDocument != nil {
@@ -269,6 +276,63 @@ struct ContentView: View {
     private var isCompactWidth: Bool {
         horizontalSizeClass == .compact
     }
+
+    private var detailNavigationTitle: String {
+        #if os(macOS)
+        return macDetailPathTitle
+        #else
+        return currentDocument?.file.fileName ?? "Markdown Preview"
+        #endif
+    }
+
+    #if os(macOS)
+    private var macDetailPathTitle: String {
+        guard let currentDocument else { return "Markdown Preview" }
+        return elidedPathTitle(for: currentDocument.file.url.path, maxWidth: detailTitleAvailableWidth)
+    }
+
+    private var detailWidthReader: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear {
+                    detailTitleAvailableWidth = max(120, proxy.size.width - 140)
+                }
+                .onChange(of: proxy.size.width) { _, newWidth in
+                    detailTitleAvailableWidth = max(120, newWidth - 140)
+                }
+        }
+    }
+
+    private func elidedPathTitle(for fullPath: String, maxWidth: CGFloat) -> String {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        if measuredWidth(fullPath, font: font) <= maxWidth {
+            return fullPath
+        }
+
+        let components = fullPath.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return fullPath }
+
+        var start = 1
+        while start < components.count {
+            let candidate = "…/" + components[start...].joined(separator: "/")
+            if measuredWidth(candidate, font: font) <= maxWidth {
+                return candidate
+            }
+            start += 1
+        }
+
+        return "…/" + components.last!
+    }
+
+    private func measuredWidth(_ text: String, font: NSFont) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        return (text as NSString).size(withAttributes: attributes).width
+    }
+    #else
+    private var detailWidthReader: some View {
+        Color.clear
+    }
+    #endif
 
     private var openButtonPlacement: ToolbarItemPlacement {
         #if os(macOS)
