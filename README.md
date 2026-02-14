@@ -97,3 +97,7 @@ The repository includes unit/UI test targets:
 - `MarkdownPreviewTests`
 - `MarkdownPreviewUITests`
 
+
+//
+// Copyright ©2026 Syd Polk. All Rights Reserved.
+//
