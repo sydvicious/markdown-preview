@@ -8,18 +8,31 @@ struct ContentView: View {
         case source
     }
 
-    private struct OpenedDocument: Identifiable {
+    private struct OpenedDocument: Identifiable, Equatable {
         let id: String
         var file: MarkdownFile
         var lastOpened: Date
+        var bookmarkData: Data
     }
 
+    private struct PersistedDocument: Codable {
+        let id: String
+        let lastOpened: Date
+        let bookmarkData: Data
+    }
+
+    private let persistedDocumentsKey = "openedMarkdownDocuments"
+    private let persistedSelectionKey = "selectedMarkdownDocumentID"
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isImporterPresented = false
     @State private var openedDocuments: [OpenedDocument] = []
     @State private var selectedDocumentID: OpenedDocument.ID?
     @State private var detailMode: DetailMode = .preview
     @State private var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
     @State private var errorMessage: String?
+    @State private var didRestoreDocuments = false
+    @State private var isRestoringDocuments = true
 
     var body: some View {
         NavigationSplitView(preferredCompactColumn: $preferredCompactColumn) {
@@ -27,7 +40,7 @@ struct ContentView: View {
                 sidebarPanel
                     .navigationTitle("Files")
                     .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
+                        ToolbarItem(placement: openButtonPlacement) {
                             Button {
                                 isImporterPresented = true
                             } label: {
@@ -42,8 +55,9 @@ struct ContentView: View {
             NavigationStack {
                 detailPanel
                     .navigationTitle(currentDocument?.file.fileName ?? "Markdown Preview")
+                    .modifier(InlineTitleOnIOS())
                     .toolbar {
-                        ToolbarItemGroup(placement: .topBarTrailing) {
+                        ToolbarItemGroup(placement: viewButtonPlacement) {
                             if currentDocument != nil {
                                 Button {
                                     detailMode = detailMode == .preview ? .source : .preview
@@ -72,24 +86,48 @@ struct ContentView: View {
         } message: {
             Text(errorMessage ?? "Unknown error")
         }
-        .onChange(of: selectedDocumentID) { _, selectedID in
-            guard selectedID != nil else { return }
-            preferredCompactColumn = .detail
+        .onChange(of: openedDocuments) { _, _ in
+            persistDocuments()
+        }
+        .onChange(of: selectedDocumentID) { _, _ in
+            persistSelectedDocument()
+        }
+        .onAppear {
+            restorePersistedDocumentsIfNeeded()
         }
     }
 
     private var sidebarPanel: some View {
-        Group {
-            if sortedDocuments.isEmpty {
-                placeholder("Open a .md file")
-            } else {
-                List(selection: $selectedDocumentID) {
-                    ForEach(sortedDocuments) { document in
-                        Text(document.file.fileName)
-                            .lineLimit(1)
-                            .tag(document.id)
+        VStack(spacing: 0) {
+            #if os(macOS)
+            HStack {
+                Spacer()
+                Button {
+                    isImporterPresented = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Open")
+                .accessibilityIdentifier("Open")
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            #endif
+
+            Group {
+                if isRestoringDocuments {
+                    ProgressView("Loading Files")
+                } else if sortedDocuments.isEmpty {
+                    placeholder("Open a .md file")
+                } else {
+                    List(selection: $selectedDocumentID) {
+                        ForEach(sortedDocuments) { document in
+                            Text(document.file.fileName)
+                                .lineLimit(1)
+                                .tag(document.id)
+                        }
+                        .onDelete(perform: deleteDocuments)
                     }
-                    .onDelete(perform: deleteDocuments)
                 }
             }
         }
@@ -144,24 +182,28 @@ struct ContentView: View {
 
     private func load(url: URL) {
         do {
-            upsertDocument(try MarkdownFile.load(from: url))
+            let bookmarkData = try makeBookmarkData(for: url)
+            upsertDocument(try MarkdownFile.load(from: url), bookmarkData: bookmarkData)
             detailMode = .preview
-            preferredCompactColumn = .detail
+            preferredCompactColumn = .sidebar
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func upsertDocument(_ file: MarkdownFile) {
+    private func upsertDocument(_ file: MarkdownFile, bookmarkData: Data) {
         let id = file.url.standardizedFileURL.path
         if let index = openedDocuments.firstIndex(where: { $0.id == id }) {
             openedDocuments[index].file = file
             openedDocuments[index].lastOpened = Date()
+            openedDocuments[index].bookmarkData = bookmarkData
         } else {
-            openedDocuments.append(.init(id: id, file: file, lastOpened: Date()))
+            openedDocuments.append(.init(id: id, file: file, lastOpened: Date(), bookmarkData: bookmarkData))
         }
-        selectedDocumentID = id
+        if !isCompactWidth {
+            selectedDocumentID = id
+        }
     }
 
     private var sortedDocuments: [OpenedDocument] {
@@ -178,6 +220,115 @@ struct ContentView: View {
         openedDocuments.removeAll(where: { idsToDelete.contains($0.id) })
         if let selectedDocumentID, idsToDelete.contains(selectedDocumentID) {
             self.selectedDocumentID = sortedDocuments.first?.id
+        }
+    }
+
+    private func restorePersistedDocumentsIfNeeded() {
+        guard !didRestoreDocuments else { return }
+        didRestoreDocuments = true
+
+        let decoder = JSONDecoder()
+        guard let data = UserDefaults.standard.data(forKey: persistedDocumentsKey),
+              let persisted = try? decoder.decode([PersistedDocument].self, from: data) else {
+            isRestoringDocuments = false
+            return
+        }
+
+        var restored: [OpenedDocument] = []
+        for entry in persisted.sorted(by: { $0.lastOpened > $1.lastOpened }) {
+            guard let file = loadFromBookmarkData(entry.bookmarkData) else { continue }
+            restored.append(
+                .init(
+                    id: entry.id,
+                    file: file,
+                    lastOpened: entry.lastOpened,
+                    bookmarkData: entry.bookmarkData
+                )
+            )
+        }
+
+        openedDocuments = restored
+        if isCompactWidth {
+            selectedDocumentID = nil
+        } else {
+            if let persistedSelection = UserDefaults.standard.string(forKey: persistedSelectionKey),
+               restored.contains(where: { $0.id == persistedSelection }) {
+                selectedDocumentID = persistedSelection
+            } else {
+                selectedDocumentID = restored.first?.id
+            }
+        }
+        isRestoringDocuments = false
+    }
+
+    private var isCompactWidth: Bool {
+        horizontalSizeClass == .compact
+    }
+
+    private var openButtonPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        return .automatic
+        #else
+        return .topBarTrailing
+        #endif
+    }
+
+    private var viewButtonPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        return .automatic
+        #else
+        return .topBarTrailing
+        #endif
+    }
+
+    private func persistDocuments() {
+        let encoder = JSONEncoder()
+        let persisted = openedDocuments.map {
+            PersistedDocument(id: $0.id, lastOpened: $0.lastOpened, bookmarkData: $0.bookmarkData)
+        }
+        guard let data = try? encoder.encode(persisted) else { return }
+        UserDefaults.standard.set(data, forKey: persistedDocumentsKey)
+    }
+
+    private func persistSelectedDocument() {
+        UserDefaults.standard.set(selectedDocumentID, forKey: persistedSelectionKey)
+    }
+
+    private func makeBookmarkData(for url: URL) throws -> Data {
+        #if os(macOS)
+        do {
+            return try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        } catch {
+            return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+        }
+        #else
+        return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+        #endif
+    }
+
+    private func loadFromBookmarkData(_ bookmarkData: Data) -> MarkdownFile? {
+        var isStale = false
+        do {
+            #if os(macOS)
+            let options: URL.BookmarkResolutionOptions = [.withSecurityScope, .withoutUI]
+            #else
+            let options: URL.BookmarkResolutionOptions = [.withoutUI]
+            #endif
+            let url = try URL(
+                resolvingBookmarkData: bookmarkData,
+                options: options,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            let hasAccess = url.startAccessingSecurityScopedResource()
+            defer {
+                if hasAccess {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            return try MarkdownFile.load(from: url)
+        } catch {
+            return nil
         }
     }
 
@@ -207,6 +358,16 @@ struct ContentView: View {
                 isImporterPresented = true
             }
         }
+    }
+}
+
+private struct InlineTitleOnIOS: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.navigationBarTitleDisplayMode(.inline)
+        #else
+        content
+        #endif
     }
 }
 
