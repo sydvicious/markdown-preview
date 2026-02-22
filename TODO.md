@@ -4,7 +4,7 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ## 1) Support Image References
 
-## 2) Investigate why Mac does not know this opens .md files.
+## 2) [COMPLETED] Investigate why Mac does not know this opens .md files.
 
 ## 3) Allow editing of the text in the Source view.
 - On iPad and Mac, investigate showing both preview and source at the same time.
@@ -90,5 +90,7 @@ Notes:
 - Added missing-file handling:
   - Active missing file: modal alert, remove on OK, and iPhone returns to list.
   - Non-active missing file: removed silently.
+- Fixed macOS app document-type registration so `.md` files are recognized in Finder/Open With.
+- Added a dedicated macOS Info.plist with markdown UTI/document type declarations.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*
