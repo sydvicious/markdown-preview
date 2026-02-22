@@ -44,3 +44,12 @@ Notes:
 - Printing will require platform-specific integration (NSPrintOperation on macOS, UIPrintInteractionController on iPadOS)
 - Keep iOS/iPadOS on the split-view design while macOS migrates to document-based
 - Info.plist updates are required for document types and opening-in-place
+
+## Completed (2026-02-22)
+
+- Replaced SwiftUI table rendering with an embedded `WKWebView` table renderer.
+- Added horizontal scrolling for wide tables and auto-height reporting back to SwiftUI.
+- Added inline backtick rendering in table cells/headers.
+- Tuned iOS table typography and disabled text inflation for consistent sizing.
+
+*Copyright ©2026 Syd Polk. All Rights Reserved.*

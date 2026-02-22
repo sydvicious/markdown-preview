@@ -42,6 +42,17 @@ This app is designed to feel like a lightweight Preview-style reader for `.md` f
   - Single-window macOS scene
 - Accessibility:
   - Dynamic text sizing (`Dynamic Type`) supported across list/preview/source content
+- Table rendering:
+  - Tables are rendered with an embedded `WKWebView` block (macOS + iOS/iPadOS)
+  - Horizontal scrolling for wide tables
+  - Preserves explicit line breaks in cells
+  - Disables hyphenation/truncation behavior that was clipping table text
+  - Supports inline backticks in table cells/headers as styled inline code
+
+## Changelog
+
+- See `CHANGELOG.md` for dated change entries.
+
 
 ## Project Structure
 
@@ -88,8 +99,9 @@ After this, double-clicking `.md` files should open them in this app.
 ## Notes and Limitations
 
 - Rendering is intentionally lightweight and block-oriented.
-- It supports common Markdown structures (headings, paragraphs, lists, ordered lists, blockquotes, fenced code, rules).
-- It does not aim to be a full CommonMark/GitHub-Flavored Markdown engine yet.
+- It supports common Markdown structures (headings, paragraphs, lists, ordered lists, blockquotes, fenced code, rules, and tables).
+- Table rendering is now HTML/CSS-based via `WKWebView` for fidelity and scrolling behavior.
+- It still does not aim to be a full CommonMark/GitHub-Flavored Markdown engine.
 
 ## Tests
 
@@ -98,6 +110,4 @@ The repository includes unit/UI test targets:
 - `MarkdownPreviewUITests`
 
 
-//
-// Copyright ©2026 Syd Polk. All Rights Reserved.
-//
+*Copyright ©2026 Syd Polk. All Rights Reserved.*
