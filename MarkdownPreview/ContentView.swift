@@ -608,6 +608,12 @@ private struct MarkdownTableBlockView: View {
     }
 
     private var htmlDocument: String {
+        #if os(iOS)
+        let codeFontSize = "0.88em"
+        #else
+        let codeFontSize = "0.95em"
+        #endif
+
         let headerRow = zip(table.headers, table.alignments).map { text, alignment in
             "<th class=\"\(cssAlignmentClass(alignment))\">\(renderInlineMarkdownHTML(text))</th>"
         }.joined()
@@ -632,6 +638,8 @@ private struct MarkdownTableBlockView: View {
               margin: 0;
               padding: 0;
               background: transparent;
+              -webkit-text-size-adjust: 100%;
+              text-size-adjust: 100%;
             }
             body {
               font: -apple-system-body;
@@ -663,6 +671,7 @@ private struct MarkdownTableBlockView: View {
             .a-right { text-align: right; }
             code {
               font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+              font-size: \(codeFontSize);
               background: rgba(0,0,0,0.08);
               border-radius: 4px;
               padding: 1px 4px;
