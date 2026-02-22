@@ -6,6 +6,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 import Foundation
 import WebKit
+#if os(iOS)
+import UIKit
+#endif
 
 struct ContentView: View {
     private enum DetailMode {
@@ -122,6 +125,7 @@ struct ContentView: View {
                     }
             }
         }
+        #if os(macOS)
         .fileImporter(
             isPresented: $isImporterPresented,
             allowedContentTypes: MarkdownFile.supportedTypes,
@@ -129,6 +133,16 @@ struct ContentView: View {
         ) { result in
             handleImport(result)
         }
+        #else
+        .sheet(isPresented: $isImporterPresented) {
+            MarkdownDocumentPicker { url in
+                load(url: url)
+                isImporterPresented = false
+            } onCancel: {
+                isImporterPresented = false
+            }
+        }
+        #endif
         #if !os(macOS)
         .sheet(isPresented: $isInitialOpenSheetPresented) {
             initialOpenSheet
@@ -302,17 +316,31 @@ struct ContentView: View {
     }
 
     private func load(url: URL) {
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
         do {
             let bookmarkData = try makeBookmarkData(for: url)
-            let file = try MarkdownFile.load(from: url)
-            let modificationDate = currentModificationDate(for: url)
-            upsertDocument(file, bookmarkData: bookmarkData, modificationDate: modificationDate)
+            if let loaded = loadFromBookmarkData(bookmarkData) {
+                upsertDocument(loaded.file, bookmarkData: bookmarkData, modificationDate: loaded.modificationDate)
+            } else {
+                throw CocoaError(.fileNoSuchFile)
+            }
             detailMode = .preview
             preferredCompactColumn = isCompactWidth ? .detail : .sidebar
             openErrorMessage = nil
         } catch {
-            openErrorMessage = error.localizedDescription
+            openErrorMessage = detailedOpenErrorMessage(for: error, url: url)
         }
+    }
+
+    private func detailedOpenErrorMessage(for error: Error, url: URL) -> String {
+        let nsError = error as NSError
+        return "\(error.localizedDescription)\n(\(nsError.domain) code \(nsError.code))\n\(url.path)"
     }
 
     private func upsertDocument(_ file: MarkdownFile, bookmarkData: Data, modificationDate: Date?) {
@@ -591,6 +619,51 @@ struct ContentView: View {
     #endif
 
 }
+
+#if os(iOS)
+private struct MarkdownDocumentPicker: UIViewControllerRepresentable {
+    let onPick: (URL) -> Void
+    let onCancel: () -> Void
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+        let onCancel: () -> Void
+
+        init(onPick: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
+            self.onPick = onPick
+            self.onCancel = onCancel
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard let url = urls.first else {
+                onCancel()
+                return
+            }
+            onPick(url)
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onCancel()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick, onCancel: onCancel)
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: MarkdownFile.supportedTypes,
+            asCopy: true
+        )
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+}
+#endif
 
 private struct InlineTitleOnIOS: ViewModifier {
     func body(content: Content) -> some View {

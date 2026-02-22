@@ -15,13 +15,110 @@ struct MarkdownFile: Identifiable, Equatable {
     }
 
     static func load(from url: URL) throws -> MarkdownFile {
-        let data = try Data(contentsOf: url)
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let data = try readData(from: url)
         guard let text = String(data: data, encoding: .utf8) ??
             String(data: data, encoding: .unicode) ??
             String(data: data, encoding: .ascii) else {
             throw CocoaError(.fileReadInapplicableStringEncoding)
         }
         return MarkdownFile(url: url, contents: text)
+    }
+
+    private static func readData(from url: URL) throws -> Data {
+        try ensureUbiquitousItemIsAvailable(at: url)
+
+        let deadline = Date().addingTimeInterval(30)
+        var lastError: Error?
+        while Date() < deadline {
+            do {
+                return try coordinatedReadData(from: url)
+            } catch {
+                lastError = error
+                let nsError = error as NSError
+                if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileNoSuchFileError {
+                    if let uploadedData = tryCoordinatedUploadingReadData(from: url) {
+                        return uploadedData
+                    }
+                    try? ensureUbiquitousItemIsAvailable(at: url)
+                    Thread.sleep(forTimeInterval: 0.2)
+                    continue
+                }
+                throw error
+            }
+        }
+
+        throw lastError ?? CocoaError(.fileNoSuchFile)
+    }
+
+    private static func coordinatedReadData(from url: URL) throws -> Data {
+        var coordinatedData: Data?
+        var coordinatedError: NSError?
+        var readError: Error?
+        let coordinator = NSFileCoordinator()
+
+        coordinator.coordinate(readingItemAt: url, options: [], error: &coordinatedError) { coordinatedURL in
+            do {
+                coordinatedData = try Data(contentsOf: coordinatedURL)
+            } catch {
+                readError = error
+            }
+        }
+
+        if let readError {
+            throw readError
+        }
+
+        if let coordinatedError {
+            throw coordinatedError
+        }
+
+        guard let coordinatedData else {
+            throw CocoaError(.fileReadUnknown)
+        }
+
+        return coordinatedData
+    }
+
+    private static func tryCoordinatedUploadingReadData(from url: URL) -> Data? {
+        var coordinatedData: Data?
+        var coordinatedError: NSError?
+        var readError: Error?
+        let coordinator = NSFileCoordinator()
+
+        coordinator.coordinate(readingItemAt: url, options: [.forUploading], error: &coordinatedError) { coordinatedURL in
+            do {
+                coordinatedData = try Data(contentsOf: coordinatedURL)
+            } catch {
+                readError = error
+            }
+        }
+
+        if coordinatedError != nil || readError != nil {
+            return nil
+        }
+
+        return coordinatedData
+    }
+
+    private static func ensureUbiquitousItemIsAvailable(at url: URL) throws {
+        let keys: Set<URLResourceKey> = [
+            .isUbiquitousItemKey,
+            .ubiquitousItemDownloadingStatusKey
+        ]
+        let values = try url.resourceValues(forKeys: keys)
+        guard values.isUbiquitousItem == true else { return }
+
+        let status = values.ubiquitousItemDownloadingStatus
+        if status != URLUbiquitousItemDownloadingStatus.current {
+            try FileManager.default.startDownloadingUbiquitousItem(at: url)
+        }
     }
 
     static var supportedTypes: [UTType] {
