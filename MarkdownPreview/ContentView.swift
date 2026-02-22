@@ -5,11 +5,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import Foundation
-#if canImport(UIKit)
-import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
+import WebKit
 
 struct ContentView: View {
     private enum DetailMode {
@@ -537,7 +533,7 @@ private struct MarkdownBlocksView: View {
                         }
                     }
                 case .table(let table):
-                    MarkdownTableBlockView(table: table, inlineAttributed: inlineAttributed)
+                    MarkdownTableBlockView(table: table)
                 case .blockquote(let text):
                     HStack(alignment: .top, spacing: 10) {
                         Rectangle()
@@ -590,49 +586,12 @@ private struct MarkdownBlocksView: View {
 
 private struct MarkdownTableBlockView: View {
     let table: MarkdownTable
-    let inlineAttributed: (String) -> AttributedString
-    private let horizontalCellPadding: CGFloat = 10
+    @State private var contentHeight: CGFloat = 120
 
     var body: some View {
-        tableContent
-    }
-
-    private var tableContent: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            tableGrid
-                .fixedSize(horizontal: true, vertical: false)
-        }
-        .scrollIndicators(.visible, axes: .horizontal)
+        MarkdownTableWebView(html: htmlDocument, contentHeight: $contentHeight)
+        .frame(height: max(contentHeight, 44))
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var tableGrid: some View {
-        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-            GridRow {
-                ForEach(Array(table.alignments.enumerated()), id: \.offset) { index, alignment in
-                    tableCell(
-                        text: table.headers[index],
-                        alignment: alignment,
-                        isHeader: true,
-                        columnWidth: measuredColumnWidths[index]
-                    )
-                }
-            }
-
-            ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
-                GridRow {
-                    ForEach(Array(table.alignments.enumerated()), id: \.offset) { index, alignment in
-                        tableCell(
-                            text: index < row.count ? row[index] : "",
-                            alignment: alignment,
-                            isHeader: false,
-                            columnWidth: measuredColumnWidths[index]
-                        )
-                    }
-                }
-            }
-        }
-        .background(Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
@@ -640,131 +599,287 @@ private struct MarkdownTableBlockView: View {
         )
     }
 
-    private var measuredColumnWidths: [CGFloat] {
-        let count = table.alignments.count
-        guard count > 0 else { return [] }
+    private func cssAlignmentClass(_ alignment: MarkdownTableAlignment) -> String {
+        switch alignment {
+        case .leading: return "a-left"
+        case .center: return "a-center"
+        case .trailing: return "a-right"
+        }
+    }
 
-        var widths = Array(repeating: CGFloat(80), count: count)
-        for column in 0..<count {
-            var maxWidth = measuredTextWidth(table.headers[column], isHeader: true)
-            for row in table.rows {
-                let cellText = column < row.count ? row[column] : ""
-                maxWidth = max(maxWidth, measuredTextWidth(cellText, isHeader: false))
+    private var htmlDocument: String {
+        let headerRow = zip(table.headers, table.alignments).map { text, alignment in
+            "<th class=\"\(cssAlignmentClass(alignment))\">\(renderInlineMarkdownHTML(text))</th>"
+        }.joined()
+
+        let bodyRows = table.rows.map { row -> String in
+            let cells = table.alignments.indices.map { index -> String in
+                let text = index < row.count ? row[index] : ""
+                let alignment = table.alignments[index]
+                return "<td class=\"\(cssAlignmentClass(alignment))\">\(renderInlineMarkdownHTML(text))</td>"
+            }.joined()
+            return "<tr>\(cells)</tr>"
+        }.joined()
+
+        return """
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+          <style>
+            html, body {
+              margin: 0;
+              padding: 0;
+              background: transparent;
             }
-            widths[column] = maxWidth
-        }
-        return widths
+            body {
+              font: -apple-system-body;
+              color: #111;
+            }
+            .wrap {
+              overflow-x: auto;
+              overflow-y: hidden;
+            }
+            table {
+              border-collapse: collapse;
+              width: max-content;
+            }
+            th, td {
+              border: 1px solid rgba(0,0,0,0.16);
+              padding: 8px 10px;
+              vertical-align: top;
+              white-space: pre;
+              word-break: normal;
+              overflow-wrap: normal;
+              hyphens: none;
+            }
+            th {
+              background: rgba(0,0,0,0.08);
+              font-weight: 600;
+            }
+            .a-left { text-align: left; }
+            .a-center { text-align: center; }
+            .a-right { text-align: right; }
+            code {
+              font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+              background: rgba(0,0,0,0.08);
+              border-radius: 4px;
+              padding: 1px 4px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="wrap">
+            <table>
+              <thead><tr>\(headerRow)</tr></thead>
+              <tbody>\(bodyRows)</tbody>
+            </table>
+          </div>
+          <script>
+            function reportSize() {
+              const h = document.documentElement.scrollHeight || document.body.scrollHeight || 44;
+              if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.size) {
+                window.webkit.messageHandlers.size.postMessage(h);
+              }
+            }
+            window.addEventListener('load', reportSize);
+            window.addEventListener('resize', reportSize);
+            setTimeout(reportSize, 50);
+          </script>
+        </body>
+        </html>
+        """
     }
 
-    private func measuredTextWidth(_ text: String, isHeader: Bool) -> CGFloat {
-        let lines = text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map(String.init)
-        let nonEmptyLines = lines.isEmpty ? [""] : lines
+    private func renderInlineMarkdownHTML(_ text: String) -> String {
+        var result = ""
+        var buffer = ""
+        var insideCode = false
 
-        #if canImport(UIKit)
-        let base = UIFont.preferredFont(forTextStyle: .body)
-        let font = isHeader ? UIFont.systemFont(ofSize: base.pointSize, weight: .semibold) : base
-        let plainWidth = nonEmptyLines
-            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
-            .max() ?? 0
-        let attributedWidth = nonEmptyLines
-            .map { measuredAttributedLineWidth($0, isHeader: isHeader, fallbackFont: font) }
-            .max() ?? 0
-        let width = max(plainWidth, attributedWidth)
-        #elseif canImport(AppKit)
-        let base = NSFont.preferredFont(forTextStyle: .body)
-        let font: NSFont = isHeader ? .systemFont(ofSize: base.pointSize, weight: .semibold) : base
-        let plainWidth = nonEmptyLines
-            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
-            .max() ?? 0
-        let attributedWidth = nonEmptyLines
-            .map { measuredAttributedLineWidth($0, isHeader: isHeader, fallbackFont: font) }
-            .max() ?? 0
-        let width = max(plainWidth, attributedWidth)
-        #else
-        let width = nonEmptyLines
-            .map { CGFloat($0.count) * 8 }
-            .max() ?? 0
-        #endif
-        return ceil(width + 30)
-    }
-
-    #if canImport(UIKit)
-    private func measuredAttributedLineWidth(_ line: String, isHeader: Bool, fallbackFont: UIFont) -> CGFloat {
-        let mutable = NSMutableAttributedString(attributedString: NSAttributedString(inlineAttributed(line)))
-        if mutable.length > 0 {
-            mutable.addAttribute(.font, value: fallbackFont, range: NSRange(location: 0, length: mutable.length))
-        }
-        return mutable.size().width
-    }
-    #elseif canImport(AppKit)
-    private func measuredAttributedLineWidth(_ line: String, isHeader: Bool, fallbackFont: NSFont) -> CGFloat {
-        let mutable = NSMutableAttributedString(attributedString: NSAttributedString(inlineAttributed(line)))
-        if mutable.length > 0 {
-            mutable.addAttribute(.font, value: fallbackFont, range: NSRange(location: 0, length: mutable.length))
-        }
-        return mutable.size().width
-    }
-    #endif
-
-    private func tableCell(text: String, alignment: MarkdownTableAlignment, isHeader: Bool, columnWidth: CGFloat) -> some View {
-        VStack(alignment: horizontalAlignment(for: alignment), spacing: 0) {
-            ForEach(normalizedLines(text), id: \.self) { line in
-                Text(inlineAttributed(line))
-                    .font(isHeader ? .body.weight(.semibold) : .body)
-                    .lineLimit(1)
-                    .minimumScaleFactor(1)
-                    .allowsTightening(false)
-                    .fixedSize(horizontal: true, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: frameAlignment(for: alignment))
+        for character in text {
+            if character == "`" {
+                if insideCode {
+                    result += "<code>\(escapeHTML(buffer))</code>"
+                    buffer.removeAll(keepingCapacity: true)
+                    insideCode = false
+                } else {
+                    if !buffer.isEmpty {
+                        result += escapeHTML(buffer)
+                        buffer.removeAll(keepingCapacity: true)
+                    }
+                    insideCode = true
+                }
+            } else {
+                buffer.append(character)
             }
         }
-            .frame(width: columnWidth, alignment: frameAlignment(for: alignment))
-            .padding(.vertical, 8)
-            .padding(.horizontal, horizontalCellPadding)
-            .background(isHeader ? Color.secondary.opacity(0.15) : Color.clear)
-            .overlay(
-                Rectangle()
-                    .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
-            )
+
+        if insideCode {
+            result += "&#96;\(escapeHTML(buffer))"
+        } else if !buffer.isEmpty {
+            result += escapeHTML(buffer)
+        }
+
+        return result
     }
 
-    private func normalizedLines(_ text: String) -> [String] {
-        let lines = text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map(String.init)
-        return lines.isEmpty ? [""] : lines
+    private func escapeHTML(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#39;")
     }
+}
 
-    private func frameAlignment(for alignment: MarkdownTableAlignment) -> Alignment {
-        switch alignment {
-        case .leading: return .leading
-        case .center: return .center
-        case .trailing: return .trailing
+#if os(iOS)
+private struct MarkdownTableWebView: UIViewRepresentable {
+    let html: String
+    @Binding var contentHeight: CGFloat
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        var contentHeight: Binding<CGFloat>
+        var lastHTML: String?
+
+        init(contentHeight: Binding<CGFloat>) {
+            self.contentHeight = contentHeight
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            requestSizeUpdate(from: webView)
+        }
+
+        func requestSizeUpdate(from webView: WKWebView) {
+            webView.evaluateJavaScript("document.documentElement.scrollHeight") { [weak self] result, _ in
+                guard let self else { return }
+                if let value = result as? CGFloat {
+                    DispatchQueue.main.async {
+                        self.contentHeight.wrappedValue = max(44, value)
+                    }
+                } else if let number = result as? NSNumber {
+                    DispatchQueue.main.async {
+                        self.contentHeight.wrappedValue = max(44, CGFloat(truncating: number))
+                    }
+                }
+            }
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "size" else { return }
+            if let value = message.body as? CGFloat {
+                DispatchQueue.main.async {
+                    self.contentHeight.wrappedValue = max(44, value)
+                }
+            } else if let number = message.body as? NSNumber {
+                DispatchQueue.main.async {
+                    self.contentHeight.wrappedValue = max(44, CGFloat(truncating: number))
+                }
+            }
         }
     }
 
-    private func horizontalAlignment(for alignment: MarkdownTableAlignment) -> HorizontalAlignment {
-        switch alignment {
-        case .leading: return .leading
-        case .center: return .center
-        case .trailing: return .trailing
-        }
+    func makeCoordinator() -> Coordinator { Coordinator(contentHeight: $contentHeight) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let userContentController = WKUserContentController()
+        userContentController.add(context.coordinator, name: "size")
+        let config = WKWebViewConfiguration()
+        config.userContentController = userContentController
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
+        webView.scrollView.showsVerticalScrollIndicator = false
+        webView.loadHTMLString(html, baseURL: nil)
+        return webView
     }
 
-    private func multilineTextAlignment(for alignment: MarkdownTableAlignment) -> TextAlignment {
-        switch alignment {
-        case .leading: return .leading
-        case .center: return .center
-        case .trailing: return .trailing
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        context.coordinator.contentHeight = $contentHeight
+        if context.coordinator.lastHTML != html {
+            context.coordinator.lastHTML = html
+            webView.loadHTMLString(html, baseURL: nil)
+        } else {
+            context.coordinator.requestSizeUpdate(from: webView)
         }
     }
 }
+#elseif os(macOS)
+private struct MarkdownTableWebView: NSViewRepresentable {
+    let html: String
+    @Binding var contentHeight: CGFloat
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        var contentHeight: Binding<CGFloat>
+        var lastHTML: String?
+
+        init(contentHeight: Binding<CGFloat>) {
+            self.contentHeight = contentHeight
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            requestSizeUpdate(from: webView)
+        }
+
+        func requestSizeUpdate(from webView: WKWebView) {
+            webView.evaluateJavaScript("document.documentElement.scrollHeight") { [weak self] result, _ in
+                guard let self else { return }
+                if let value = result as? CGFloat {
+                    DispatchQueue.main.async {
+                        self.contentHeight.wrappedValue = max(44, value)
+                    }
+                } else if let number = result as? NSNumber {
+                    DispatchQueue.main.async {
+                        self.contentHeight.wrappedValue = max(44, CGFloat(truncating: number))
+                    }
+                }
+            }
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "size" else { return }
+            if let value = message.body as? CGFloat {
+                DispatchQueue.main.async {
+                    self.contentHeight.wrappedValue = max(44, value)
+                }
+            } else if let number = message.body as? NSNumber {
+                DispatchQueue.main.async {
+                    self.contentHeight.wrappedValue = max(44, CGFloat(truncating: number))
+                }
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(contentHeight: $contentHeight) }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let userContentController = WKUserContentController()
+        userContentController.add(context.coordinator, name: "size")
+        let config = WKWebViewConfiguration()
+        config.userContentController = userContentController
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.setValue(false, forKey: "drawsBackground")
+        webView.loadHTMLString(html, baseURL: nil)
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.contentHeight = $contentHeight
+        if context.coordinator.lastHTML != html {
+            context.coordinator.lastHTML = html
+            webView.loadHTMLString(html, baseURL: nil)
+        } else {
+            context.coordinator.requestSizeUpdate(from: webView)
+        }
+    }
+}
+#endif
 
 private struct MarkdownBlock: Identifiable {
     enum Kind {
