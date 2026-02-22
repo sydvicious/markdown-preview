@@ -5,6 +5,11 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 struct ContentView: View {
     private enum DetailMode {
@@ -202,6 +207,7 @@ struct ContentView: View {
                     sourcePanel
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         )
     }
 
@@ -264,7 +270,7 @@ struct ContentView: View {
             let bookmarkData = try makeBookmarkData(for: url)
             upsertDocument(try MarkdownFile.load(from: url), bookmarkData: bookmarkData)
             detailMode = .preview
-            preferredCompactColumn = .sidebar
+            preferredCompactColumn = isCompactWidth ? .detail : .sidebar
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -280,9 +286,7 @@ struct ContentView: View {
         } else {
             openedDocuments.append(.init(id: id, file: file, lastOpened: Date(), bookmarkData: bookmarkData))
         }
-        if !isCompactWidth {
-            selectedDocumentID = id
-        }
+        selectedDocumentID = id
     }
 
     private var sortedDocuments: [OpenedDocument] {
@@ -483,77 +487,84 @@ private struct MarkdownBlocksView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                ForEach(MarkdownBlockParser.parse(source), id: \.id) { block in
-                    switch block.kind {
-                    case .heading(let level, let text):
-                        Text(inlineAttributed(text))
-                            .font(headingFont(level: level))
-                            .fontWeight(.semibold)
-                    case .paragraph(let text):
+            blocksContent
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var blocksContent: some View {
+        LazyVStack(alignment: .leading, spacing: 14) {
+            ForEach(MarkdownBlockParser.parse(source), id: \.id) { block in
+                switch block.kind {
+                case .heading(let level, let text):
+                    Text(inlineAttributed(text))
+                        .font(headingFont(level: level))
+                        .fontWeight(.semibold)
+                case .paragraph(let text):
+                    Text(inlineAttributed(text))
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .list(let items):
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(items) { item in
+                            HStack(alignment: .top, spacing: 8) {
+                                if let checked = item.checkbox {
+                                    Image(systemName: checked ? "checkmark.square.fill" : "square")
+                                        .foregroundColor(checked ? Color.accentColor : Color.secondary)
+                                } else {
+                                    Text("•")
+                                        .font(.body)
+                                }
+                                Text(inlineAttributed(item.text))
+                                    .font(.body)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.leading, CGFloat(item.indent) * 18)
+                        }
+                    }
+                case .orderedList(let items):
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("\(item.order ?? (index + 1)).")
+                                    .monospacedDigit()
+                                    .font(.body)
+                                Text(inlineAttributed(item.text))
+                                    .font(.body)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.leading, CGFloat(item.indent) * 18)
+                        }
+                    }
+                case .table(let table):
+                    MarkdownTableBlockView(table: table, inlineAttributed: inlineAttributed)
+                case .blockquote(let text):
+                    HStack(alignment: .top, spacing: 10) {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.4))
+                            .frame(width: 4)
                         Text(inlineAttributed(text))
                             .font(.body)
+                            .italic()
                             .fixedSize(horizontal: false, vertical: true)
-                    case .list(let items):
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(items) { item in
-                                HStack(alignment: .top, spacing: 8) {
-                                    if let checked = item.checkbox {
-                                        Image(systemName: checked ? "checkmark.square.fill" : "square")
-                                            .foregroundColor(checked ? Color.accentColor : Color.secondary)
-                                    } else {
-                                        Text("•")
-                                            .font(.body)
-                                    }
-                                    Text(inlineAttributed(item.text))
-                                        .font(.body)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                .padding(.leading, CGFloat(item.indent) * 18)
-                            }
-                        }
-                    case .orderedList(let items):
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Text("\(item.order ?? (index + 1)).")
-                                        .monospacedDigit()
-                                        .font(.body)
-                                    Text(inlineAttributed(item.text))
-                                        .font(.body)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                .padding(.leading, CGFloat(item.indent) * 18)
-                            }
-                        }
-                    case .blockquote(let text):
-                        HStack(alignment: .top, spacing: 10) {
-                            Rectangle()
-                                .fill(Color.secondary.opacity(0.4))
-                                .frame(width: 4)
-                            Text(inlineAttributed(text))
-                                .font(.body)
-                                .italic()
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    case .rule:
-                        Divider()
-                    case .code(let code):
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            Text(code)
-                                .font(.system(.body, design: .monospaced))
-                                .padding(10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .background(Color.secondary.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
+                case .rule:
+                    Divider()
+                case .code(let code):
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Text(code)
+                            .font(.system(.body, design: .monospaced))
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .background(Color.secondary.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
         }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
     }
 
     private func headingFont(level: Int) -> Font {
@@ -577,12 +588,191 @@ private struct MarkdownBlocksView: View {
     }
 }
 
+private struct MarkdownTableBlockView: View {
+    let table: MarkdownTable
+    let inlineAttributed: (String) -> AttributedString
+    private let horizontalCellPadding: CGFloat = 10
+
+    var body: some View {
+        tableContent
+    }
+
+    private var tableContent: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            tableGrid
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .scrollIndicators(.visible, axes: .horizontal)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var tableGrid: some View {
+        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+            GridRow {
+                ForEach(Array(table.alignments.enumerated()), id: \.offset) { index, alignment in
+                    tableCell(
+                        text: table.headers[index],
+                        alignment: alignment,
+                        isHeader: true,
+                        columnWidth: measuredColumnWidths[index]
+                    )
+                }
+            }
+
+            ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
+                GridRow {
+                    ForEach(Array(table.alignments.enumerated()), id: \.offset) { index, alignment in
+                        tableCell(
+                            text: index < row.count ? row[index] : "",
+                            alignment: alignment,
+                            isHeader: false,
+                            columnWidth: measuredColumnWidths[index]
+                        )
+                    }
+                }
+            }
+        }
+        .background(Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    private var measuredColumnWidths: [CGFloat] {
+        let count = table.alignments.count
+        guard count > 0 else { return [] }
+
+        var widths = Array(repeating: CGFloat(80), count: count)
+        for column in 0..<count {
+            var maxWidth = measuredTextWidth(table.headers[column], isHeader: true)
+            for row in table.rows {
+                let cellText = column < row.count ? row[column] : ""
+                maxWidth = max(maxWidth, measuredTextWidth(cellText, isHeader: false))
+            }
+            widths[column] = maxWidth
+        }
+        return widths
+    }
+
+    private func measuredTextWidth(_ text: String, isHeader: Bool) -> CGFloat {
+        let lines = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        let nonEmptyLines = lines.isEmpty ? [""] : lines
+
+        #if canImport(UIKit)
+        let base = UIFont.preferredFont(forTextStyle: .body)
+        let font = isHeader ? UIFont.systemFont(ofSize: base.pointSize, weight: .semibold) : base
+        let plainWidth = nonEmptyLines
+            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+            .max() ?? 0
+        let attributedWidth = nonEmptyLines
+            .map { measuredAttributedLineWidth($0, isHeader: isHeader, fallbackFont: font) }
+            .max() ?? 0
+        let width = max(plainWidth, attributedWidth)
+        #elseif canImport(AppKit)
+        let base = NSFont.preferredFont(forTextStyle: .body)
+        let font: NSFont = isHeader ? .systemFont(ofSize: base.pointSize, weight: .semibold) : base
+        let plainWidth = nonEmptyLines
+            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+            .max() ?? 0
+        let attributedWidth = nonEmptyLines
+            .map { measuredAttributedLineWidth($0, isHeader: isHeader, fallbackFont: font) }
+            .max() ?? 0
+        let width = max(plainWidth, attributedWidth)
+        #else
+        let width = nonEmptyLines
+            .map { CGFloat($0.count) * 8 }
+            .max() ?? 0
+        #endif
+        return ceil(width + 30)
+    }
+
+    #if canImport(UIKit)
+    private func measuredAttributedLineWidth(_ line: String, isHeader: Bool, fallbackFont: UIFont) -> CGFloat {
+        let mutable = NSMutableAttributedString(attributedString: NSAttributedString(inlineAttributed(line)))
+        if mutable.length > 0 {
+            mutable.addAttribute(.font, value: fallbackFont, range: NSRange(location: 0, length: mutable.length))
+        }
+        return mutable.size().width
+    }
+    #elseif canImport(AppKit)
+    private func measuredAttributedLineWidth(_ line: String, isHeader: Bool, fallbackFont: NSFont) -> CGFloat {
+        let mutable = NSMutableAttributedString(attributedString: NSAttributedString(inlineAttributed(line)))
+        if mutable.length > 0 {
+            mutable.addAttribute(.font, value: fallbackFont, range: NSRange(location: 0, length: mutable.length))
+        }
+        return mutable.size().width
+    }
+    #endif
+
+    private func tableCell(text: String, alignment: MarkdownTableAlignment, isHeader: Bool, columnWidth: CGFloat) -> some View {
+        VStack(alignment: horizontalAlignment(for: alignment), spacing: 0) {
+            ForEach(normalizedLines(text), id: \.self) { line in
+                Text(inlineAttributed(line))
+                    .font(isHeader ? .body.weight(.semibold) : .body)
+                    .lineLimit(1)
+                    .minimumScaleFactor(1)
+                    .allowsTightening(false)
+                    .fixedSize(horizontal: true, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: frameAlignment(for: alignment))
+            }
+        }
+            .frame(width: columnWidth, alignment: frameAlignment(for: alignment))
+            .padding(.vertical, 8)
+            .padding(.horizontal, horizontalCellPadding)
+            .background(isHeader ? Color.secondary.opacity(0.15) : Color.clear)
+            .overlay(
+                Rectangle()
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+            )
+    }
+
+    private func normalizedLines(_ text: String) -> [String] {
+        let lines = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        return lines.isEmpty ? [""] : lines
+    }
+
+    private func frameAlignment(for alignment: MarkdownTableAlignment) -> Alignment {
+        switch alignment {
+        case .leading: return .leading
+        case .center: return .center
+        case .trailing: return .trailing
+        }
+    }
+
+    private func horizontalAlignment(for alignment: MarkdownTableAlignment) -> HorizontalAlignment {
+        switch alignment {
+        case .leading: return .leading
+        case .center: return .center
+        case .trailing: return .trailing
+        }
+    }
+
+    private func multilineTextAlignment(for alignment: MarkdownTableAlignment) -> TextAlignment {
+        switch alignment {
+        case .leading: return .leading
+        case .center: return .center
+        case .trailing: return .trailing
+        }
+    }
+}
+
 private struct MarkdownBlock: Identifiable {
     enum Kind {
         case heading(level: Int, text: String)
         case paragraph(String)
         case list([MarkdownListItem])
         case orderedList([MarkdownListItem])
+        case table(MarkdownTable)
         case blockquote(String)
         case rule
         case code(String)
@@ -598,6 +788,18 @@ private struct MarkdownListItem: Identifiable {
     let indent: Int
     let checkbox: Bool?
     let order: Int?
+}
+
+private struct MarkdownTable: Equatable {
+    let headers: [String]
+    let alignments: [MarkdownTableAlignment]
+    let rows: [[String]]
+}
+
+private enum MarkdownTableAlignment: Equatable {
+    case leading
+    case center
+    case trailing
 }
 
 private enum MarkdownBlockParser {
@@ -642,7 +844,10 @@ private enum MarkdownBlockParser {
             flushQuote()
         }
 
-        for line in lines {
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+
             if line.hasPrefix("```") {
                 flushAll()
                 if inCodeFence {
@@ -650,22 +855,40 @@ private enum MarkdownBlockParser {
                     code.removeAll()
                 }
                 inCodeFence.toggle()
+                index += 1
                 continue
             }
 
             if inCodeFence {
                 code.append(line)
+                index += 1
                 continue
             }
 
             if line.trimmingCharacters(in: .whitespaces).isEmpty {
                 flushAll()
+                index += 1
+                continue
+            }
+
+            if let setextHeading = parseSetextHeading(from: lines, startIndex: index) {
+                flushAll()
+                blocks.append(.init(kind: .heading(level: setextHeading.level, text: setextHeading.text)))
+                index += 2
+                continue
+            }
+
+            if let tableResult = parseTable(from: lines, startIndex: index) {
+                flushAll()
+                blocks.append(.init(kind: .table(tableResult.table)))
+                index = tableResult.nextIndex
                 continue
             }
 
             if let heading = parseHeading(line) {
                 flushAll()
                 blocks.append(.init(kind: .heading(level: heading.level, text: heading.text)))
+                index += 1
                 continue
             }
 
@@ -674,6 +897,7 @@ private enum MarkdownBlockParser {
                 flushOrderedList()
                 flushQuote()
                 listItems.append(item)
+                index += 1
                 continue
             }
 
@@ -682,6 +906,7 @@ private enum MarkdownBlockParser {
                 flushList()
                 flushQuote()
                 orderedListItems.append(item)
+                index += 1
                 continue
             }
 
@@ -690,12 +915,14 @@ private enum MarkdownBlockParser {
                 flushList()
                 flushOrderedList()
                 quoteLines.append(quote)
+                index += 1
                 continue
             }
 
             if parseRule(line) {
                 flushAll()
                 blocks.append(.init(kind: .rule))
+                index += 1
                 continue
             }
 
@@ -703,6 +930,7 @@ private enum MarkdownBlockParser {
             flushOrderedList()
             flushQuote()
             paragraph.append(line.trimmingCharacters(in: .whitespaces))
+            index += 1
         }
 
         flushAll()
@@ -720,6 +948,24 @@ private enum MarkdownBlockParser {
         let text = trimmed.dropFirst(level).trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
         return (level, text)
+    }
+
+    private static func parseSetextHeading(from lines: [String], startIndex: Int) -> (level: Int, text: String)? {
+        guard startIndex + 1 < lines.count else { return nil }
+        let textLine = lines[startIndex].trimmingCharacters(in: .whitespaces)
+        guard !textLine.isEmpty else { return nil }
+
+        let underlineLine = lines[startIndex + 1].trimmingCharacters(in: .whitespaces)
+        guard !underlineLine.isEmpty else { return nil }
+        guard underlineLine.count >= 3 else { return nil }
+
+        if underlineLine.allSatisfy({ $0 == "=" }) {
+            return (1, textLine)
+        }
+        if underlineLine.allSatisfy({ $0 == "-" }) {
+            return (2, textLine)
+        }
+        return nil
     }
 
     private static func parseListItem(_ line: String) -> MarkdownListItem? {
@@ -791,6 +1037,98 @@ private enum MarkdownBlockParser {
             return (String(text.dropFirst(4)), true)
         }
         return (text, nil)
+    }
+
+    private static func parseTable(from lines: [String], startIndex: Int) -> (table: MarkdownTable, nextIndex: Int)? {
+        guard startIndex + 2 < lines.count else { return nil }
+        guard let headers = parseTableRow(lines[startIndex]) else { return nil }
+        guard let alignments = parseDelimiterRow(lines[startIndex + 1]) else { return nil }
+        guard headers.count == alignments.count else { return nil }
+        guard headers.count >= 2 else { return nil }
+
+        var rows: [[String]] = []
+        var index = startIndex + 2
+
+        while index < lines.count {
+            let line = lines[index]
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                break
+            }
+            guard let row = parseTableRow(line), row.count == headers.count else {
+                break
+            }
+            rows.append(row)
+            index += 1
+        }
+
+        // If body rows are missing, treat these lines as plain text.
+        guard !rows.isEmpty else { return nil }
+        return (MarkdownTable(headers: headers, alignments: alignments, rows: rows), index)
+    }
+
+    private static func parseTableRow(_ line: String) -> [String]? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("|") else { return nil }
+
+        var cells: [String] = []
+        var current = ""
+        var isEscaped = false
+
+        for ch in trimmed {
+            if isEscaped {
+                current.append(ch)
+                isEscaped = false
+                continue
+            }
+            if ch == "\\" {
+                isEscaped = true
+                continue
+            }
+            if ch == "|" {
+                cells.append(current.trimmingCharacters(in: .whitespaces))
+                current = ""
+            } else {
+                current.append(ch)
+            }
+        }
+        cells.append(current.trimmingCharacters(in: .whitespaces))
+
+        if cells.first?.isEmpty == true {
+            cells.removeFirst()
+        }
+        if cells.last?.isEmpty == true {
+            cells.removeLast()
+        }
+
+        guard !cells.isEmpty else { return nil }
+        return cells.map { $0.replacingOccurrences(of: "\\|", with: "|") }
+    }
+
+    private static func parseDelimiterRow(_ line: String) -> [MarkdownTableAlignment]? {
+        guard let cells = parseTableRow(line) else { return nil }
+        var alignments: [MarkdownTableAlignment] = []
+        alignments.reserveCapacity(cells.count)
+
+        for cell in cells {
+            let trimmed = cell.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return nil }
+            let startsWithColon = trimmed.hasPrefix(":")
+            let endsWithColon = trimmed.hasSuffix(":")
+
+            let core = trimmed
+                .trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+                .trimmingCharacters(in: .whitespaces)
+            guard core.count >= 3, core.allSatisfy({ $0 == "-" }) else { return nil }
+
+            if startsWithColon && endsWithColon {
+                alignments.append(.center)
+            } else if endsWithColon {
+                alignments.append(.trailing)
+            } else {
+                alignments.append(.leading)
+            }
+        }
+        return alignments
     }
 }
 
