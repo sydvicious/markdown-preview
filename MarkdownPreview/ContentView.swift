@@ -13,6 +13,11 @@ struct ContentView: View {
         case source
     }
 
+    private struct MissingActiveDocumentAlert: Identifiable {
+        let id: String
+        let fileName: String
+    }
+
     private struct OpenedDocument: Identifiable, Equatable {
         let id: String
         var file: MarkdownFile
@@ -30,18 +35,20 @@ struct ContentView: View {
     private let persistedSelectionKey = "selectedMarkdownDocumentID"
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var fileOpenState: FileOpenState
     @State private var isImporterPresented = false
     @State private var openedDocuments: [OpenedDocument] = []
     @State private var selectedDocumentID: OpenedDocument.ID?
     @State private var detailMode: DetailMode = .preview
     @State private var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
-    @State private var errorMessage: String?
+    @State private var openErrorMessage: String?
     @State private var didRestoreDocuments = false
     @State private var isRestoringDocuments = true
     @State private var isInitialOpenSheetPresented = false
     @State private var hasPresentedInitialOpenSheet = false
     @State private var knownModificationDates: [String: Date] = [:]
+    @State private var missingActiveDocumentAlert: MissingActiveDocumentAlert?
 
     init(
         previewFiles: [MarkdownFile] = [],
@@ -130,10 +137,25 @@ struct ContentView: View {
         #if os(macOS)
         .onDrop(of: [.fileURL], isTargeted: nil, perform: handleDrop)
         #endif
-        .alert("Unable to Open File", isPresented: .constant(errorMessage != nil)) {
-            Button("OK") { errorMessage = nil }
+        .alert("Unable to Open File", isPresented: .constant(openErrorMessage != nil)) {
+            Button("OK") { openErrorMessage = nil }
         } message: {
-            Text(errorMessage ?? "Unknown error")
+            Text(openErrorMessage ?? "Unknown error")
+        }
+        .alert(
+            "File No Longer Available",
+            isPresented: Binding(
+                get: { missingActiveDocumentAlert != nil },
+                set: { if !$0 { missingActiveDocumentAlert = nil } }
+            ),
+            presenting: missingActiveDocumentAlert
+        ) { alert in
+            Button("OK") {
+                removeDocument(id: alert.id, forceShowSidebarOnCompact: true)
+                missingActiveDocumentAlert = nil
+            }
+        } message: { alert in
+            Text("\"\(alert.fileName)\" is no longer available.")
         }
         .onChange(of: openedDocuments) { _, _ in
             persistDocuments()
@@ -148,13 +170,27 @@ struct ContentView: View {
         .onAppear {
             restorePersistedDocumentsIfNeeded()
             presentInitialOpenSheetIfNeeded()
+            #if !os(macOS)
+            checkActiveDocumentForChanges()
+            checkAllDocumentsForChanges()
+            #endif
         }
+        #if !os(macOS)
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            checkActiveDocumentForChanges()
+            checkAllDocumentsForChanges()
+        }
+        #endif
         .onReceive(fileOpenState.$openedURL.compactMap { $0 }) { url in
             load(url: url)
             fileOpenState.openedURL = nil
         }
         .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
-            reloadChangedDocumentsIfNeeded()
+            checkActiveDocumentForChanges()
+        }
+        .onReceive(Timer.publish(every: 10.0, on: .main, in: .common).autoconnect()) { _ in
+            checkAllDocumentsForChanges()
         }
         .dynamicTypeSize(.xSmall ... .accessibility5)
     }
@@ -261,7 +297,7 @@ struct ContentView: View {
             guard let url = urls.first else { return }
             load(url: url)
         case .failure(let error):
-            errorMessage = error.localizedDescription
+            openErrorMessage = error.localizedDescription
         }
     }
 
@@ -273,9 +309,9 @@ struct ContentView: View {
             upsertDocument(file, bookmarkData: bookmarkData, modificationDate: modificationDate)
             detailMode = .preview
             preferredCompactColumn = isCompactWidth ? .detail : .sidebar
-            errorMessage = nil
+            openErrorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            openErrorMessage = error.localizedDescription
         }
     }
 
@@ -473,20 +509,68 @@ struct ContentView: View {
     }
 
     private func reloadChangedDocumentsIfNeeded() {
+        checkActiveDocumentForChanges()
+        checkAllDocumentsForChanges()
+    }
+
+    private func checkActiveDocumentForChanges() {
+        guard let selectedDocumentID else { return }
+        reloadDocumentIfNeeded(documentID: selectedDocumentID, alertIfMissing: true)
+    }
+
+    private func checkAllDocumentsForChanges() {
         guard !openedDocuments.isEmpty else { return }
+        let activeID = selectedDocumentID
+        let ids = openedDocuments.map(\.id)
+        for id in ids where id != activeID {
+            reloadDocumentIfNeeded(documentID: id, alertIfMissing: false)
+        }
+    }
 
-        for index in openedDocuments.indices {
-            let document = openedDocuments[index]
-            guard let loaded = loadFromBookmarkData(document.bookmarkData) else { continue }
+    private func reloadDocumentIfNeeded(documentID: String, alertIfMissing: Bool) {
+        guard let index = openedDocuments.firstIndex(where: { $0.id == documentID }) else { return }
+        let document = openedDocuments[index]
 
-            if let modificationDate = loaded.modificationDate {
-                let knownDate = knownModificationDates[document.id]
-                guard knownDate == nil || modificationDate > knownDate! else { continue }
-                knownModificationDates[document.id] = modificationDate
+        guard let loaded = loadFromBookmarkData(document.bookmarkData) else {
+            handleMissingDocument(document, alertIfMissing: alertIfMissing)
+            return
+        }
+
+        if let modificationDate = loaded.modificationDate {
+            let knownDate = knownModificationDates[document.id]
+            if knownDate != nil, modificationDate <= knownDate! {
+                return
             }
+            knownModificationDates[document.id] = modificationDate
+        }
 
-            guard loaded.file.contents != document.file.contents else { continue }
-            openedDocuments[index].file = loaded.file
+        guard loaded.file.contents != document.file.contents else { return }
+        openedDocuments[index].file = loaded.file
+    }
+
+    private func handleMissingDocument(_ document: OpenedDocument, alertIfMissing: Bool) {
+        if alertIfMissing {
+            guard missingActiveDocumentAlert?.id != document.id else { return }
+            missingActiveDocumentAlert = .init(id: document.id, fileName: document.file.fileName)
+        } else {
+            removeDocument(id: document.id)
+        }
+    }
+
+    private func removeDocument(id: String, forceShowSidebarOnCompact: Bool = false) {
+        let wasSelected = selectedDocumentID == id
+        openedDocuments.removeAll(where: { $0.id == id })
+        knownModificationDates.removeValue(forKey: id)
+
+        if wasSelected {
+            if isCompactWidth {
+                selectedDocumentID = nil
+                if forceShowSidebarOnCompact {
+                    preferredCompactColumn = .sidebar
+                }
+            } else {
+                selectedDocumentID = sortedDocuments.first?.id
+            }
         }
     }
 
