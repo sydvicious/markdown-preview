@@ -40,6 +40,8 @@ This document tracks planned work for MarkdownPreviewApp.
 - If .onOpenURL receives an http(s) link to a markdown file, fetch into memory and open in a new window
 - Provide Save to persist locally if desired
 
+## 11) Support Image Referenes
+
 Notes:
 - Printing will require platform-specific integration (NSPrintOperation on macOS, UIPrintInteractionController on iPadOS)
 - Keep iOS/iPadOS on the split-view design while macOS migrates to document-based
