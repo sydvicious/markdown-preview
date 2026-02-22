@@ -58,6 +58,16 @@ This document tracks planned work for MarkdownPreviewApp.
 - Add actions to paste/open markdown text directly from the clipboard.
 - Define copy behavior for source text and rendered preview content on each platform.
 
+## 16) Improve project documentation and samples
+- Make a good `SAMPLE.md` file displaying features.
+- Make a better, more consumer-based `README.md` with screenshots displaying features.
+- Split out developer instructions to `CONTRIBUTING.md`.
+
+## 17) Get ready for TestFlight
+- Investigate how to submit to AppStore as an individual.
+- Submit apps to app store.
+- Setup TestFlight.
+
 Notes:
 - Printing will require platform-specific integration (NSPrintOperation on macOS, UIPrintInteractionController on iPadOS)
 - Keep iOS/iPadOS on the split-view design while macOS migrates to document-based
