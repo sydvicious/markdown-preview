@@ -67,10 +67,23 @@ This document tracks planned work for MarkdownPreviewApp.
 - Investigate how to submit to AppStore as an individual.
 - Submit apps to app store.
 - Setup TestFlight.
+- Capture and prepare App Store screenshots for iPhone, iPad, and Mac.
 
 ## 18) Break up and rename `ContentView.swift`
 - Split `ContentView.swift` into smaller, focused files with clearer names.
 - Consider combining this refactor with the YMMV-related work.
+
+## 19) Hardening for production use
+- Improve handling/performance for very large markdown files.
+- Add robustness for markdown edge cases and malformed input across parser/renderer paths.
+
+## 20) Internationalization (i18n) and localization (l10n)
+- Localize all user-facing strings across iOS, iPadOS, and macOS.
+- Verify layout/text behavior for longer localized strings and right-to-left languages.
+
+## 21) Accessibility testing
+- Run VoiceOver, Dynamic Type, contrast, and keyboard navigation checks on all platforms.
+- Fix accessibility labels/traits/focus order issues and add regression checks.
 
 Notes:
 - Printing will require platform-specific integration (NSPrintOperation on macOS, UIPrintInteractionController on iPadOS)
