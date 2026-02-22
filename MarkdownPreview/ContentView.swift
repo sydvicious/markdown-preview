@@ -686,7 +686,7 @@ private struct MarkdownBlocksView: View {
     }
 
     private var blocksContent: some View {
-        LazyVStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 14) {
             ForEach(MarkdownBlockParser.parse(source), id: \.id) { block in
                 switch block.kind {
                 case .heading(let level, let text):
@@ -784,16 +784,25 @@ private struct MarkdownBlocksView: View {
 private struct MarkdownTableBlockView: View {
     let table: MarkdownTable
     @State private var contentHeight: CGFloat = 120
+    @State private var contentWidth: CGFloat = 320
 
     var body: some View {
-        MarkdownTableWebView(html: htmlDocument, contentHeight: $contentHeight)
+        GeometryReader { geometry in
+            let targetWidth = max(120, min(contentWidth, max(120, geometry.size.width)))
+            MarkdownTableWebView(
+                html: htmlDocument,
+                contentHeight: $contentHeight,
+                contentWidth: $contentWidth
+            )
+            .frame(width: targetWidth, height: max(contentHeight, 44), alignment: .leading)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .frame(height: max(contentHeight, 44))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
-        )
     }
 
     private func cssAlignmentClass(_ alignment: MarkdownTableAlignment) -> String {
@@ -884,9 +893,11 @@ private struct MarkdownTableBlockView: View {
           </div>
           <script>
             function reportSize() {
+              const table = document.querySelector('table');
               const h = document.documentElement.scrollHeight || document.body.scrollHeight || 44;
+              const w = (table && table.scrollWidth) ? table.scrollWidth : (document.documentElement.scrollWidth || document.body.scrollWidth || 120);
               if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.size) {
-                window.webkit.messageHandlers.size.postMessage(h);
+                window.webkit.messageHandlers.size.postMessage({ height: h, width: w });
               }
             }
             window.addEventListener('load', reportSize);
@@ -944,13 +955,16 @@ private struct MarkdownTableBlockView: View {
 private struct MarkdownTableWebView: UIViewRepresentable {
     let html: String
     @Binding var contentHeight: CGFloat
+    @Binding var contentWidth: CGFloat
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var contentHeight: Binding<CGFloat>
+        var contentWidth: Binding<CGFloat>
         var lastHTML: String?
 
-        init(contentHeight: Binding<CGFloat>) {
+        init(contentHeight: Binding<CGFloat>, contentWidth: Binding<CGFloat>) {
             self.contentHeight = contentHeight
+            self.contentWidth = contentWidth
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -958,9 +972,18 @@ private struct MarkdownTableWebView: UIViewRepresentable {
         }
 
         func requestSizeUpdate(from webView: WKWebView) {
-            webView.evaluateJavaScript("document.documentElement.scrollHeight") { [weak self] result, _ in
+            webView.evaluateJavaScript("""
+            (function() {
+              const table = document.querySelector('table');
+              const h = document.documentElement.scrollHeight || document.body.scrollHeight || 44;
+              const w = (table && table.scrollWidth) ? table.scrollWidth : (document.documentElement.scrollWidth || document.body.scrollWidth || 120);
+              return { height: h, width: w };
+            })()
+            """) { [weak self] result, _ in
                 guard let self else { return }
-                if let value = result as? CGFloat {
+                if let dictionary = result as? [String: Any] {
+                    self.applyTableSize(from: dictionary)
+                } else if let value = result as? CGFloat {
                     DispatchQueue.main.async {
                         self.contentHeight.wrappedValue = max(44, value)
                     }
@@ -974,7 +997,9 @@ private struct MarkdownTableWebView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "size" else { return }
-            if let value = message.body as? CGFloat {
+            if let dictionary = message.body as? [String: Any] {
+                applyTableSize(from: dictionary)
+            } else if let value = message.body as? CGFloat {
                 DispatchQueue.main.async {
                     self.contentHeight.wrappedValue = max(44, value)
                 }
@@ -984,9 +1009,18 @@ private struct MarkdownTableWebView: UIViewRepresentable {
                 }
             }
         }
+
+        private func applyTableSize(from dictionary: [String: Any]) {
+            let heightValue = (dictionary["height"] as? NSNumber)?.doubleValue ?? 44
+            let widthValue = (dictionary["width"] as? NSNumber)?.doubleValue ?? 120
+            DispatchQueue.main.async {
+                self.contentHeight.wrappedValue = max(44, CGFloat(heightValue))
+                self.contentWidth.wrappedValue = max(120, CGFloat(widthValue))
+            }
+        }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(contentHeight: $contentHeight) }
+    func makeCoordinator() -> Coordinator { Coordinator(contentHeight: $contentHeight, contentWidth: $contentWidth) }
 
     func makeUIView(context: Context) -> WKWebView {
         let userContentController = WKUserContentController()
@@ -1006,6 +1040,7 @@ private struct MarkdownTableWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.contentHeight = $contentHeight
+        context.coordinator.contentWidth = $contentWidth
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
             webView.loadHTMLString(html, baseURL: nil)
@@ -1018,13 +1053,16 @@ private struct MarkdownTableWebView: UIViewRepresentable {
 private struct MarkdownTableWebView: NSViewRepresentable {
     let html: String
     @Binding var contentHeight: CGFloat
+    @Binding var contentWidth: CGFloat
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var contentHeight: Binding<CGFloat>
+        var contentWidth: Binding<CGFloat>
         var lastHTML: String?
 
-        init(contentHeight: Binding<CGFloat>) {
+        init(contentHeight: Binding<CGFloat>, contentWidth: Binding<CGFloat>) {
             self.contentHeight = contentHeight
+            self.contentWidth = contentWidth
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -1032,9 +1070,18 @@ private struct MarkdownTableWebView: NSViewRepresentable {
         }
 
         func requestSizeUpdate(from webView: WKWebView) {
-            webView.evaluateJavaScript("document.documentElement.scrollHeight") { [weak self] result, _ in
+            webView.evaluateJavaScript("""
+            (function() {
+              const table = document.querySelector('table');
+              const h = document.documentElement.scrollHeight || document.body.scrollHeight || 44;
+              const w = (table && table.scrollWidth) ? table.scrollWidth : (document.documentElement.scrollWidth || document.body.scrollWidth || 120);
+              return { height: h, width: w };
+            })()
+            """) { [weak self] result, _ in
                 guard let self else { return }
-                if let value = result as? CGFloat {
+                if let dictionary = result as? [String: Any] {
+                    self.applyTableSize(from: dictionary)
+                } else if let value = result as? CGFloat {
                     DispatchQueue.main.async {
                         self.contentHeight.wrappedValue = max(44, value)
                     }
@@ -1048,7 +1095,9 @@ private struct MarkdownTableWebView: NSViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "size" else { return }
-            if let value = message.body as? CGFloat {
+            if let dictionary = message.body as? [String: Any] {
+                applyTableSize(from: dictionary)
+            } else if let value = message.body as? CGFloat {
                 DispatchQueue.main.async {
                     self.contentHeight.wrappedValue = max(44, value)
                 }
@@ -1058,9 +1107,18 @@ private struct MarkdownTableWebView: NSViewRepresentable {
                 }
             }
         }
+
+        private func applyTableSize(from dictionary: [String: Any]) {
+            let heightValue = (dictionary["height"] as? NSNumber)?.doubleValue ?? 44
+            let widthValue = (dictionary["width"] as? NSNumber)?.doubleValue ?? 120
+            DispatchQueue.main.async {
+                self.contentHeight.wrappedValue = max(44, CGFloat(heightValue))
+                self.contentWidth.wrappedValue = max(120, CGFloat(widthValue))
+            }
+        }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(contentHeight: $contentHeight) }
+    func makeCoordinator() -> Coordinator { Coordinator(contentHeight: $contentHeight, contentWidth: $contentWidth) }
 
     func makeNSView(context: Context) -> WKWebView {
         let userContentController = WKUserContentController()
@@ -1077,6 +1135,7 @@ private struct MarkdownTableWebView: NSViewRepresentable {
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.contentHeight = $contentHeight
+        context.coordinator.contentWidth = $contentWidth
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
             webView.loadHTMLString(html, baseURL: nil)
