@@ -24,6 +24,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		621B2E762F40F94700DD1CCB /* Info-macOS.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info-macOS.plist"; sourceTree = "<group>"; };
 		621B2E752F40F94600DD1CCB /* TODO.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = TODO.md; sourceTree = "<group>"; };
 		6231AE202F40F583007D442C /* LICENSE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = LICENSE.md; sourceTree = "<group>"; };
 		6231AE212F40F583007D442C /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
@@ -84,6 +85,7 @@
 				6231AE202F40F583007D442C /* LICENSE.md */,
 				6231AE212F40F583007D442C /* README.md */,
 				621B2E752F40F94600DD1CCB /* TODO.md */,
+				621B2E762F40F94700DD1CCB /* Info-macOS.plist */,
 				62584AF22D45FB4E00831420 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -407,6 +409,8 @@
 				DEVELOPMENT_TEAM = R5PQPZARC5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				"GENERATE_INFOPLIST_FILE[sdk=macosx*]" = NO;
+				"INFOPLIST_FILE[sdk=macosx*]" = "Info-macOS.plist";
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_CFBundleTypeName = "Markdown Document";
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_CFBundleTypeRole = Editor;
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_LSHandlerRank = Owner;
@@ -449,6 +453,8 @@
 				DEVELOPMENT_TEAM = R5PQPZARC5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				"GENERATE_INFOPLIST_FILE[sdk=macosx*]" = NO;
+				"INFOPLIST_FILE[sdk=macosx*]" = "Info-macOS.plist";
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_CFBundleTypeName = "Markdown Document";
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_CFBundleTypeRole = Editor;
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_LSHandlerRank = Owner;
