@@ -41,6 +41,7 @@ struct ContentView: View {
     @State private var isRestoringDocuments = true
     @State private var isInitialOpenSheetPresented = false
     @State private var hasPresentedInitialOpenSheet = false
+    @State private var knownModificationDates: [String: Date] = [:]
 
     init(
         previewFiles: [MarkdownFile] = [],
@@ -151,6 +152,9 @@ struct ContentView: View {
         .onReceive(fileOpenState.$openedURL.compactMap { $0 }) { url in
             load(url: url)
             fileOpenState.openedURL = nil
+        }
+        .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
+            reloadChangedDocumentsIfNeeded()
         }
         .dynamicTypeSize(.xSmall ... .accessibility5)
     }
@@ -264,7 +268,9 @@ struct ContentView: View {
     private func load(url: URL) {
         do {
             let bookmarkData = try makeBookmarkData(for: url)
-            upsertDocument(try MarkdownFile.load(from: url), bookmarkData: bookmarkData)
+            let file = try MarkdownFile.load(from: url)
+            let modificationDate = currentModificationDate(for: url)
+            upsertDocument(file, bookmarkData: bookmarkData, modificationDate: modificationDate)
             detailMode = .preview
             preferredCompactColumn = isCompactWidth ? .detail : .sidebar
             errorMessage = nil
@@ -273,7 +279,7 @@ struct ContentView: View {
         }
     }
 
-    private func upsertDocument(_ file: MarkdownFile, bookmarkData: Data) {
+    private func upsertDocument(_ file: MarkdownFile, bookmarkData: Data, modificationDate: Date?) {
         let id = file.url.standardizedFileURL.path
         if let index = openedDocuments.firstIndex(where: { $0.id == id }) {
             openedDocuments[index].file = file
@@ -281,6 +287,9 @@ struct ContentView: View {
             openedDocuments[index].bookmarkData = bookmarkData
         } else {
             openedDocuments.append(.init(id: id, file: file, lastOpened: Date(), bookmarkData: bookmarkData))
+        }
+        if let modificationDate {
+            knownModificationDates[id] = modificationDate
         }
         selectedDocumentID = id
     }
@@ -297,6 +306,7 @@ struct ContentView: View {
     private func deleteDocuments(at offsets: IndexSet) {
         let idsToDelete = offsets.map { sortedDocuments[$0].id }
         openedDocuments.removeAll(where: { idsToDelete.contains($0.id) })
+        idsToDelete.forEach { knownModificationDates.removeValue(forKey: $0) }
         if let selectedDocumentID, idsToDelete.contains(selectedDocumentID) {
             self.selectedDocumentID = sortedDocuments.first?.id
         }
@@ -314,19 +324,24 @@ struct ContentView: View {
         }
 
         var restored: [OpenedDocument] = []
+        var restoredModificationDates: [String: Date] = [:]
         for entry in persisted.sorted(by: { $0.lastOpened > $1.lastOpened }) {
-            guard let file = loadFromBookmarkData(entry.bookmarkData) else { continue }
+            guard let loaded = loadFromBookmarkData(entry.bookmarkData) else { continue }
             restored.append(
                 .init(
                     id: entry.id,
-                    file: file,
+                    file: loaded.file,
                     lastOpened: entry.lastOpened,
                     bookmarkData: entry.bookmarkData
                 )
             )
+            if let modificationDate = loaded.modificationDate {
+                restoredModificationDates[entry.id] = modificationDate
+            }
         }
 
         openedDocuments = restored
+        knownModificationDates = restoredModificationDates
         if isCompactWidth {
             selectedDocumentID = nil
         } else {
@@ -424,7 +439,7 @@ struct ContentView: View {
         #endif
     }
 
-    private func loadFromBookmarkData(_ bookmarkData: Data) -> MarkdownFile? {
+    private func loadFromBookmarkData(_ bookmarkData: Data) -> (file: MarkdownFile, modificationDate: Date?)? {
         var isStale = false
         do {
             #if os(macOS)
@@ -444,9 +459,34 @@ struct ContentView: View {
                     url.stopAccessingSecurityScopedResource()
                 }
             }
-            return try MarkdownFile.load(from: url)
+            let file = try MarkdownFile.load(from: url)
+            let modificationDate = currentModificationDate(for: url)
+            return (file, modificationDate)
         } catch {
             return nil
+        }
+    }
+
+    private func currentModificationDate(for url: URL) -> Date? {
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+        return values?.contentModificationDate
+    }
+
+    private func reloadChangedDocumentsIfNeeded() {
+        guard !openedDocuments.isEmpty else { return }
+
+        for index in openedDocuments.indices {
+            let document = openedDocuments[index]
+            guard let loaded = loadFromBookmarkData(document.bookmarkData) else { continue }
+
+            if let modificationDate = loaded.modificationDate {
+                let knownDate = knownModificationDates[document.id]
+                guard knownDate == nil || modificationDate > knownDate! else { continue }
+                knownModificationDates[document.id] = modificationDate
+            }
+
+            guard loaded.file.contents != document.file.contents else { continue }
+            openedDocuments[index].file = loaded.file
         }
     }
 

@@ -5,8 +5,16 @@ This document tracks planned work for MarkdownPreviewApp.
 ## 1) Investigate why Mac does not know this opens .md files.
 
 ## 2) Update when the file changes while the app is open.
-- If the file disappears, put up an alert to the user and remove it from the list.
-- If the file moves, simply update the reference.
+- If the currently displayed file disappears:
+  - Present a modal alert.
+  - When the user presses OK, remove that file from the list.
+  - On iPhone, if currently in detail view, navigate back to the list view.
+- If a file that is not currently displayed disappears:
+  - Remove it from the list without showing an alert.
+- If the file moves, update the reference.
+- Detection strategy:
+  - Long-term: move to filesystem notifications.
+  - Initial implementation: poll the active file every 1 second and all files every 10 seconds.
 
 ## 3) Allow editing of the text in the Source view.
 - On iPad and Mac, investigate showing both preview and source at the same time.
