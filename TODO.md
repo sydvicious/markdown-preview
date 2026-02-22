@@ -2,11 +2,9 @@
 
 This document tracks planned work for MarkdownPreviewApp.
 
-## 1) Investigate why Mac does not know this opens .md files.
+## 1) Support Image References
 
-## 2) Update when the file changes while the app is open.
-- If the file disappears, put up an alert to the user and remove it from the list.
-- If the file moves, simply update the reference.
+## 2) Investigate why Mac does not know this opens .md files.
 
 ## 3) Allow editing of the text in the Source view.
 - On iPad and Mac, investigate showing both preview and source at the same time.
@@ -40,7 +38,25 @@ This document tracks planned work for MarkdownPreviewApp.
 - If .onOpenURL receives an http(s) link to a markdown file, fetch into memory and open in a new window
 - Provide Save to persist locally if desired
 
-## 11) Support Image Referenes
+## 11) Investigate iPad multi-window mode
+- Evaluate scene/window behavior when opening multiple markdown files in Split View/Stage Manager.
+- Decide whether to keep single-window split navigation or support multiple app windows on iPadOS.
+
+## 12) Support side-by-side Preview and Source on Mac and iPad
+- Add a layout mode that shows rendered preview and source simultaneously.
+- Ensure the mode works in regular-width environments on macOS and iPadOS.
+
+## 13) Add text size controls with per-file persistence
+- Add controls to increase/decrease text size for markdown preview content.
+- Persist text size settings per file and restore the value when that file is reopened.
+
+## 14) Support remote URIs to `.md` files
+- Open `http(s)` URIs that point to markdown files directly in the app.
+- Handle redirects, content-type mismatches, and network failures with user-visible errors.
+
+## 15) Add clipboard support
+- Add actions to paste/open markdown text directly from the clipboard.
+- Define copy behavior for source text and rendered preview content on each platform.
 
 Notes:
 - Printing will require platform-specific integration (NSPrintOperation on macOS, UIPrintInteractionController on iPadOS)
@@ -53,5 +69,12 @@ Notes:
 - Added horizontal scrolling for wide tables and auto-height reporting back to SwiftUI.
 - Added inline backtick rendering in table cells/headers.
 - Tuned iOS table typography and disabled text inflation for consistent sizing.
+- Added file-change reloading while app is running:
+  - Active file check every 1 second.
+  - All files check every 10 seconds.
+  - iOS/iPadOS checks on launch and foreground.
+- Added missing-file handling:
+  - Active missing file: modal alert, remove on OK, and iPhone returns to list.
+  - Non-active missing file: removed silently.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*

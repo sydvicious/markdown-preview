@@ -15,6 +15,14 @@ Format:
   - Reduced inline code font size for better visual balance.
   - Disabled text inflation in the web table renderer so compact and regular presentations match.
 - Iterated table width behavior to avoid clipping/truncation artifacts that appeared in the original SwiftUI table approach.
+- Added live file change handling for opened documents:
+  - Poll active file every 1 second.
+  - Poll all opened files every 10 seconds.
+  - On iOS/iPadOS, re-check files on launch and when app enters foreground.
+- Added missing-file behavior:
+  - If the active file disappears, show modal alert and remove file on OK.
+  - If a non-active file disappears, remove it silently.
+  - On iPhone compact layout, return to file list after removing the active missing file.
 
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*
