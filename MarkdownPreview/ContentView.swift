@@ -654,7 +654,7 @@ private struct MarkdownDocumentPicker: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let picker = UIDocumentPickerViewController(
             forOpeningContentTypes: MarkdownFile.supportedTypes,
-            asCopy: true
+            asCopy: false
         )
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = false

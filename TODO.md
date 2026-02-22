@@ -68,6 +68,10 @@ This document tracks planned work for MarkdownPreviewApp.
 - Submit apps to app store.
 - Setup TestFlight.
 
+## 18) Break up and rename `ContentView.swift`
+- Split `ContentView.swift` into smaller, focused files with clearer names.
+- Consider combining this refactor with the YMMV-related work.
+
 Notes:
 - Printing will require platform-specific integration (NSPrintOperation on macOS, UIPrintInteractionController on iPadOS)
 - Keep iOS/iPadOS on the split-view design while macOS migrates to document-based
