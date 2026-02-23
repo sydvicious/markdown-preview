@@ -17,7 +17,7 @@ This document tracks planned work for MarkdownPreviewApp.
 ## 5) macOS startup behavior
 - If there are no valid files after restore, automatically present the file picker
 
-## 6) iPhone/iPad document associations
+## 6) [COMPLETED] iPhone/iPad document associations
 - Configure Info.plist CFBundleDocumentTypes to open .md files
 - Support opening in place and handle security-scoped URLs
 
@@ -85,25 +85,26 @@ This document tracks planned work for MarkdownPreviewApp.
 - Run VoiceOver, Dynamic Type, contrast, and keyboard navigation checks on all platforms.
 - Fix accessibility labels/traits/focus order issues and add regression checks.
 
+## 22) Async file loading off `@Main`
+- Read source files in a separate task, not on `@Main`.
+- If loading takes longer than 0.5 seconds, show a spinner with "Loading...".
+- Investigate checking file existence and polling in a separate `Task` as well.
+- Schedule this work after the YMMV-related refactor work.
+
+## 23) Add list title
+- Add the title `Markdown Preview` to the list panel.
+
+## 24) Add list toolbar menu
+- Add a hamburger menu next to the `+` button.
+- Include a menu entry that says `©2026 Syd Polk`.
+
+## BUGS
+
+- Investigate why macOS sometimes opens a second list window when a file is double-clicked.
+
 Notes:
 - Printing will require platform-specific integration (NSPrintOperation on macOS, UIPrintInteractionController on iPadOS)
 - Keep iOS/iPadOS on the split-view design while macOS migrates to document-based
 - Info.plist updates are required for document types and opening-in-place
-
-## Completed (2026-02-22)
-
-- Replaced SwiftUI table rendering with an embedded `WKWebView` table renderer.
-- Added horizontal scrolling for wide tables and auto-height reporting back to SwiftUI.
-- Added inline backtick rendering in table cells/headers.
-- Tuned iOS table typography and disabled text inflation for consistent sizing.
-- Added file-change reloading while app is running:
-  - Active file check every 1 second.
-  - All files check every 10 seconds.
-  - iOS/iPadOS checks on launch and foreground.
-- Added missing-file handling:
-  - Active missing file: modal alert, remove on OK, and iPhone returns to list.
-  - Non-active missing file: removed silently.
-- Fixed macOS app document-type registration so `.md` files are recognized in Finder/Open With.
-- Added a dedicated macOS Info.plist with markdown UTI/document type declarations.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*
