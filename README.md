@@ -53,6 +53,14 @@ This app is designed to feel like a lightweight Preview-style reader for `.md` f
 
 - See `CHANGELOG.md` for dated change entries.
 
+## Preview Table Sample
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| macOS | ✅ | Open With + drag/drop supported |
+| iOS | ✅ | Files picker + detail/source toggle |
+| iPadOS | ✅ | Split view navigation + toolbar actions |
+
 
 ## Project Structure
 
