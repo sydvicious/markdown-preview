@@ -4,6 +4,19 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-02-23
+
+- Fixed iOS/iPadOS open-in-place behavior for iCloud files and restored use of real source URLs (`UIDocumentPicker` with `asCopy: false`).
+- Added a dedicated macOS app `Info.plist` (`Info-macOS.plist`) and build wiring so Finder/Open With recognizes `.md` files.
+- Added a markdown table sample to the preview source document (`README.md`) so SwiftUI previews exercise table rendering.
+- Fixed preview instability by disabling live file monitoring via dependency injection in preview configurations.
+- Improved table rendering polish:
+  - Added dark-mode-aware table styling for text, borders, headers, and inline code.
+  - Measured table width and height from table content so rounded card bounds fit content.
+  - Reduced extra vertical whitespace around table cards.
+  - Tightened table cell horizontal padding.
+  - Switched markdown block container from `LazyVStack` to `VStack` to avoid first-scroll table hitching.
+
 ## 2026-02-22
 
 - Replaced SwiftUI `Grid` table rendering with a `WKWebView`-based table block renderer on macOS, iOS, and iPadOS.

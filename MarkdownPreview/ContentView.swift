@@ -36,6 +36,7 @@ struct ContentView: View {
 
     private let persistedDocumentsKey = "openedMarkdownDocuments"
     private let persistedSelectionKey = "selectedMarkdownDocumentID"
+    private let disableLiveFileMonitoring: Bool
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
@@ -57,7 +58,8 @@ struct ContentView: View {
         previewFiles: [MarkdownFile] = [],
         selectedPreviewFileID: String? = nil,
         showsSourceInPreview: Bool = false,
-        disablePersistenceRestore: Bool = false
+        disablePersistenceRestore: Bool = false,
+        disableLiveFileMonitoring: Bool = false
     ) {
         let now = Date()
         let opened = previewFiles.map {
@@ -76,6 +78,7 @@ struct ContentView: View {
         _isRestoringDocuments = State(initialValue: !disablePersistenceRestore)
         _didRestoreDocuments = State(initialValue: disablePersistenceRestore)
         _hasPresentedInitialOpenSheet = State(initialValue: disablePersistenceRestore)
+        self.disableLiveFileMonitoring = disableLiveFileMonitoring
     }
 
     var body: some View {
@@ -542,11 +545,13 @@ struct ContentView: View {
     }
 
     private func checkActiveDocumentForChanges() {
+        guard !disableLiveFileMonitoring else { return }
         guard let selectedDocumentID else { return }
         reloadDocumentIfNeeded(documentID: selectedDocumentID, alertIfMissing: true)
     }
 
     private func checkAllDocumentsForChanges() {
+        guard !disableLiveFileMonitoring else { return }
         guard !openedDocuments.isEmpty else { return }
         let activeID = selectedDocumentID
         let ids = openedDocuments.map(\.id)
@@ -861,12 +866,13 @@ private struct MarkdownTableBlockView: View {
             }
             th, td {
               border: 1px solid rgba(0,0,0,0.16);
-              padding: 8px 10px;
+              padding: 8px 8px;
               vertical-align: top;
               white-space: pre;
               word-break: normal;
               overflow-wrap: normal;
               hyphens: none;
+              color: inherit;
             }
             th {
               background: rgba(0,0,0,0.08);
@@ -882,6 +888,20 @@ private struct MarkdownTableBlockView: View {
               border-radius: 4px;
               padding: 1px 4px;
             }
+            @media (prefers-color-scheme: dark) {
+              body {
+                color: #f2f2f7;
+              }
+              th, td {
+                border-color: rgba(255,255,255,0.24);
+              }
+              th {
+                background: rgba(255,255,255,0.14);
+              }
+              code {
+                background: rgba(255,255,255,0.18);
+              }
+            }
           </style>
         </head>
         <body>
@@ -894,7 +914,7 @@ private struct MarkdownTableBlockView: View {
           <script>
             function reportSize() {
               const table = document.querySelector('table');
-              const h = document.documentElement.scrollHeight || document.body.scrollHeight || 44;
+              const h = (table && table.getBoundingClientRect) ? Math.ceil(table.getBoundingClientRect().height) : (document.documentElement.scrollHeight || document.body.scrollHeight || 44);
               const w = (table && table.scrollWidth) ? table.scrollWidth : (document.documentElement.scrollWidth || document.body.scrollWidth || 120);
               if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.size) {
                 window.webkit.messageHandlers.size.postMessage({ height: h, width: w });
@@ -975,7 +995,7 @@ private struct MarkdownTableWebView: UIViewRepresentable {
             webView.evaluateJavaScript("""
             (function() {
               const table = document.querySelector('table');
-              const h = document.documentElement.scrollHeight || document.body.scrollHeight || 44;
+              const h = (table && table.getBoundingClientRect) ? Math.ceil(table.getBoundingClientRect().height) : (document.documentElement.scrollHeight || document.body.scrollHeight || 44);
               const w = (table && table.scrollWidth) ? table.scrollWidth : (document.documentElement.scrollWidth || document.body.scrollWidth || 120);
               return { height: h, width: w };
             })()
@@ -1073,7 +1093,7 @@ private struct MarkdownTableWebView: NSViewRepresentable {
             webView.evaluateJavaScript("""
             (function() {
               const table = document.querySelector('table');
-              const h = document.documentElement.scrollHeight || document.body.scrollHeight || 44;
+              const h = (table && table.getBoundingClientRect) ? Math.ceil(table.getBoundingClientRect().height) : (document.documentElement.scrollHeight || document.body.scrollHeight || 44);
               const w = (table && table.scrollWidth) ? table.scrollWidth : (document.documentElement.scrollWidth || document.body.scrollWidth || 120);
               return { height: h, width: w };
             })()
@@ -1579,27 +1599,31 @@ private struct DetailPreviewPane: View {
     ContentView(
         previewFiles: [ContentViewPreviewData.fullFile],
         selectedPreviewFileID: ContentViewPreviewData.fullFile.url.standardizedFileURL.path,
-        disablePersistenceRestore: true
+        disablePersistenceRestore: true,
+        disableLiveFileMonitoring: true
     )
     .environmentObject(FileOpenState())
 }
 
 #Preview("App - Empty") {
-    ContentView(disablePersistenceRestore: true)
+    ContentView(
+        disablePersistenceRestore: true,
+        disableLiveFileMonitoring: true
+    )
         .environmentObject(FileOpenState())
 }
 
 #Preview("Detail - Preview") {
     NavigationStack {
-        DetailPreviewPane(file: ContentViewPreviewData.excerptFile, mode: .preview)
-            .navigationTitle(ContentViewPreviewData.excerptFile.fileName)
+        DetailPreviewPane(file: ContentViewPreviewData.fullFile, mode: .preview)
+            .navigationTitle(ContentViewPreviewData.fullFile.fileName)
     }
 }
 
 #Preview("Detail - Source") {
     NavigationStack {
-        DetailPreviewPane(file: ContentViewPreviewData.excerptFile, mode: .source)
-            .navigationTitle(ContentViewPreviewData.excerptFile.fileName)
+        DetailPreviewPane(file: ContentViewPreviewData.fullFile, mode: .source)
+            .navigationTitle(ContentViewPreviewData.fullFile.fileName)
     }
 }
 
