@@ -6,6 +6,7 @@ import SwiftUI
 
 struct MarkdownBlocksView: View {
     let source: String
+    var selections: [MarkdownSelectionRange] = []
 
     var body: some View {
         ScrollView {
@@ -15,15 +16,26 @@ struct MarkdownBlocksView: View {
     }
 
     private var blocksContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(MarkdownBlockParser.parse(source), id: \.id) { block in
-                switch block.kind {
+        let blocks = MarkdownBlockParser.parse(source)
+        return VStack(alignment: .leading, spacing: 14) {
+            ForEach(blocks, id: \.id) { block in
+                blockView(block)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: MarkdownBlock) -> some View {
+        switch block.kind {
                 case .heading(let level, let text):
-                    Text(inlineAttributed(text))
+                    Text(inlineAttributed(text, highlights: selectedFragments))
                         .font(headingFont(level: level))
                         .fontWeight(.semibold)
                 case .paragraph(let text):
-                    Text(inlineAttributed(text))
+                    Text(inlineAttributed(text, highlights: selectedFragments))
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
                 case .list(let items):
@@ -37,7 +49,7 @@ struct MarkdownBlocksView: View {
                                     Text("•")
                                         .font(.body)
                                 }
-                                Text(inlineAttributed(item.text))
+                                Text(inlineAttributed(item.text, highlights: selectedFragments))
                                     .font(.body)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -51,7 +63,7 @@ struct MarkdownBlocksView: View {
                                 Text("\(item.order ?? (index + 1)).")
                                     .monospacedDigit()
                                     .font(.body)
-                                Text(inlineAttributed(item.text))
+                                Text(inlineAttributed(item.text, highlights: selectedFragments))
                                     .font(.body)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -65,7 +77,7 @@ struct MarkdownBlocksView: View {
                         Rectangle()
                             .fill(Color.secondary.opacity(0.4))
                             .frame(width: 4)
-                        Text(inlineAttributed(text))
+                        Text(inlineAttributed(text, highlights: selectedFragments))
                             .font(.body)
                             .italic()
                             .fixedSize(horizontal: false, vertical: true)
@@ -74,19 +86,14 @@ struct MarkdownBlocksView: View {
                     Divider()
                 case .code(let code):
                     ScrollView(.horizontal, showsIndicators: false) {
-                        Text(code)
+                        Text(highlightedCodeOverlay(code))
                             .font(.system(.body, design: .monospaced))
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .background(Color.secondary.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-            }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .textSelection(.enabled)
     }
 
     private func headingFont(level: Int) -> Font {
@@ -99,17 +106,129 @@ struct MarkdownBlocksView: View {
         }
     }
 
-    private func inlineAttributed(_ text: String) -> AttributedString {
+    private var selectedFragments: [String] {
+        sourceFragments(from: selections, source: source)
+    }
+
+    private func inlineAttributed(_ text: String, highlights: [String]) -> AttributedString {
+        let base: AttributedString
         if let attributed = try? AttributedString(
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         ) {
-            return attributed
+            base = attributed
+        } else {
+            base = AttributedString(text)
         }
-        return AttributedString(text)
+
+        return applyHighlights(to: base, fragments: highlights)
+    }
+
+    private func highlightedCodeOverlay(_ code: String) -> AttributedString {
+        applyHighlights(to: AttributedString(code), fragments: selectedFragments)
+    }
+
+    private func applyHighlights(to base: AttributedString, fragments: [String]) -> AttributedString {
+        guard !fragments.isEmpty else { return base }
+        var result = base
+        let fullText = String(result.characters)
+        guard !fullText.isEmpty else { return result }
+
+        for fragment in fragments {
+            guard !fragment.isEmpty else { continue }
+            var searchRange = fullText.startIndex..<fullText.endIndex
+            while let range = fullText.range(of: fragment, options: [], range: searchRange) {
+                if let lower = AttributedString.Index(range.lowerBound, within: result),
+                   let upper = AttributedString.Index(range.upperBound, within: result) {
+                    result[lower..<upper].backgroundColor = selectionHighlightColor
+                }
+                searchRange = range.upperBound..<fullText.endIndex
+            }
+        }
+        return result
+    }
+
+    private func sourceFragments(from ranges: [MarkdownSelectionRange], source: String) -> [String] {
+        let maxLength = source.utf16.count
+        var result: [String] = []
+
+        for range in ranges {
+            guard let clamped = range.clamped(toUTF16Length: maxLength), clamped.length > 0 else { continue }
+            guard let swiftRange = Range(clamped.nsRange, in: source) else { continue }
+            let selected = String(source[swiftRange])
+            let lines = selected.components(separatedBy: .newlines)
+            for line in lines {
+                let cleaned = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard cleaned.count >= 2 else { continue }
+                result.append(cleaned)
+
+                // Match rendered inline markdown text (for headings/paragraphs with `code`, emphasis, links, etc.).
+                let rendered = renderedInlineText(from: cleaned)
+                if rendered.count >= 2 {
+                    result.append(rendered)
+                }
+
+                let normalized = stripMarkdownPrefix(from: cleaned)
+                if normalized.count >= 2 {
+                    result.append(normalized)
+                    let normalizedRendered = renderedInlineText(from: normalized)
+                    if normalizedRendered.count >= 2 {
+                        result.append(normalizedRendered)
+                    }
+                }
+            }
+        }
+
+        // Prefer longer fragments first so highlight matching is more stable.
+        return Array(Set(result)).sorted { $0.count > $1.count }
+    }
+
+    private func stripMarkdownPrefix(from text: String) -> String {
+        var line = text
+
+        // ATX headings: "### Heading"
+        if line.hasPrefix("#") {
+            line = line.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespaces)
+            return line
+        }
+
+        // Blockquote: "> Quote"
+        if line.hasPrefix(">") {
+            return line.dropFirst().trimmingCharacters(in: .whitespaces)
+        }
+
+        // Unordered list: "- item", "* item", "+ item"
+        if let first = line.first, ["-", "*", "+"].contains(first) {
+            return line.dropFirst().trimmingCharacters(in: .whitespaces)
+        }
+
+        // Ordered list: "12. item"
+        if let dot = line.firstIndex(of: "."),
+           line[..<dot].allSatisfy(\.isNumber) {
+            let afterDot = line.index(after: dot)
+            if afterDot < line.endIndex {
+                return line[afterDot...].trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        return line
+    }
+
+    private func renderedInlineText(from markdownLine: String) -> String {
+        guard let attributed = try? AttributedString(
+            markdown: markdownLine,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) else {
+            return markdownLine
+        }
+        return String(attributed.characters).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+private let selectionHighlightColor = Color.yellow.opacity(0.35)
 
 #Preview("Blocks View") {
-    MarkdownBlocksView(source: MarkdownPreviewFixtures.excerptFile.contents)
+    MarkdownBlocksView(
+        source: MarkdownPreviewFixtures.excerptFile.contents,
+        selections: [MarkdownSelectionRange(location: 0, length: 120)]
+    )
 }

@@ -40,7 +40,9 @@ final class ContentViewModel: ObservableObject {
         // Bridge nested store updates so SwiftUI redraws when document data changes.
         store.objectWillChange
             .sink { [weak self] _ in
-                self?.objectWillChange.send()
+                Task { @MainActor in
+                    self?.objectWillChange.send()
+                }
             }
             .store(in: &cancellables)
     }

@@ -6,12 +6,16 @@ import SwiftUI
 
 struct MarkdownPreviewView: View {
     let source: String
+    var selections: [MarkdownSelectionRange] = []
 
     var body: some View {
-        MarkdownBlocksView(source: source)
+        MarkdownBlocksView(source: source, selections: selections)
     }
 }
 
 #Preview("Markdown Preview View") {
-    MarkdownPreviewView(source: MarkdownPreviewFixtures.excerptFile.contents)
+    MarkdownPreviewView(
+        source: MarkdownPreviewFixtures.excerptFile.contents,
+        selections: [MarkdownSelectionRange(location: 0, length: 120)]
+    )
 }

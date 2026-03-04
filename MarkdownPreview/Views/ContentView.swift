@@ -213,13 +213,16 @@ struct ContentView: View {
             )
         }
         return AnyView(
-            Group {
-                switch viewModel.detailMode {
-                case .preview:
-                    previewPanel
-                case .source:
-                    sourcePanel
-                }
+            ZStack(alignment: .topLeading) {
+                previewPanel
+                    .opacity(viewModel.detailMode == .preview ? 1 : 0)
+                    .allowsHitTesting(viewModel.detailMode == .preview)
+                    .accessibilityHidden(viewModel.detailMode != .preview)
+
+                sourcePanel
+                    .opacity(viewModel.detailMode == .source ? 1 : 0)
+                    .allowsHitTesting(viewModel.detailMode == .source)
+                    .accessibilityHidden(viewModel.detailMode != .source)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         )
@@ -263,8 +266,11 @@ struct ContentView: View {
 
     private var previewPanel: some View {
         Group {
-            if let file = store.currentDocument?.file {
-                MarkdownPreviewView(source: file.contents)
+            if let document = store.currentDocument {
+                MarkdownPreviewView(
+                    source: document.file.contents,
+                    selections: store.selections(for: document.id)
+                )
             }
         }
     }
@@ -297,7 +303,7 @@ struct ContentView: View {
         provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
             guard let data = item as? Data,
                   let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 viewModel.load(url: url, isCompactWidth: isCompactWidth)
             }
         }

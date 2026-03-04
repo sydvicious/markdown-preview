@@ -23,6 +23,8 @@ struct SelectableSourceTextView: UIViewRepresentable {
             guard !isApplyingSelection else { return }
             let range = textView.selectedRange
             let next = range.length > 0 ? [MarkdownSelectionRange(range)] : []
+            // Ignore transient empty selections during focus/view transitions.
+            guard !next.isEmpty else { return }
             if next != selections.wrappedValue {
                 selections.wrappedValue = next
             }
@@ -46,15 +48,19 @@ struct SelectableSourceTextView: UIViewRepresentable {
         view.font = UIFontMetrics(forTextStyle: .body).scaledFont(
             for: UIFont.monospacedSystemFont(ofSize: 16, weight: .regular)
         )
+        context.coordinator.isApplyingSelection = true
         view.text = text
         applySelection(to: view, from: selections, coordinator: context.coordinator)
+        context.coordinator.isApplyingSelection = false
         return view
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         context.coordinator.selections = $selections
         if uiView.text != text {
+            context.coordinator.isApplyingSelection = true
             uiView.text = text
+            context.coordinator.isApplyingSelection = false
         }
         applySelection(to: uiView, from: selections, coordinator: context.coordinator)
     }
@@ -64,10 +70,11 @@ struct SelectableSourceTextView: UIViewRepresentable {
         from ranges: [MarkdownSelectionRange],
         coordinator: Coordinator
     ) {
+        // Don't fight native selection gestures while user is editing selection.
+        if textView.isFirstResponder { return }
+        guard let desired = ranges.first else { return }
         let textLength = textView.text.utf16.count
-        let next = ranges.first?
-            .clamped(toUTF16Length: textLength)?
-            .nsRange ?? NSRange(location: 0, length: 0)
+        let next = desired.clamped(toUTF16Length: textLength)?.nsRange ?? NSRange(location: 0, length: 0)
         guard textView.selectedRange != next else { return }
         coordinator.isApplyingSelection = true
         textView.selectedRange = next
@@ -99,6 +106,8 @@ struct SelectableSourceTextView: NSViewRepresentable {
                 let range = (value as! NSValue).rangeValue
                 return range.length > 0 ? MarkdownSelectionRange(range) : nil
             }
+            // Ignore transient empty selections during focus/view transitions.
+            guard !next.isEmpty else { return }
             if next != selections.wrappedValue {
                 selections.wrappedValue = next
             }
@@ -129,10 +138,12 @@ struct SelectableSourceTextView: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        context.coordinator.isApplyingSelection = true
         textView.string = text
 
         scrollView.documentView = textView
         applySelection(to: textView, from: selections, coordinator: context.coordinator)
+        context.coordinator.isApplyingSelection = false
         return scrollView
     }
 
@@ -140,7 +151,9 @@ struct SelectableSourceTextView: NSViewRepresentable {
         context.coordinator.selections = $selections
         guard let textView = nsView.documentView as? NSTextView else { return }
         if textView.string != text {
+            context.coordinator.isApplyingSelection = true
             textView.string = text
+            context.coordinator.isApplyingSelection = false
         }
         applySelection(to: textView, from: selections, coordinator: context.coordinator)
     }
@@ -150,6 +163,8 @@ struct SelectableSourceTextView: NSViewRepresentable {
         from ranges: [MarkdownSelectionRange],
         coordinator: Coordinator
     ) {
+        // Avoid resetting selection while the text view is actively focused.
+        if textView.window?.firstResponder === textView { return }
         let textLength = textView.string.utf16.count
         var nsRanges = ranges.compactMap { $0.clamped(toUTF16Length: textLength)?.nsRange }
         if nsRanges.isEmpty {
