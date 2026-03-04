@@ -11,6 +11,7 @@ Format:
 - Removed obsolete table HTML/CSS builder utility (`MarkdownTableHTMLBuilder.swift`).
 - Fixed macOS scroll-wheel behavior when moving vertically past table blocks.
 - Improved rendering performance; table-heavy documents now scroll and render noticeably faster with the `Grid` implementation.
+- Updated preview selection highlight color to use system semantic colors so it better matches Source selection and adapts to appearance/accessibility settings.
 
 ## 2026-03-03
 
