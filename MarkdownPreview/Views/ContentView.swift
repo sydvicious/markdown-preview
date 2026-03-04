@@ -269,7 +269,10 @@ struct ContentView: View {
             if let document = store.currentDocument {
                 MarkdownPreviewView(
                     source: document.file.contents,
-                    selections: store.selections(for: document.id)
+                    selections: Binding(
+                        get: { store.selections(for: document.id) },
+                        set: { store.setSelections($0, for: document.id, text: document.file.contents) }
+                    )
                 )
             }
         }
