@@ -30,6 +30,7 @@ struct MarkdownBlock: Identifiable {
 
     let id = UUID()
     let kind: Kind
+    let lineRange: Range<Int>
 }
 
 struct MarkdownListItem: Identifiable {
@@ -45,41 +46,70 @@ struct MarkdownBlockParser {
         let lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
+        var paragraphStartLine: Int?
         var listItems: [MarkdownListItem] = []
+        var listStartLine: Int?
         var orderedListItems: [MarkdownListItem] = []
+        var orderedListStartLine: Int?
         var quoteLines: [String] = []
+        var quoteStartLine: Int?
         var code: [String] = []
+        var codeStartLine: Int?
         var inCodeFence = false
 
-        func flushParagraph() {
-            guard !paragraph.isEmpty else { return }
-            blocks.append(.init(kind: .paragraph(paragraph.joined(separator: " "))))
+        func flushParagraph(currentLine: Int) {
+            guard !paragraph.isEmpty, let start = paragraphStartLine else { return }
+            blocks.append(
+                .init(
+                    kind: .paragraph(paragraph.joined(separator: " ")),
+                    lineRange: start..<currentLine
+                )
+            )
             paragraph.removeAll()
+            paragraphStartLine = nil
         }
 
-        func flushList() {
-            guard !listItems.isEmpty else { return }
-            blocks.append(.init(kind: .list(listItems)))
+        func flushList(currentLine: Int) {
+            guard !listItems.isEmpty, let start = listStartLine else { return }
+            blocks.append(
+                .init(
+                    kind: .list(listItems),
+                    lineRange: start..<currentLine
+                )
+            )
             listItems.removeAll()
+            listStartLine = nil
         }
 
-        func flushOrderedList() {
-            guard !orderedListItems.isEmpty else { return }
-            blocks.append(.init(kind: .orderedList(orderedListItems)))
+        func flushOrderedList(currentLine: Int) {
+            guard !orderedListItems.isEmpty, let start = orderedListStartLine else { return }
+            blocks.append(
+                .init(
+                    kind: .orderedList(orderedListItems),
+                    lineRange: start..<currentLine
+                )
+            )
             orderedListItems.removeAll()
+            orderedListStartLine = nil
         }
 
-        func flushQuote() {
-            guard !quoteLines.isEmpty else { return }
-            blocks.append(.init(kind: .blockquote(quoteLines.joined(separator: "\n"))))
+        func flushQuote(currentLine: Int) {
+            guard !quoteLines.isEmpty, let start = quoteStartLine else { return }
+            blocks.append(
+                .init(
+                    kind: .blockquote(quoteLines.joined(separator: "\n")),
+                    lineRange: start..<currentLine
+                )
+            )
             quoteLines.removeAll()
+            quoteStartLine = nil
         }
 
-        func flushAll() {
-            flushParagraph()
-            flushList()
-            flushOrderedList()
-            flushQuote()
+        func flushAll(currentLine: Int) {
+            flushParagraph(currentLine: currentLine)
+            flushList(currentLine: currentLine)
+            flushOrderedList(currentLine: currentLine)
+            flushQuote(currentLine: currentLine)
         }
 
         var index = 0
@@ -87,10 +117,18 @@ struct MarkdownBlockParser {
             let line = lines[index]
 
             if line.hasPrefix("```") {
-                flushAll()
+                flushAll(currentLine: index)
                 if inCodeFence {
-                    blocks.append(.init(kind: .code(code.joined(separator: "\n"))))
+                    blocks.append(
+                        .init(
+                            kind: .code(code.joined(separator: "\n")),
+                            lineRange: (codeStartLine ?? index)..<index
+                        )
+                    )
                     code.removeAll()
+                    codeStartLine = nil
+                } else {
+                    codeStartLine = index + 1
                 }
                 inCodeFence.toggle()
                 index += 1
@@ -104,76 +142,108 @@ struct MarkdownBlockParser {
             }
 
             if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                flushAll()
+                flushAll(currentLine: index)
                 index += 1
                 continue
             }
 
             if let setextHeading = parseSetextHeading(from: lines, startIndex: index) {
-                flushAll()
-                blocks.append(.init(kind: .heading(level: setextHeading.level, text: setextHeading.text)))
+                flushAll(currentLine: index)
+                blocks.append(
+                    .init(
+                        kind: .heading(level: setextHeading.level, text: setextHeading.text),
+                        lineRange: index..<(index + 2)
+                    )
+                )
                 index += 2
                 continue
             }
 
             if let tableResult = parseTable(from: lines, startIndex: index) {
-                flushAll()
-                blocks.append(.init(kind: .table(tableResult.table)))
+                flushAll(currentLine: index)
+                blocks.append(
+                    .init(
+                        kind: .table(tableResult.table),
+                        lineRange: index..<tableResult.nextIndex
+                    )
+                )
                 index = tableResult.nextIndex
                 continue
             }
 
             if let heading = parseHeading(line) {
-                flushAll()
-                blocks.append(.init(kind: .heading(level: heading.level, text: heading.text)))
+                flushAll(currentLine: index)
+                blocks.append(
+                    .init(
+                        kind: .heading(level: heading.level, text: heading.text),
+                        lineRange: index..<(index + 1)
+                    )
+                )
                 index += 1
                 continue
             }
 
             if let item = parseListItem(line) {
-                flushParagraph()
-                flushOrderedList()
-                flushQuote()
+                flushParagraph(currentLine: index)
+                flushOrderedList(currentLine: index)
+                flushQuote(currentLine: index)
+                if listStartLine == nil {
+                    listStartLine = index
+                }
                 listItems.append(item)
                 index += 1
                 continue
             }
 
             if let item = parseOrderedListItem(line) {
-                flushParagraph()
-                flushList()
-                flushQuote()
+                flushParagraph(currentLine: index)
+                flushList(currentLine: index)
+                flushQuote(currentLine: index)
+                if orderedListStartLine == nil {
+                    orderedListStartLine = index
+                }
                 orderedListItems.append(item)
                 index += 1
                 continue
             }
 
             if let quote = parseBlockquote(line) {
-                flushParagraph()
-                flushList()
-                flushOrderedList()
+                flushParagraph(currentLine: index)
+                flushList(currentLine: index)
+                flushOrderedList(currentLine: index)
+                if quoteStartLine == nil {
+                    quoteStartLine = index
+                }
                 quoteLines.append(quote)
                 index += 1
                 continue
             }
 
             if parseRule(line) {
-                flushAll()
-                blocks.append(.init(kind: .rule))
+                flushAll(currentLine: index)
+                blocks.append(.init(kind: .rule, lineRange: index..<(index + 1)))
                 index += 1
                 continue
             }
 
-            flushList()
-            flushOrderedList()
-            flushQuote()
+            flushList(currentLine: index)
+            flushOrderedList(currentLine: index)
+            flushQuote(currentLine: index)
+            if paragraphStartLine == nil {
+                paragraphStartLine = index
+            }
             paragraph.append(line.trimmingCharacters(in: .whitespaces))
             index += 1
         }
 
-        flushAll()
+        flushAll(currentLine: lines.count)
         if !code.isEmpty {
-            blocks.append(.init(kind: .code(code.joined(separator: "\n"))))
+            blocks.append(
+                .init(
+                    kind: .code(code.joined(separator: "\n")),
+                    lineRange: (codeStartLine ?? lines.count)..<lines.count
+                )
+            )
         }
         return blocks
     }

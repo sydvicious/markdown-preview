@@ -4,6 +4,13 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-03-03
+
+- Implemented cross-platform source text selection plumbing and persisted selections in the document session model.
+- Synced source selections into preview highlighting, including heading normalization so markdown heading syntax maps to rendered heading text.
+- Fixed selection loss when switching between Preview and Source by keeping both panes mounted and toggling visibility instead of recreating views.
+- Stabilized selection behavior by ignoring transient empty selection updates emitted during focus/view transitions.
+
 ## 2026-02-23
 
 - Fixed iOS/iPadOS open-in-place behavior for iCloud files and restored use of real source URLs (`UIDocumentPicker` with `asCopy: false`).

@@ -75,11 +75,11 @@ struct MarkdownTableWebView: UIViewRepresentable {
                 if let dictionary = result as? [String: Any] {
                     self.applyTableSize(from: dictionary)
                 } else if let value = result as? CGFloat {
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         self.contentHeight.wrappedValue = max(44, value)
                     }
                 } else if let number = result as? NSNumber {
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         self.contentHeight.wrappedValue = max(44, CGFloat(truncating: number))
                     }
                 }
@@ -91,11 +91,11 @@ struct MarkdownTableWebView: UIViewRepresentable {
             if let dictionary = message.body as? [String: Any] {
                 applyTableSize(from: dictionary)
             } else if let value = message.body as? CGFloat {
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self.contentHeight.wrappedValue = max(44, value)
                 }
             } else if let number = message.body as? NSNumber {
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self.contentHeight.wrappedValue = max(44, CGFloat(truncating: number))
                 }
             }
@@ -104,7 +104,7 @@ struct MarkdownTableWebView: UIViewRepresentable {
         private func applyTableSize(from dictionary: [String: Any]) {
             let heightValue = (dictionary["height"] as? NSNumber)?.doubleValue ?? 44
             let widthValue = (dictionary["width"] as? NSNumber)?.doubleValue ?? 120
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self.contentHeight.wrappedValue = max(44, CGFloat(heightValue))
                 self.contentWidth.wrappedValue = max(120, CGFloat(widthValue))
             }
@@ -173,11 +173,11 @@ struct MarkdownTableWebView: NSViewRepresentable {
                 if let dictionary = result as? [String: Any] {
                     self.applyTableSize(from: dictionary)
                 } else if let value = result as? CGFloat {
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         self.contentHeight.wrappedValue = max(44, value)
                     }
                 } else if let number = result as? NSNumber {
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         self.contentHeight.wrappedValue = max(44, CGFloat(truncating: number))
                     }
                 }
@@ -189,11 +189,11 @@ struct MarkdownTableWebView: NSViewRepresentable {
             if let dictionary = message.body as? [String: Any] {
                 applyTableSize(from: dictionary)
             } else if let value = message.body as? CGFloat {
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self.contentHeight.wrappedValue = max(44, value)
                 }
             } else if let number = message.body as? NSNumber {
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self.contentHeight.wrappedValue = max(44, CGFloat(truncating: number))
                 }
             }
@@ -202,7 +202,7 @@ struct MarkdownTableWebView: NSViewRepresentable {
         private func applyTableSize(from dictionary: [String: Any]) {
             let heightValue = (dictionary["height"] as? NSNumber)?.doubleValue ?? 44
             let widthValue = (dictionary["width"] as? NSNumber)?.doubleValue ?? 120
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self.contentHeight.wrappedValue = max(44, CGFloat(heightValue))
                 self.contentWidth.wrappedValue = max(120, CGFloat(widthValue))
             }

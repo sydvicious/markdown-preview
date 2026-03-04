@@ -104,13 +104,17 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ## 25) Implement search
 - Add in-document search for markdown source and/or rendered preview.
-- Blocked by text-selection behavior decisions (shared dependency with copy behavior).
+- Depends on current selection model and upcoming copy behavior details.
 
-## 26) Investigate text selection for copy
-- Clarify expected text-selection behavior across the app.
-- Determine how text selection should work across tables.
-- Evaluate whether table rendering should move away from `WKWebView` to enable reliable selection/copy behavior.
-- This investigation blocks both Search and Copy features.
+## 26) [COMPLETED] Implement baseline text selection model
+- Added source selection persistence in the shared document session model.
+- Synced source selection into preview highlighting (including headings).
+- Preserved selection when switching between Source and Preview across iOS/macOS.
+
+## 27) Selection/copy follow-ups
+- Add multi-range selection in source and preview parity where feasible.
+- Implement copy export in plain text and rich text formats.
+- Define table-granularity selection behavior (whole table/row/column/cell/text).
 
 ## BUGS
 
@@ -128,6 +132,7 @@ This document tracks planned work for MarkdownPreviewApp.
   `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Utilities/MarkdownTableHTMLBuilder.swift`.
 - Added `#Preview` coverage across view files, with shared preview fixtures in:
   `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Preview Content/MarkdownPreviewFixtures.swift`.
+- Added shared selection model plumbing across source and preview views, including selection retention when switching modes.
 
 Notes:
 - Printing will require platform-specific integration (NSPrintOperation on macOS, UIPrintInteractionController on iPadOS)
