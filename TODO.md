@@ -93,6 +93,14 @@ This document tracks planned work for MarkdownPreviewApp.
   - Implement copy export in plain text and rich text formats.
   - Define table-granularity selection behavior (whole table/row/column/cell/text).
 
+### Add Copy button to quote and table blocks.
+  - Expand the rounded-rect container to include a top strip.
+  - In that top strip, add a right-aligned `Copy <icon>` action using the standard web-style copy icon.
+  - On tap/click, copy the contents of that quote block or table block.
+  - Set the current selection to the corresponding quote/table block in source.
+  - Initial behavior: copy the original source block as plain text.
+  - Follow-up behavior: also place an attributed version on the clipboard as RTF.
+
 ### BUG: Investigate why macOS sometimes opens a second list window when a file is double-clicked.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*
