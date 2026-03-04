@@ -10,6 +10,7 @@ Format:
 - Removed `WKWebView` table rendering path (`MarkdownTableWebView.swift`).
 - Removed obsolete table HTML/CSS builder utility (`MarkdownTableHTMLBuilder.swift`).
 - Fixed macOS scroll-wheel behavior when moving vertically past table blocks.
+- Improved rendering performance; table-heavy documents now scroll and render noticeably faster with the `Grid` implementation.
 
 ## 2026-03-03
 

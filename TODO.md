@@ -101,6 +101,10 @@ This document tracks planned work for MarkdownPreviewApp.
   - Initial behavior: copy the original source block as plain text.
   - Follow-up behavior: also place an attributed version on the clipboard as RTF.
 
+### Make the grid-based table view show the selection correctly.
+
+### Fix selection color in Preview to match the selection color in the Source view.
+
 ### BUG: Investigate why macOS sometimes opens a second list window when a file is double-clicked.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*
