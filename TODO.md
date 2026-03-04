@@ -2,141 +2,97 @@
 
 This document tracks planned work for MarkdownPreviewApp.
 
-## 1) Support Image References
+### Support image references.
 
-## 2) [COMPLETED] Investigate why Mac does not know this opens .md files.
+### Allow editing in Source view.
+  - On iPad and Mac, investigate showing preview and source at the same time.
 
-## 3) Allow editing of the text in the Source view.
-- On iPad and Mac, investigate showing both preview and source at the same time.
+### File menu (macOS and iPad).
+  - Open (Cmd-O): present a file picker filtering for `.md`.
+  - Print (Cmd-P): show system print panel and print current document/preview.
+  - Quit (Cmd-Q): quit the app (macOS only).
 
-## 4) File menu (macOS and iPad)
-- Open (Cmd-O): Present a file picker filtering for .md files
-- Print (Cmd-P): Show system print panel and print current document/preview
-- Quit (Cmd-Q): Quit the app (macOS only)
+### macOS startup behavior.
+  - If there are no valid files after restore, automatically present the file picker.
 
-## 5) macOS startup behavior
-- If there are no valid files after restore, automatically present the file picker
+### macOS redesign as a document-based app.
+  - Use `DocumentGroup` (or `NSDocument`) so each document opens in its own window.
+  - Replace in-app file list with system Recents.
+  - Opening a file (for example, double-click in Finder) opens a new window for that doc.
 
-## 6) [COMPLETED] iPhone/iPad document associations
-- Configure Info.plist CFBundleDocumentTypes to open .md files
-- Support opening in place and handle security-scoped URLs
+### New from clipboard.
+  - File -> New (Cmd-N): if clipboard has text, create a new unsaved document with that content.
+  - File -> Save (Cmd-S): prompt to save as `.md`.
 
-## 7) [COMPLETED] Adopt MVVM
-- Introduce a ViewModel to manage open/restore/persist, selection, and errors
-- Keep MarkdownFile as the model; keep SwiftUI views focused on rendering
+### Open remote URLs without downloading.
+  - If `.onOpenURL` receives an `http(s)` link to a markdown file, fetch into memory and open in a new window.
+  - Provide Save to persist locally if desired.
 
-## 8) macOS redesign as a document-based app
-- Use DocumentGroup (or NSDocument) so each document opens in its own window
-- Replace in-app file list with system Recents
-- Opening a file (e.g., double-click in Finder) opens a new window for that doc
+### Investigate iPad multi-window mode.
+  - Evaluate scene/window behavior when opening multiple markdown files in Split View/Stage Manager.
+  - Decide whether to keep single-window split navigation or support multiple app windows on iPadOS.
 
-## 9) New from clipboard
-- File -> New (Cmd-N): If clipboard has text, create a new unsaved document with that content
-- File -> Save (Cmd-S): Prompt to save as .md
+### Support side-by-side Preview and Source on Mac and iPad.
+  - Add a layout mode that shows rendered preview and source simultaneously.
+  - Ensure the mode works in regular-width environments on macOS and iPadOS.
 
-## 10) Open remote URLs without downloading
-- If .onOpenURL receives an http(s) link to a markdown file, fetch into memory and open in a new window
-- Provide Save to persist locally if desired
+### Add text size controls with per-file persistence.
+  - Add controls to increase/decrease text size for markdown preview content.
+  - Persist text size settings per file and restore the value when that file is reopened.
 
-## 11) Investigate iPad multi-window mode
-- Evaluate scene/window behavior when opening multiple markdown files in Split View/Stage Manager.
-- Decide whether to keep single-window split navigation or support multiple app windows on iPadOS.
+### Add clipboard support.
+  - Add actions to paste/open markdown text directly from the clipboard.
+  - Define copy behavior for source text and rendered preview content on each platform.
 
-## 12) Support side-by-side Preview and Source on Mac and iPad
-- Add a layout mode that shows rendered preview and source simultaneously.
-- Ensure the mode works in regular-width environments on macOS and iPadOS.
+### Improve project documentation and samples.
+  - Make a good `SAMPLE.md` file displaying features.
+  - Make a better, more consumer-based `README.md` with screenshots displaying features.
+  - Split out developer instructions to `CONTRIBUTING.md`.
 
-## 13) Add text size controls with per-file persistence
-- Add controls to increase/decrease text size for markdown preview content.
-- Persist text size settings per file and restore the value when that file is reopened.
+### Get ready for TestFlight.
+  - Investigate how to submit to App Store as an individual.
+  - Submit app to App Store.
+  - Set up TestFlight.
+  - Capture and prepare App Store screenshots for iPhone, iPad, and Mac.
 
-## 14) Support remote URIs to `.md` files
-- Open `http(s)` URIs that point to markdown files directly in the app.
-- Handle redirects, content-type mismatches, and network failures with user-visible errors.
+### Rename and simplify `ContentView.swift`.
+  - Consider renaming `ContentView.swift` to a clearer top-level container name.
+  - Consider combining this cleanup with YMMV-related work.
 
-## 15) Add clipboard support
-- Add actions to paste/open markdown text directly from the clipboard.
-- Define copy behavior for source text and rendered preview content on each platform.
+### Hardening for production use.
+  - Improve handling/performance for very large markdown files.
+  - Add robustness for markdown edge cases and malformed input across parser/renderer paths.
 
-## 16) Improve project documentation and samples
-- Make a good `SAMPLE.md` file displaying features.
-- Make a better, more consumer-based `README.md` with screenshots displaying features.
-- Split out developer instructions to `CONTRIBUTING.md`.
+### Internationalization (i18n) and localization (l10n).
+  - Localize all user-facing strings across iOS, iPadOS, and macOS.
+  - Verify layout/text behavior for longer localized strings and right-to-left languages.
 
-## 17) Get ready for TestFlight
-- Investigate how to submit to AppStore as an individual.
-- Submit apps to app store.
-- Setup TestFlight.
-- Capture and prepare App Store screenshots for iPhone, iPad, and Mac.
+### Accessibility testing.
+  - Run VoiceOver, Dynamic Type, contrast, and keyboard navigation checks on all platforms.
+  - Fix accessibility labels/traits/focus order issues and add regression checks.
 
-## 18) Break up and rename `ContentView.swift`
-- [COMPLETED] Split `ContentView.swift` into smaller, focused files:
-  `DetailPreviewPane`, `MarkdownPreviewView`, `MarkdownSourceView`,
-  `MarkdownBlocksView`, `MarkdownDocumentPicker`, `MarkdownTableBlockView`,
-  and `MarkdownTableWebView`.
-- Remaining: consider renaming `ContentView.swift` to a clearer top-level container name.
-- Consider combining this refactor with the YMMV-related work.
+### Async file loading off `@Main`.
+  - Read source files in a separate task, not on `@Main`.
+  - If loading takes longer than 0.5 seconds, show a spinner with "Loading...".
+  - Investigate checking file existence and polling in a separate `Task` as well.
+  - Schedule this work after the YMMV-related refactor work.
 
-## 19) Hardening for production use
-- Improve handling/performance for very large markdown files.
-- Add robustness for markdown edge cases and malformed input across parser/renderer paths.
+### Add list title.
+  - Add the title `Markdown Preview` to the list panel.
 
-## 20) Internationalization (i18n) and localization (l10n)
-- Localize all user-facing strings across iOS, iPadOS, and macOS.
-- Verify layout/text behavior for longer localized strings and right-to-left languages.
+### Add list toolbar menu.
+  - Add a hamburger menu next to the `+` button.
+  - Include a menu entry that says `©2026 Syd Polk`.
 
-## 21) Accessibility testing
-- Run VoiceOver, Dynamic Type, contrast, and keyboard navigation checks on all platforms.
-- Fix accessibility labels/traits/focus order issues and add regression checks.
+### Implement search.
+  - Add in-document search for markdown source and/or rendered preview.
+  - Depends on current selection model and final copy behavior details.
 
-## 22) Async file loading off `@Main`
-- Read source files in a separate task, not on `@Main`.
-- If loading takes longer than 0.5 seconds, show a spinner with "Loading...".
-- Investigate checking file existence and polling in a separate `Task` as well.
-- Schedule this work after the YMMV-related refactor work.
+### Selection/copy follow-ups.
+  - Add multi-range selection in source and preview parity where feasible.
+  - Implement copy export in plain text and rich text formats.
+  - Define table-granularity selection behavior (whole table/row/column/cell/text).
 
-## 23) Add list title
-- Add the title `Markdown Preview` to the list panel.
-
-## 24) Add list toolbar menu
-- Add a hamburger menu next to the `+` button.
-- Include a menu entry that says `©2026 Syd Polk`.
-
-## 25) Implement search
-- Add in-document search for markdown source and/or rendered preview.
-- Depends on current selection model and upcoming copy behavior details.
-
-## 26) [COMPLETED] Implement baseline text selection model
-- Added source selection persistence in the shared document session model.
-- Synced source selection into preview highlighting (including headings).
-- Preserved selection when switching between Source and Preview across iOS/macOS.
-
-## 27) Selection/copy follow-ups
-- Add multi-range selection in source and preview parity where feasible.
-- Implement copy export in plain text and rich text formats.
-- Define table-granularity selection behavior (whole table/row/column/cell/text).
-
-## BUGS
-
-- Investigate why macOS sometimes opens a second list window when a file is double-clicked.
-
-## Completed Refactors (2026-03-03)
-
-- Separated major views into dedicated files (one primary `struct ...: View` per file).
-- Extracted markdown parsing into `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Utilities/MarkdownBlockParser.swift`.
-- Introduced and integrated `ContentViewModel` for view-level state/actions.
-- Split table rendering components into:
-  `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Views/MarkdownTableBlockView.swift`
-  and `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Views/MarkdownTableWebView.swift`.
-- Extracted shared table HTML/CSS generation into:
-  `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Utilities/MarkdownTableHTMLBuilder.swift`.
-- Added `#Preview` coverage across view files, with shared preview fixtures in:
-  `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Preview Content/MarkdownPreviewFixtures.swift`.
-- Added shared selection model plumbing across source and preview views, including selection retention when switching modes.
-
-Notes:
-- Printing will require platform-specific integration (NSPrintOperation on macOS, UIPrintInteractionController on iPadOS)
-- Keep iOS/iPadOS on the split-view design while macOS migrates to document-based
-- Info.plist updates are required for document types and opening-in-place
+### BUG: Investigate why macOS sometimes opens a second list window when a file is double-clicked.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*

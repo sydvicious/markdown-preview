@@ -4,8 +4,20 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-03-04
+
+- Replaced markdown table rendering with native SwiftUI `Grid`-based layout, using horizontal scrolling for overflow.
+- Removed `WKWebView` table rendering path (`MarkdownTableWebView.swift`).
+- Removed obsolete table HTML/CSS builder utility (`MarkdownTableHTMLBuilder.swift`).
+- Fixed macOS scroll-wheel behavior when moving vertically past table blocks.
+
 ## 2026-03-03
 
+- Completed major view/model refactor:
+  - split major views into dedicated files (one primary `struct ...: View` per file),
+  - extracted markdown parsing into `MarkdownBlockParser`,
+  - introduced and integrated `ContentViewModel`,
+  - expanded `#Preview` coverage with shared preview fixtures.
 - Implemented cross-platform source text selection plumbing and persisted selections in the document session model.
 - Synced source selections into preview highlighting, including heading normalization so markdown heading syntax maps to rendered heading text.
 - Fixed selection loss when switching between Preview and Source by keeping both panes mounted and toggling visibility instead of recreating views.
@@ -14,7 +26,7 @@ Format:
 ## 2026-02-23
 
 - Fixed iOS/iPadOS open-in-place behavior for iCloud files and restored use of real source URLs (`UIDocumentPicker` with `asCopy: false`).
-- Completed iPhone/iPad document association support (`.md`/UTI declaration + open-in-place handling), and marked TODO item #6 as complete.
+- Completed iPhone/iPad document association support (`.md`/UTI declaration + open-in-place handling).
 - Added a dedicated macOS app `Info.plist` (`Info-macOS.plist`) and build wiring so Finder/Open With recognizes `.md` files.
 - Added a markdown table sample to the preview source document (`README.md`) so SwiftUI previews exercise table rendering.
 - Fixed preview instability by disabling live file monitoring via dependency injection in preview configurations.
