@@ -20,13 +20,7 @@ struct DetailPreviewPane: View {
                 case .preview:
                     MarkdownBlocksView(source: file.contents)
                 case .source:
-                    ScrollView {
-                        Text(file.contents)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(16)
-                            .textSelection(.enabled)
-                    }
+                    MarkdownSourceView(contents: file.contents, selections: .constant([]))
                 }
             } else {
                 Color.clear

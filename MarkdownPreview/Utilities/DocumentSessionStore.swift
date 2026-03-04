@@ -31,6 +31,7 @@ final class DocumentSessionStore: ObservableObject {
     @Published var openedDocuments: [OpenedDocument]
     @Published var selectedDocumentID: OpenedDocument.ID?
     @Published var knownModificationDates: [String: Date] = [:]
+    @Published private(set) var selectionsByDocumentID: [String: [MarkdownSelectionRange]] = [:]
     @Published var missingActiveDocumentAlert: MissingActiveDocumentAlert?
 
     private(set) var didRestoreDocuments = false
@@ -96,7 +97,10 @@ final class DocumentSessionStore: ObservableObject {
     func deleteDocuments(at offsets: IndexSet, isCompactWidth: Bool) {
         let idsToDelete = offsets.map { sortedDocuments[$0].id }
         openedDocuments.removeAll(where: { idsToDelete.contains($0.id) })
-        idsToDelete.forEach { knownModificationDates.removeValue(forKey: $0) }
+        idsToDelete.forEach {
+            knownModificationDates.removeValue(forKey: $0)
+            selectionsByDocumentID.removeValue(forKey: $0)
+        }
         if let selectedDocumentID, idsToDelete.contains(selectedDocumentID) {
             self.selectedDocumentID = isCompactWidth ? nil : sortedDocuments.first?.id
         }
@@ -107,6 +111,7 @@ final class DocumentSessionStore: ObservableObject {
         let wasSelected = selectedDocumentID == id
         openedDocuments.removeAll(where: { $0.id == id })
         knownModificationDates.removeValue(forKey: id)
+        selectionsByDocumentID.removeValue(forKey: id)
 
         var shouldShowSidebar = false
         if wasSelected {
@@ -118,6 +123,20 @@ final class DocumentSessionStore: ObservableObject {
             }
         }
         return shouldShowSidebar
+    }
+
+    func selections(for documentID: String) -> [MarkdownSelectionRange] {
+        selectionsByDocumentID[documentID] ?? []
+    }
+
+    func setSelections(_ ranges: [MarkdownSelectionRange], for documentID: String, text: String) {
+        let maxLength = text.utf16.count
+        let sanitized = ranges.compactMap { $0.clamped(toUTF16Length: maxLength) }
+        if sanitized.isEmpty {
+            selectionsByDocumentID.removeValue(forKey: documentID)
+        } else {
+            selectionsByDocumentID[documentID] = sanitized
+        }
     }
 
     func restorePersistedDocumentsIfNeeded(isCompactWidth: Bool) {
@@ -218,6 +237,7 @@ final class DocumentSessionStore: ObservableObject {
 
         guard loaded.file.contents != document.file.contents else { return }
         openedDocuments[index].file = loaded.file
+        clampSelections(for: document.id, text: loaded.file.contents)
     }
 
     private func handleMissingDocument(_ document: OpenedDocument, alertIfMissing: Bool, isCompactWidth: Bool) {
@@ -272,5 +292,16 @@ final class DocumentSessionStore: ObservableObject {
     private func currentModificationDate(for url: URL) -> Date? {
         let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
         return values?.contentModificationDate
+    }
+
+    private func clampSelections(for documentID: String, text: String) {
+        guard let current = selectionsByDocumentID[documentID] else { return }
+        let maxLength = text.utf16.count
+        let clamped = current.compactMap { $0.clamped(toUTF16Length: maxLength) }
+        if clamped.isEmpty {
+            selectionsByDocumentID.removeValue(forKey: documentID)
+        } else {
+            selectionsByDocumentID[documentID] = clamped
+        }
     }
 }

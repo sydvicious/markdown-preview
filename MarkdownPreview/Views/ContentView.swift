@@ -249,8 +249,14 @@ struct ContentView: View {
 
     private var sourcePanel: some View {
         Group {
-            if let file = store.currentDocument?.file {
-                MarkdownSourceView(contents: file.contents)
+            if let document = store.currentDocument {
+                MarkdownSourceView(
+                    contents: document.file.contents,
+                    selections: Binding(
+                        get: { store.selections(for: document.id) },
+                        set: { store.setSelections($0, for: document.id, text: document.file.contents) }
+                    )
+                )
             }
         }
     }

@@ -6,18 +6,16 @@ import SwiftUI
 
 struct MarkdownSourceView: View {
     let contents: String
+    @Binding var selections: [MarkdownSelectionRange]
 
     var body: some View {
-        ScrollView {
-            Text(contents)
-                .font(.system(.body, design: .monospaced))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-                .textSelection(.enabled)
-        }
+        SelectableSourceTextView(text: contents, selections: $selections)
     }
 }
 
 #Preview("Markdown Source View") {
-    MarkdownSourceView(contents: MarkdownPreviewFixtures.excerptFile.contents)
+    MarkdownSourceView(
+        contents: MarkdownPreviewFixtures.excerptFile.contents,
+        selections: .constant([MarkdownSelectionRange(location: 0, length: 24)])
+    )
 }
