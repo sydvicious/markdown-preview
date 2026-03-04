@@ -7,6 +7,7 @@ Format:
 ## 2026-02-23
 
 - Fixed iOS/iPadOS open-in-place behavior for iCloud files and restored use of real source URLs (`UIDocumentPicker` with `asCopy: false`).
+- Completed iPhone/iPad document association support (`.md`/UTI declaration + open-in-place handling), and marked TODO item #6 as complete.
 - Added a dedicated macOS app `Info.plist` (`Info-macOS.plist`) and build wiring so Finder/Open With recognizes `.md` files.
 - Added a markdown table sample to the preview source document (`README.md`) so SwiftUI previews exercise table rendering.
 - Fixed preview instability by disabling live file monitoring via dependency injection in preview configurations.

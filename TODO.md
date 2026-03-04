@@ -17,11 +17,11 @@ This document tracks planned work for MarkdownPreviewApp.
 ## 5) macOS startup behavior
 - If there are no valid files after restore, automatically present the file picker
 
-## 6) iPhone/iPad document associations
+## 6) [COMPLETED] iPhone/iPad document associations
 - Configure Info.plist CFBundleDocumentTypes to open .md files
 - Support opening in place and handle security-scoped URLs
 
-## 7) Adopt MVVM
+## 7) [COMPLETED] Adopt MVVM
 - Introduce a ViewModel to manage open/restore/persist, selection, and errors
 - Keep MarkdownFile as the model; keep SwiftUI views focused on rendering
 
@@ -70,7 +70,11 @@ This document tracks planned work for MarkdownPreviewApp.
 - Capture and prepare App Store screenshots for iPhone, iPad, and Mac.
 
 ## 18) Break up and rename `ContentView.swift`
-- Split `ContentView.swift` into smaller, focused files with clearer names.
+- [COMPLETED] Split `ContentView.swift` into smaller, focused files:
+  `DetailPreviewPane`, `MarkdownPreviewView`, `MarkdownSourceView`,
+  `MarkdownBlocksView`, `MarkdownDocumentPicker`, `MarkdownTableBlockView`,
+  and `MarkdownTableWebView`.
+- Remaining: consider renaming `ContentView.swift` to a clearer top-level container name.
 - Consider combining this refactor with the YMMV-related work.
 
 ## 19) Hardening for production use
@@ -85,25 +89,49 @@ This document tracks planned work for MarkdownPreviewApp.
 - Run VoiceOver, Dynamic Type, contrast, and keyboard navigation checks on all platforms.
 - Fix accessibility labels/traits/focus order issues and add regression checks.
 
+## 22) Async file loading off `@Main`
+- Read source files in a separate task, not on `@Main`.
+- If loading takes longer than 0.5 seconds, show a spinner with "Loading...".
+- Investigate checking file existence and polling in a separate `Task` as well.
+- Schedule this work after the YMMV-related refactor work.
+
+## 23) Add list title
+- Add the title `Markdown Preview` to the list panel.
+
+## 24) Add list toolbar menu
+- Add a hamburger menu next to the `+` button.
+- Include a menu entry that says `©2026 Syd Polk`.
+
+## 25) Implement search
+- Add in-document search for markdown source and/or rendered preview.
+- Blocked by text-selection behavior decisions (shared dependency with copy behavior).
+
+## 26) Investigate text selection for copy
+- Clarify expected text-selection behavior across the app.
+- Determine how text selection should work across tables.
+- Evaluate whether table rendering should move away from `WKWebView` to enable reliable selection/copy behavior.
+- This investigation blocks both Search and Copy features.
+
+## BUGS
+
+- Investigate why macOS sometimes opens a second list window when a file is double-clicked.
+
+## Completed Refactors (2026-03-03)
+
+- Separated major views into dedicated files (one primary `struct ...: View` per file).
+- Extracted markdown parsing into `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Utilities/MarkdownBlockParser.swift`.
+- Introduced and integrated `ContentViewModel` for view-level state/actions.
+- Split table rendering components into:
+  `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Views/MarkdownTableBlockView.swift`
+  and `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Views/MarkdownTableWebView.swift`.
+- Extracted shared table HTML/CSS generation into:
+  `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Utilities/MarkdownTableHTMLBuilder.swift`.
+- Added `#Preview` coverage across view files, with shared preview fixtures in:
+  `/Users/jazzman/dev/github/sydvicious/MarkdownPreviewApp/MarkdownPreview/Preview Content/MarkdownPreviewFixtures.swift`.
+
 Notes:
 - Printing will require platform-specific integration (NSPrintOperation on macOS, UIPrintInteractionController on iPadOS)
 - Keep iOS/iPadOS on the split-view design while macOS migrates to document-based
 - Info.plist updates are required for document types and opening-in-place
-
-## Completed (2026-02-22)
-
-- Replaced SwiftUI table rendering with an embedded `WKWebView` table renderer.
-- Added horizontal scrolling for wide tables and auto-height reporting back to SwiftUI.
-- Added inline backtick rendering in table cells/headers.
-- Tuned iOS table typography and disabled text inflation for consistent sizing.
-- Added file-change reloading while app is running:
-  - Active file check every 1 second.
-  - All files check every 10 seconds.
-  - iOS/iPadOS checks on launch and foreground.
-- Added missing-file handling:
-  - Active missing file: modal alert, remove on OK, and iPhone returns to list.
-  - Non-active missing file: removed silently.
-- Fixed macOS app document-type registration so `.md` files are recognized in Finder/Open With.
-- Added a dedicated macOS Info.plist with markdown UTI/document type declarations.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*
