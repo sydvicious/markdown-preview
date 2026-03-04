@@ -103,6 +103,10 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Make the grid-based table view show the selection correctly.
 
+### Investigate using Liquid Glass controls.
+
+### Investigate a native visionOS (Vision Pro) app.
+
 ### BUG: Investigate why macOS sometimes opens a second list window when a file is double-clicked.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*
