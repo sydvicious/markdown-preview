@@ -103,8 +103,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Make the grid-based table view show the selection correctly.
 
-### Fix selection color in Preview to match the selection color in the Source view.
-
 ### BUG: Investigate why macOS sometimes opens a second list window when a file is double-clicked.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*

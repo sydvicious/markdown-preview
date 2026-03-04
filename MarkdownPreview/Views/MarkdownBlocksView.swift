@@ -3,6 +3,11 @@
 //
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 struct MarkdownBlocksView: View {
     let source: String
@@ -224,7 +229,16 @@ struct MarkdownBlocksView: View {
         return String(attributed.characters).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-private let selectionHighlightColor = Color.yellow.opacity(0.35)
+private var selectionHighlightColor: Color {
+    #if os(iOS)
+    // Match system tint semantics instead of hardcoded color values.
+    return Color(uiColor: .tintColor).opacity(0.28)
+    #elseif os(macOS)
+    return Color(nsColor: .selectedTextBackgroundColor)
+    #else
+    return Color.accentColor.opacity(0.30)
+    #endif
+}
 
 #Preview("Blocks View") {
     MarkdownBlocksView(
