@@ -23,8 +23,6 @@ struct SelectableSourceTextView: UIViewRepresentable {
             guard !isApplyingSelection else { return }
             let range = textView.selectedRange
             let next = range.length > 0 ? [MarkdownSelectionRange(range)] : []
-            // Ignore transient empty selections during focus/view transitions.
-            guard !next.isEmpty else { return }
             if next != selections.wrappedValue {
                 selections.wrappedValue = next
             }
@@ -106,8 +104,6 @@ struct SelectableSourceTextView: NSViewRepresentable {
                 let range = (value as! NSValue).rangeValue
                 return range.length > 0 ? MarkdownSelectionRange(range) : nil
             }
-            // Ignore transient empty selections during focus/view transitions.
-            guard !next.isEmpty else { return }
             if next != selections.wrappedValue {
                 selections.wrappedValue = next
             }

@@ -6,6 +6,13 @@ Format:
 
 ## 2026-03-04
 
+- Added reusable copyable block chrome (`Copy` action in a top strip) for quote, table, and fenced code blocks.
+- Copy actions now preserve existing user selection state (copy no longer rewrites source selection).
+- Source selection behavior updated: tap/click with no selected text now clears the shared selection model.
+- Improved copy-block container sizing:
+  - width clamps to `min(content width, available width)`,
+  - horizontal overflow scrolls inside the rounded container,
+  - layout now responds correctly to window/split-view resize in both growth and shrink directions.
 - Replaced markdown table rendering with native SwiftUI `Grid`-based layout, using horizontal scrolling for overflow.
 - Removed `WKWebView` table rendering path (`MarkdownTableWebView.swift`).
 - Removed obsolete table HTML/CSS builder utility (`MarkdownTableHTMLBuilder.swift`).
