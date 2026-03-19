@@ -4,9 +4,19 @@
 
 import SwiftUI
 
-struct MarkdownCodeBlockView: View {
-    let code: AttributedString
+struct MarkdownCodeBlockView<Content: View>: View {
+    private let content: Content
     var wrapsInHorizontalScroll: Bool = true
+
+    init(code: AttributedString, wrapsInHorizontalScroll: Bool = true) where Content == Text {
+        self.content = Text(code)
+        self.wrapsInHorizontalScroll = wrapsInHorizontalScroll
+    }
+
+    init(@ViewBuilder content: () -> Content, wrapsInHorizontalScroll: Bool = true) {
+        self.content = content()
+        self.wrapsInHorizontalScroll = wrapsInHorizontalScroll
+    }
 
     var body: some View {
         Group {
@@ -23,7 +33,7 @@ struct MarkdownCodeBlockView: View {
     }
 
     private var codeText: some View {
-        Text(code)
+        content
             .font(.system(.body, design: .monospaced))
             .padding(10)
     }
