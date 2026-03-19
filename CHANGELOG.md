@@ -4,8 +4,16 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-03-19
+
+- Brought the same coalesced preview text-segment behavior to macOS so adjacent headings, paragraphs, and list content can be selected across block boundaries there as well.
+- Kept quote blocks, fenced code blocks, tables, and rules as explicit preview selection boundaries on macOS and iOS, preserving copy-block behavior and stable table geometry.
+
 ## 2026-03-18
 
+- Restored iOS preview text selection/copy within individual rendered text blocks using native selectable text views.
+- Coalesced adjacent basic preview text blocks on iOS so selection can drag across headings, paragraphs, and list content until a quote, code block, table, or rule boundary.
+- Quote and fenced code blocks now host native selectable text content while preserving their existing copy-block chrome.
 - Added animated copy feedback for block copy actions, including immediate visual confirmation and iOS haptic feedback.
 - Tuned block copy feedback timing so the animation starts immediately on tap and clears more quickly.
 

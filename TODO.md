@@ -43,6 +43,7 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Add clipboard support.
   - Add actions to paste/open markdown text directly from the clipboard.
   - Define copy behavior for source text and rendered preview content on each platform.
+  - Copy text to the clipboard as both plain text and `RTF`.
   - Add rich-text (`RTF`) clipboard export for copy actions on quote/table/code blocks (plain-text export is already implemented).
 
 ### Improve project documentation and samples.
@@ -55,6 +56,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - Submit app to App Store.
   - Set up TestFlight.
   - Capture and prepare App Store screenshots for iPhone, iPad, and Mac.
+  - Set up a simple versioning process for `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` so release/build numbers are easy to bump consistently.
 
 ### Rename and simplify `ContentView.swift`.
   - Consider renaming `ContentView.swift` to a clearer top-level container name.
@@ -92,8 +94,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Selection/copy follow-ups.
   - Keep `Grid` as the table rendering path; do not regress table geometry while adding selection support.
-  - Coalesce adjacent non-special preview blocks (headings, paragraphs, unordered lists, ordered lists) into a single selectable preview text segment.
-  - On iOS first, render each combined text segment as one native selectable text view so selection can drag across those blocks.
   - Keep blockquote and fenced code blocks as independent preview blocks with both internal text selection and the existing Copy button.
   - Keep tables as independent preview blocks; later support selecting a whole table, row, column, cell, or text inside a cell.
   - Make source-file ranges the canonical selection model shared by Source and Preview.
