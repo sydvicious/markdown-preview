@@ -39,13 +39,9 @@ struct MarkdownBlocksView: View {
     private func blockView(_ block: MarkdownBlock) -> some View {
         switch block.kind {
                 case .heading(let level, let text):
-                    Text(inlineAttributed(text, highlights: selectedFragments))
-                        .font(headingFont(level: level))
-                        .fontWeight(.semibold)
+                    headingView(level: level, text: text)
                 case .paragraph(let text):
-                    Text(inlineAttributed(text, highlights: selectedFragments))
-                        .font(.body)
-                        .fixedSize(horizontal: false, vertical: true)
+                    bodyTextView(text)
                 case .list(let items):
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(items) { item in
@@ -57,9 +53,7 @@ struct MarkdownBlocksView: View {
                                     Text("•")
                                         .font(.body)
                                 }
-                                Text(inlineAttributed(item.text, highlights: selectedFragments))
-                                    .font(.body)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                bodyTextView(item.text)
                             }
                             .padding(.leading, CGFloat(item.indent) * 18)
                         }
@@ -71,9 +65,7 @@ struct MarkdownBlocksView: View {
                                 Text("\(item.order ?? (index + 1)).")
                                     .monospacedDigit()
                                     .font(.body)
-                                Text(inlineAttributed(item.text, highlights: selectedFragments))
-                                    .font(.body)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                bodyTextView(item.text)
                             }
                             .padding(.leading, CGFloat(item.indent) * 18)
                         }
@@ -93,9 +85,7 @@ struct MarkdownBlocksView: View {
                     MarkdownCopyableBlockContainerView(onCopy: {
                         copyBlockToClipboard(block)
                     }) {
-                        MarkdownBlockQuoteView(
-                            text: inlineAttributed(text, highlights: selectedFragments)
-                        )
+                        blockQuoteView(text)
                     }
                 case .rule:
                     Divider()
@@ -103,12 +93,73 @@ struct MarkdownBlocksView: View {
                     MarkdownCopyableBlockContainerView(onCopy: {
                         copyBlockToClipboard(block)
                     }, scrollContentHorizontally: true) {
-                        MarkdownCodeBlockView(
-                            code: highlightedCodeOverlay(code),
-                            wrapsInHorizontalScroll: false
-                        )
+                        codeBlockView(code)
                     }
         }
+    }
+
+    @ViewBuilder
+    private func headingView(level: Int, text: String) -> some View {
+        #if os(iOS)
+        SelectablePreviewTextView(
+            attributedText: inlineAttributed(text, highlights: selectedFragments),
+            baseFont: previewUIFont(textStyle: headingTextStyle(level), weight: .semibold)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        #else
+        Text(inlineAttributed(text, highlights: selectedFragments))
+            .font(headingFont(level: level))
+            .fontWeight(.semibold)
+        #endif
+    }
+
+    @ViewBuilder
+    private func bodyTextView(_ text: String) -> some View {
+        #if os(iOS)
+        SelectablePreviewTextView(
+            attributedText: inlineAttributed(text, highlights: selectedFragments),
+            baseFont: previewUIFont(textStyle: .body)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        #else
+        Text(inlineAttributed(text, highlights: selectedFragments))
+            .font(.body)
+            .fixedSize(horizontal: false, vertical: true)
+        #endif
+    }
+
+    @ViewBuilder
+    private func blockQuoteView(_ text: String) -> some View {
+        #if os(iOS)
+        MarkdownBlockQuoteView {
+            SelectablePreviewTextView(
+                attributedText: inlineAttributed(text, highlights: selectedFragments),
+                baseFont: previewUIFont(textStyle: .body, italic: true)
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        #else
+        MarkdownBlockQuoteView(
+            text: inlineAttributed(text, highlights: selectedFragments)
+        )
+        #endif
+    }
+
+    @ViewBuilder
+    private func codeBlockView(_ code: String) -> some View {
+        #if os(iOS)
+        MarkdownCodeBlockView(content: {
+            SelectablePreviewTextView(
+                attributedText: highlightedCodeOverlay(code),
+                baseFont: previewUIFont(textStyle: .body, monospaced: true)
+            )
+        }, wrapsInHorizontalScroll: false)
+        #else
+        MarkdownCodeBlockView(
+            code: highlightedCodeOverlay(code),
+            wrapsInHorizontalScroll: false
+        )
+        #endif
     }
 
     private func copyBlockToClipboard(_ block: MarkdownBlock) {
@@ -309,7 +360,43 @@ struct MarkdownBlocksView: View {
         return String(attributed.characters).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    #if os(iOS)
+    private func headingTextStyle(_ level: Int) -> UIFont.TextStyle {
+        switch level {
+        case 1: return .largeTitle
+        case 2: return .title1
+        case 3: return .title2
+        case 4: return .headline
+        default: return .body
+        }
+    }
+
+    private func previewUIFont(
+        textStyle: UIFont.TextStyle,
+        weight: UIFont.Weight = .regular,
+        italic: Bool = false,
+        monospaced: Bool = false
+    ) -> UIFont {
+        let preferredSize = UIFont.preferredFont(forTextStyle: textStyle).pointSize
+        let base: UIFont
+
+        if monospaced {
+            base = UIFont.monospacedSystemFont(ofSize: preferredSize, weight: weight)
+        } else {
+            let weighted = UIFont.systemFont(ofSize: preferredSize, weight: weight)
+            if italic,
+               let descriptor = weighted.fontDescriptor.withSymbolicTraits(.traitItalic) {
+                base = UIFont(descriptor: descriptor, size: preferredSize)
+            } else {
+                base = weighted
+            }
+        }
+
+        return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: base)
+    }
+    #endif
 }
+
 private var selectionHighlightColor: Color {
     #if os(iOS)
     // Match system tint semantics instead of hardcoded color values.

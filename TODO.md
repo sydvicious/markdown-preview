@@ -87,12 +87,21 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Implement search.
   - Add in-document search for markdown source and/or rendered preview.
-  - Depends on current selection model and final copy behavior details.
+  - Build search on top of the shared source/preview selection model so found text can be selected in both panes.
+  - This depends on the selection/copy work below.
 
 ### Selection/copy follow-ups.
+  - Keep `Grid` as the table rendering path; do not regress table geometry while adding selection support.
+  - Coalesce adjacent non-special preview blocks (headings, paragraphs, unordered lists, ordered lists) into a single selectable preview text segment.
+  - On iOS first, render each combined text segment as one native selectable text view so selection can drag across those blocks.
+  - Keep blockquote and fenced code blocks as independent preview blocks with both internal text selection and the existing Copy button.
+  - Keep tables as independent preview blocks; later support selecting a whole table, row, column, cell, or text inside a cell.
+  - Make source-file ranges the canonical selection model shared by Source and Preview.
   - Add multi-range selection in source and preview parity where feasible.
+  - When drag-selection eventually crosses quote/code/table blocks in Preview, select those blocks as whole blocks.
+  - Until preview parity exists, use Source view for precise partial selection inside quote/code/table blocks.
+  - Make Select All operate on the full document and reflect that selection in both Source and Preview.
   - Implement copy export in plain text and rich text formats.
-  - Define table-granularity selection behavior (whole table/row/column/cell/text).
 
 ### Make the grid-based table view show the selection correctly.
 
