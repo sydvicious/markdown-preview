@@ -15,6 +15,10 @@ enum MarkdownPreviewFixtures {
         MarkdownFile(url: previewURL, contents: excerptContents)
     }()
 
+    static let appLoadedFile: MarkdownFile = {
+        MarkdownFile(url: previewURL, contents: appLoadedContents)
+    }()
+
     static let table: MarkdownTable = .init(
         headers: ["Area", "Status", "Notes"],
         alignments: [.leading, .center, .leading],
@@ -53,5 +57,21 @@ enum MarkdownPreviewFixtures {
     private static let excerptContents: String = {
         let lines = fullContents.components(separatedBy: .newlines)
         return lines.prefix(120).joined(separator: "\n")
+    }()
+
+    private static let appLoadedContents: String = {
+        """
+        # Markdown Preview
+
+        This is sample preview content used in SwiftUI previews.
+
+        ## Features
+
+        - Headings and paragraphs
+        - Lists and blockquotes
+        - Inline `code`
+
+        > Preview data is embedded so the canvas works reliably.
+        """
     }()
 }

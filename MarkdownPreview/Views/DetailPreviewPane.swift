@@ -32,7 +32,7 @@ struct DetailPreviewPane: View {
 
 #Preview("Detail Pane - Preview") {
     NavigationStack {
-        DetailPreviewPane(file: MarkdownPreviewFixtures.fullFile, mode: .preview)
+        DetailPreviewPanePreviewHost(file: MarkdownPreviewFixtures.fullFile)
             .navigationTitle(MarkdownPreviewFixtures.fullFile.fileName)
     }
 }
@@ -48,5 +48,19 @@ struct DetailPreviewPane: View {
     NavigationStack {
         DetailPreviewPane(file: nil, mode: .preview)
             .navigationTitle("Markdown Preview")
+    }
+}
+
+private struct DetailPreviewPanePreviewHost: View {
+    let file: MarkdownFile
+    @State private var mode: DetailPreviewPane.Mode = .source
+
+    var body: some View {
+        DetailPreviewPane(file: file, mode: mode)
+            .task {
+                guard mode == .source else { return }
+                try? await Task.sleep(for: .milliseconds(100))
+                mode = .preview
+            }
     }
 }

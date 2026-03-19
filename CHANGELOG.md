@@ -4,9 +4,15 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-03-18
+
+- Added animated copy feedback for block copy actions, including immediate visual confirmation and iOS haptic feedback.
+- Tuned block copy feedback timing so the animation starts immediately on tap and clears more quickly.
+
 ## 2026-03-04
 
 - Added reusable copyable block chrome (`Copy` action in a top strip) for quote, table, and fenced code blocks.
+- Block copy now copies the original markdown/plain-text source for quote, table, and fenced code blocks to the system clipboard.
 - Copy actions now preserve existing user selection state (copy no longer rewrites source selection).
 - Source selection behavior updated: tap/click with no selected text now clears the shared selection model.
 - Improved copy-block container sizing:
