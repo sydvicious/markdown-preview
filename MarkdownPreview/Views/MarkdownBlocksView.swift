@@ -11,7 +11,7 @@ import AppKit
 
 struct MarkdownBlocksView: View {
     let source: String
-    var selections: [MarkdownSelectionRange] = []
+    @Binding var selections: [MarkdownSelectionRange]
 
     var body: some View {
         ScrollView {
@@ -21,15 +21,18 @@ struct MarkdownBlocksView: View {
     }
 
     private var blocksContent: some View {
-        let blocks = MarkdownBlockParser.parse(source)
         return VStack(alignment: .leading, spacing: 14) {
-            ForEach(blocks, id: \.id) { block in
+            ForEach(parsedBlocks, id: \.id) { block in
                 blockView(block)
             }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
+    }
+
+    private var parsedBlocks: [MarkdownBlock] {
+        MarkdownBlockParser.parse(source)
     }
 
     @ViewBuilder
@@ -76,29 +79,106 @@ struct MarkdownBlocksView: View {
                         }
                     }
                 case .table(let table):
-                    MarkdownTableBlockView(table: table)
+                    MarkdownCopyableBlockContainerView(onCopy: {
+                        copyBlockToClipboard(block)
+                    }, scrollContentHorizontally: true) {
+                        MarkdownTableBlockView(
+                            table: table,
+                            showChrome: false,
+                            wrapsInHorizontalScroll: false
+                        )
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
                 case .blockquote(let text):
-                    HStack(alignment: .top, spacing: 10) {
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.4))
-                            .frame(width: 4)
-                        Text(inlineAttributed(text, highlights: selectedFragments))
-                            .font(.body)
-                            .italic()
-                            .fixedSize(horizontal: false, vertical: true)
+                    MarkdownCopyableBlockContainerView(onCopy: {
+                        copyBlockToClipboard(block)
+                    }) {
+                        MarkdownBlockQuoteView(
+                            text: inlineAttributed(text, highlights: selectedFragments)
+                        )
                     }
                 case .rule:
                     Divider()
                 case .code(let code):
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        Text(highlightedCodeOverlay(code))
-                            .font(.system(.body, design: .monospaced))
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    MarkdownCopyableBlockContainerView(onCopy: {
+                        copyBlockToClipboard(block)
+                    }, scrollContentHorizontally: true) {
+                        MarkdownCodeBlockView(
+                            code: highlightedCodeOverlay(code),
+                            wrapsInHorizontalScroll: false
+                        )
                     }
-                    .background(Color.secondary.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
         }
+    }
+
+    private func copyBlockToClipboard(_ block: MarkdownBlock) {
+        guard let range = nsRangeForBlock(block) else { return }
+        guard let swiftRange = Range(range, in: source) else { return }
+        let blockText = String(source[swiftRange])
+        guard !blockText.isEmpty else { return }
+
+        copyToClipboard(blockText)
+    }
+
+    private func nsRangeForBlock(_ block: MarkdownBlock) -> NSRange? {
+        let lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let effectiveRange = effectiveLineRangeForCopy(block, lines: lines)
+        let lower = effectiveRange.lowerBound
+        let upper = effectiveRange.upperBound
+
+        guard lower >= 0, upper >= lower, upper <= lines.count else { return nil }
+
+        var starts: [Int] = []
+        starts.reserveCapacity(lines.count)
+        var offset = 0
+        for line in lines {
+            starts.append(offset)
+            offset += line.utf16.count + 1
+        }
+
+        guard lower < starts.count else { return nil }
+        let start = starts[lower]
+        let end: Int
+        if upper < starts.count {
+            end = max(start, starts[upper] - 1)
+        } else {
+            end = source.utf16.count
+        }
+
+        return NSRange(location: start, length: max(0, end - start))
+    }
+
+    private func effectiveLineRangeForCopy(_ block: MarkdownBlock, lines: [String]) -> Range<Int> {
+        guard case .code = block.kind else { return block.lineRange }
+        guard !lines.isEmpty else { return block.lineRange }
+
+        var lower = block.lineRange.lowerBound
+        var upper = block.lineRange.upperBound
+
+        // Include opening fence if parser lineRange starts at first code-content line.
+        if lower > 0, isFenceLine(lines[lower - 1]) {
+            lower -= 1
+        }
+        // Include closing fence if present.
+        if upper < lines.count, isFenceLine(lines[upper]) {
+            upper += 1
+        }
+
+        return lower..<upper
+    }
+
+    private func isFenceLine(_ line: String) -> Bool {
+        line.trimmingCharacters(in: .whitespaces).hasPrefix("```")
+    }
+
+    private func copyToClipboard(_ string: String) {
+        #if os(iOS)
+        UIPasteboard.general.string = string
+        #elseif os(macOS)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(string, forType: .string)
+        #endif
     }
 
     private func headingFont(level: Int) -> Font {
@@ -228,6 +308,7 @@ struct MarkdownBlocksView: View {
         }
         return String(attributed.characters).trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
 }
 private var selectionHighlightColor: Color {
     #if os(iOS)
@@ -243,6 +324,6 @@ private var selectionHighlightColor: Color {
 #Preview("Blocks View") {
     MarkdownBlocksView(
         source: MarkdownPreviewFixtures.excerptFile.contents,
-        selections: [MarkdownSelectionRange(location: 0, length: 120)]
+        selections: .constant([MarkdownSelectionRange(location: 0, length: 120)])
     )
 }

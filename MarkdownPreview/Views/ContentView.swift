@@ -269,7 +269,10 @@ struct ContentView: View {
             if let document = store.currentDocument {
                 MarkdownPreviewView(
                     source: document.file.contents,
-                    selections: store.selections(for: document.id)
+                    selections: Binding(
+                        get: { store.selections(for: document.id) },
+                        set: { store.setSelections($0, for: document.id, text: document.file.contents) }
+                    )
                 )
             }
         }
@@ -326,13 +329,9 @@ private struct InlineTitleOnIOS: ViewModifier {
 }
 
 #Preview("App - Loaded") {
-    ContentView(
-        previewFiles: [MarkdownPreviewFixtures.fullFile],
-        selectedPreviewFileID: MarkdownPreviewFixtures.fullFile.url.standardizedFileURL.path,
-        disablePersistenceRestore: true,
-        disableLiveFileMonitoring: true
-    )
-    .environmentObject(FileOpenState())
+    AppLoadedPreviewHost()
+        .environmentObject(FileOpenState())
+        .frame(width: 393, height: 852)
 }
 
 #Preview("App - Empty") {
@@ -341,6 +340,7 @@ private struct InlineTitleOnIOS: ViewModifier {
         disableLiveFileMonitoring: true
     )
         .environmentObject(FileOpenState())
+        .frame(width: 393, height: 852)
 }
 
 #Preview("Detail - Preview") {
@@ -361,5 +361,25 @@ private struct InlineTitleOnIOS: ViewModifier {
     NavigationStack {
         DetailPreviewPane(file: nil, mode: .preview)
             .navigationTitle("Markdown Preview")
+    }
+}
+
+private struct AppLoadedPreviewHost: View {
+    @State private var showsSource = true
+
+    var body: some View {
+        ContentView(
+            previewFiles: [MarkdownPreviewFixtures.appLoadedFile],
+            selectedPreviewFileID: MarkdownPreviewFixtures.appLoadedFile.url.standardizedFileURL.path,
+            showsSourceInPreview: showsSource,
+            disablePersistenceRestore: true,
+            disableLiveFileMonitoring: true
+        )
+        .id(showsSource)
+        .task {
+            guard showsSource else { return }
+            try? await Task.sleep(for: .milliseconds(2000))
+            showsSource = true
+        }
     }
 }
