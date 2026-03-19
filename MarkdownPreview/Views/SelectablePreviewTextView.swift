@@ -8,9 +8,32 @@ import SwiftUI
 import UIKit
 
 struct SelectablePreviewTextView: UIViewRepresentable {
-    let attributedText: AttributedString
-    let baseFont: UIFont
+    let attributedText: NSAttributedString
     var foregroundColor: UIColor = .label
+
+    init(
+        attributedText: AttributedString,
+        baseFont: UIFont,
+        foregroundColor: UIColor = .label
+    ) {
+        self.attributedText = Self.makeAttributedText(
+            from: attributedText,
+            baseFont: baseFont,
+            foregroundColor: foregroundColor
+        )
+        self.foregroundColor = foregroundColor
+    }
+
+    init(
+        attributedText: NSAttributedString,
+        foregroundColor: UIColor = .label
+    ) {
+        self.attributedText = Self.applyingDefaults(
+            to: attributedText,
+            foregroundColor: foregroundColor
+        )
+        self.foregroundColor = foregroundColor
+    }
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
@@ -30,8 +53,13 @@ struct SelectablePreviewTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
-        uiView.attributedText = renderedText()
-        uiView.textColor = foregroundColor
+        if !uiView.attributedText.isEqual(to: attributedText) {
+            uiView.attributedText = attributedText
+        }
+
+        if uiView.textColor != foregroundColor {
+            uiView.textColor = foregroundColor
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
@@ -41,15 +69,33 @@ struct SelectablePreviewTextView: UIViewRepresentable {
         return CGSize(width: width, height: ceil(measured.height))
     }
 
-    private func renderedText() -> NSAttributedString {
-        let rendered = NSMutableAttributedString(attributedString: NSAttributedString(attributedText))
+    static func makeAttributedText(
+        from attributedText: AttributedString,
+        baseFont: UIFont,
+        foregroundColor: UIColor = .label
+    ) -> NSAttributedString {
+        applyingDefaults(
+            to: NSAttributedString(attributedText),
+            baseFont: baseFont,
+            foregroundColor: foregroundColor
+        )
+    }
+
+    static func applyingDefaults(
+        to attributedText: NSAttributedString,
+        baseFont: UIFont? = nil,
+        foregroundColor: UIColor = .label
+    ) -> NSAttributedString {
+        let rendered = NSMutableAttributedString(attributedString: attributedText)
         let fullRange = NSRange(location: 0, length: rendered.length)
 
         guard rendered.length > 0 else { return rendered }
 
-        rendered.enumerateAttribute(.font, in: fullRange) { value, range, _ in
-            if value == nil {
-                rendered.addAttribute(.font, value: baseFont, range: range)
+        if let baseFont {
+            rendered.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+                if value == nil {
+                    rendered.addAttribute(.font, value: baseFont, range: range)
+                }
             }
         }
 

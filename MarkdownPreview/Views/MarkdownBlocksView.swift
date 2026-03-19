@@ -13,6 +13,21 @@ struct MarkdownBlocksView: View {
     let source: String
     @Binding var selections: [MarkdownSelectionRange]
 
+    private struct TextSegment: Identifiable {
+        let id = UUID()
+        let blocks: [MarkdownBlock]
+    }
+
+    private struct PreviewSegment: Identifiable {
+        enum Kind {
+            case text(TextSegment)
+            case block(MarkdownBlock)
+        }
+
+        let id = UUID()
+        let kind: Kind
+    }
+
     var body: some View {
         ScrollView {
             blocksContent
@@ -21,9 +36,9 @@ struct MarkdownBlocksView: View {
     }
 
     private var blocksContent: some View {
-        return VStack(alignment: .leading, spacing: 14) {
-            ForEach(parsedBlocks, id: \.id) { block in
-                blockView(block)
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(previewSegments) { segment in
+                segmentView(segment)
             }
         }
         .padding(20)
@@ -34,6 +49,206 @@ struct MarkdownBlocksView: View {
     private var parsedBlocks: [MarkdownBlock] {
         MarkdownBlockParser.parse(source)
     }
+
+    private var previewSegments: [PreviewSegment] {
+        var segments: [PreviewSegment] = []
+        var pendingTextBlocks: [MarkdownBlock] = []
+
+        func flushPendingTextBlocks() {
+            guard !pendingTextBlocks.isEmpty else { return }
+            segments.append(
+                PreviewSegment(
+                    kind: .text(TextSegment(blocks: pendingTextBlocks))
+                )
+            )
+            pendingTextBlocks.removeAll()
+        }
+
+        for block in parsedBlocks {
+            if block.isCoalescedPreviewTextBlock {
+                pendingTextBlocks.append(block)
+            } else {
+                flushPendingTextBlocks()
+                segments.append(PreviewSegment(kind: .block(block)))
+            }
+        }
+
+        flushPendingTextBlocks()
+        return segments
+    }
+
+    @ViewBuilder
+    private func segmentView(_ segment: PreviewSegment) -> some View {
+        switch segment.kind {
+        case .text(let textSegment):
+            textSegmentView(textSegment)
+        case .block(let block):
+            blockView(block)
+        }
+    }
+
+    #if os(iOS)
+    private func textSegmentView(_ segment: TextSegment) -> some View {
+        SelectablePreviewTextView(
+            attributedText: textSegmentAttributedString(segment)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func textSegmentAttributedString(_ segment: TextSegment) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+
+        for (index, block) in segment.blocks.enumerated() {
+            if index > 0 {
+                result.append(NSAttributedString(string: "\n\n"))
+            }
+            result.append(textBlockAttributedString(block))
+        }
+
+        return result
+    }
+
+    private func textBlockAttributedString(_ block: MarkdownBlock) -> NSAttributedString {
+        switch block.kind {
+        case .heading(let level, let text):
+            return inlineTextAttributedString(
+                text,
+                font: previewUIFont(textStyle: headingTextStyle(level), weight: .semibold)
+            )
+        case .paragraph(let text):
+            return inlineTextAttributedString(text, font: previewUIFont(textStyle: .body))
+        case .list(let items):
+            return listAttributedString(items, ordered: false)
+        case .orderedList(let items):
+            return listAttributedString(items, ordered: true)
+        case .table, .blockquote, .rule, .code:
+            return NSAttributedString(string: "")
+        }
+    }
+
+    private func inlineTextAttributedString(_ text: String, font: UIFont) -> NSAttributedString {
+        SelectablePreviewTextView.makeAttributedText(
+            from: inlineAttributed(text, highlights: selectedFragments),
+            baseFont: font
+        )
+    }
+
+    private func listAttributedString(_ items: [MarkdownListItem], ordered: Bool) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let bodyFont = previewUIFont(textStyle: .body)
+
+        for (index, item) in items.enumerated() {
+            if index > 0 {
+                result.append(NSAttributedString(string: "\n"))
+            }
+
+            let prefix = ordered
+                ? "\(item.order ?? (index + 1))."
+                : unorderedListPrefix(for: item)
+            let prefixFont = ordered
+                ? UIFont.monospacedDigitSystemFont(ofSize: bodyFont.pointSize, weight: .regular)
+                : bodyFont
+
+            let indentWidth = CGFloat(item.indent) * 18
+            let prefixWidth = ceil(
+                (prefix as NSString).size(withAttributes: [.font: prefixFont]).width
+            )
+            let contentIndent = indentWidth + prefixWidth + 12
+
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.firstLineHeadIndent = indentWidth
+            paragraphStyle.headIndent = contentIndent
+            paragraphStyle.tabStops = [
+                NSTextTab(textAlignment: .left, location: contentIndent)
+            ]
+            paragraphStyle.defaultTabInterval = contentIndent
+
+            let line = NSMutableAttributedString(
+                string: "\(prefix)\t",
+                attributes: [
+                    .font: prefixFont,
+                    .foregroundColor: UIColor.label
+                ]
+            )
+            line.append(
+                NSMutableAttributedString(
+                    attributedString: inlineTextAttributedString(item.text, font: bodyFont)
+                )
+            )
+            line.addAttribute(
+                .paragraphStyle,
+                value: paragraphStyle,
+                range: NSRange(location: 0, length: line.length)
+            )
+
+            result.append(line)
+        }
+
+        return result
+    }
+
+    private func unorderedListPrefix(for item: MarkdownListItem) -> String {
+        if let checked = item.checkbox {
+            return checked ? "☑︎" : "☐"
+        }
+        return "•"
+    }
+    #elseif os(macOS)
+    private func textSegmentView(_ segment: TextSegment) -> some View {
+        textSegmentText(segment)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func textSegmentText(_ segment: TextSegment) -> Text {
+        segment.blocks.enumerated().reduce(Text("")) { partial, entry in
+            let blockText = textBlockText(entry.element)
+            if entry.offset == 0 {
+                return blockText
+            }
+            return partial + Text("\n\n") + blockText
+        }
+    }
+
+    private func textBlockText(_ block: MarkdownBlock) -> Text {
+        switch block.kind {
+        case .heading(let level, let text):
+            return Text(inlineAttributed(text, highlights: selectedFragments))
+                .font(headingFont(level: level))
+                .fontWeight(.semibold)
+        case .paragraph(let text):
+            return Text(inlineAttributed(text, highlights: selectedFragments))
+                .font(.body)
+        case .list(let items):
+            return listText(items, ordered: false)
+        case .orderedList(let items):
+            return listText(items, ordered: true)
+        case .table, .blockquote, .rule, .code:
+            return Text("")
+        }
+    }
+
+    private func listText(_ items: [MarkdownListItem], ordered: Bool) -> Text {
+        items.enumerated().reduce(Text("")) { partial, entry in
+            let index = entry.offset
+            let item = entry.element
+            let indent = String(repeating: "    ", count: item.indent)
+            let prefix: String
+            if ordered {
+                prefix = "\(item.order ?? (index + 1)). "
+            } else if let checked = item.checkbox {
+                prefix = checked ? "☑︎ " : "☐ "
+            } else {
+                prefix = "• "
+            }
+
+            let line = Text(indent + prefix) + Text(inlineAttributed(item.text, highlights: selectedFragments))
+            if index == 0 {
+                return line
+            }
+            return partial + Text("\n") + line
+        }
+    }
+    #endif
 
     @ViewBuilder
     private func blockView(_ block: MarkdownBlock) -> some View {
@@ -406,6 +621,17 @@ private var selectionHighlightColor: Color {
     #else
     return Color.accentColor.opacity(0.30)
     #endif
+}
+
+private extension MarkdownBlock {
+    var isCoalescedPreviewTextBlock: Bool {
+        switch kind {
+        case .heading, .paragraph, .list, .orderedList:
+            return true
+        case .table, .blockquote, .rule, .code:
+            return false
+        }
+    }
 }
 
 #Preview("Blocks View") {

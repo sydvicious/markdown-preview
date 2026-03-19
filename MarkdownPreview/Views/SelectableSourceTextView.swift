@@ -40,6 +40,7 @@ struct SelectableSourceTextView: UIViewRepresentable {
         view.isSelectable = true
         view.alwaysBounceVertical = true
         view.backgroundColor = .clear
+        view.textColor = .label
         view.textContainerInset = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         view.textContainer.lineFragmentPadding = 0
         view.adjustsFontForContentSizeCategory = true
@@ -59,6 +60,9 @@ struct SelectableSourceTextView: UIViewRepresentable {
             context.coordinator.isApplyingSelection = true
             uiView.text = text
             context.coordinator.isApplyingSelection = false
+        }
+        if uiView.textColor != .label {
+            uiView.textColor = .label
         }
         applySelection(to: uiView, from: selections, coordinator: context.coordinator)
     }
@@ -101,7 +105,7 @@ struct SelectableSourceTextView: NSViewRepresentable {
             guard !isApplyingSelection else { return }
             guard let textView = notification.object as? NSTextView else { return }
             let next = textView.selectedRanges.compactMap { value -> MarkdownSelectionRange? in
-                let range = (value as! NSValue).rangeValue
+                let range = value.rangeValue
                 return range.length > 0 ? MarkdownSelectionRange(range) : nil
             }
             if next != selections.wrappedValue {
