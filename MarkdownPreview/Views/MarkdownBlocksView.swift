@@ -206,7 +206,7 @@ struct MarkdownBlocksView: View {
             if entry.offset == 0 {
                 return blockText
             }
-            return partial + Text("\n\n") + blockText
+            return Text("\(partial)\n\n\(blockText)")
         }
     }
 
@@ -242,11 +242,11 @@ struct MarkdownBlocksView: View {
                 prefix = "• "
             }
 
-            let line = Text(indent + prefix) + Text(inlineAttributed(item.text, highlights: selectedFragments))
+            let line = Text("\(indent + prefix)\(Text(inlineAttributed(item.text, highlights: selectedFragments)))")
             if index == 0 {
                 return line
             }
-            return partial + Text("\n") + line
+            return Text("\(partial)\n\(line)")
         }
     }
     #endif
