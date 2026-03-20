@@ -5,6 +5,7 @@
 import SwiftUI
 #if os(iOS)
 import UIKit
+import UniformTypeIdentifiers
 #elseif os(macOS)
 import AppKit
 #endif
@@ -383,7 +384,7 @@ struct MarkdownBlocksView: View {
         let blockText = String(source[swiftRange])
         guard !blockText.isEmpty else { return }
 
-        copyToClipboard(blockText)
+        copyToClipboard(plainText: blockText, richText: richTextForCopiedBlock(block))
     }
 
     private func nsRangeForBlock(_ block: MarkdownBlock) -> NSRange? {
@@ -437,14 +438,226 @@ struct MarkdownBlocksView: View {
         line.trimmingCharacters(in: .whitespaces).hasPrefix("```")
     }
 
-    private func copyToClipboard(_ string: String) {
+    private func copyToClipboard(plainText: String, richText: NSAttributedString?) {
         #if os(iOS)
-        UIPasteboard.general.string = string
+        var item: [String: Any] = [UTType.plainText.identifier: plainText]
+        if let richText, let rtfData = rtfData(for: richText) {
+            item[UTType.rtf.identifier] = rtfData
+        }
+        UIPasteboard.general.setItems([item], options: [:])
         #elseif os(macOS)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(string, forType: .string)
+        pasteboard.setString(plainText, forType: .string)
+        if let richText, let rtfData = rtfData(for: richText) {
+            pasteboard.setData(rtfData, forType: .rtf)
+        }
         #endif
+    }
+
+    private func richTextForCopiedBlock(_ block: MarkdownBlock) -> NSAttributedString? {
+        switch block.kind {
+        case .blockquote(let text):
+            return richInlineText(
+                markdown: text,
+                font: richTextFont(style: .body, italic: true)
+            )
+        case .code(let code):
+            let rendered = NSMutableAttributedString(
+                string: code,
+                attributes: [
+                    .font: richTextFont(style: .body, monospaced: true),
+                    .foregroundColor: richTextForegroundColor,
+                    .backgroundColor: richTextCodeBackgroundColor
+                ]
+            )
+            return rendered
+        case .table(let table):
+            return richTextForCopiedTable(table)
+        case .heading(let level, let text):
+            return richInlineText(
+                markdown: text,
+                font: richTextFont(style: headingTextStyle(level), weight: .semibold)
+            )
+        case .paragraph(let text):
+            return richInlineText(markdown: text, font: richTextFont(style: .body))
+        case .list(let items):
+            return richTextForCopiedList(items, ordered: false)
+        case .orderedList(let items):
+            return richTextForCopiedList(items, ordered: true)
+        case .rule:
+            return nil
+        }
+    }
+
+    private func richTextForCopiedList(_ items: [MarkdownListItem], ordered: Bool) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let bodyFont = richTextFont(style: .body)
+
+        for (index, item) in items.enumerated() {
+            if index > 0 {
+                result.append(NSAttributedString(string: "\n"))
+            }
+
+            let indent = String(repeating: "    ", count: item.indent)
+            let prefix: String
+            if ordered {
+                prefix = "\(item.order ?? (index + 1)). "
+            } else if let checked = item.checkbox {
+                prefix = checked ? "☑︎ " : "☐ "
+            } else {
+                prefix = "• "
+            }
+
+            result.append(
+                NSAttributedString(
+                    string: indent + prefix,
+                    attributes: [
+                        .font: bodyFont,
+                        .foregroundColor: richTextForegroundColor
+                    ]
+                )
+            )
+            result.append(richInlineText(markdown: item.text, font: bodyFont))
+        }
+
+        return result
+    }
+
+    private func richTextForCopiedTable(_ table: MarkdownTable) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let headerFont = richTextFont(style: .headline, weight: .semibold)
+        let bodyFont = richTextFont(style: .body)
+        let tabStops = tableTabStops(table)
+
+        if !table.headers.isEmpty {
+            result.append(tableLineAttributedString(
+                cells: table.headers,
+                font: headerFont,
+                tabStops: tabStops
+            ))
+        }
+
+        for row in table.rows {
+            if result.length > 0 {
+                result.append(NSAttributedString(string: "\n"))
+            }
+            let paddedRow = Array(row.prefix(table.headers.count)) + Array(repeating: "", count: max(0, table.headers.count - row.count))
+            result.append(tableLineAttributedString(
+                cells: paddedRow,
+                font: bodyFont,
+                tabStops: tabStops
+            ))
+        }
+
+        return result
+    }
+
+    private func tableLineAttributedString(
+        cells: [String],
+        font: PlatformFont,
+        tabStops: [NSTextTab]
+    ) -> NSAttributedString {
+        let line = NSMutableAttributedString()
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.tabStops = tabStops
+        paragraphStyle.defaultTabInterval = (tabStops.last?.location ?? 0) + 24
+
+        for index in cells.indices {
+            line.append(richInlineText(markdown: cells[index], font: font))
+            if index < cells.count - 1 {
+                line.append(
+                    NSAttributedString(
+                        string: "\t",
+                        attributes: [
+                            .font: font,
+                            .foregroundColor: richTextForegroundColor
+                        ]
+                    )
+                )
+            }
+        }
+
+        line.addAttribute(
+            .paragraphStyle,
+            value: paragraphStyle,
+            range: NSRange(location: 0, length: line.length)
+        )
+        return line
+    }
+
+    private func tableTabStops(_ table: MarkdownTable) -> [NSTextTab] {
+        guard !table.headers.isEmpty else { return [] }
+
+        var widths = Array(repeating: CGFloat(0), count: table.headers.count)
+        let headerFont = richTextFont(style: .headline, weight: .semibold)
+        let bodyFont = richTextFont(style: .body)
+
+        for column in table.headers.indices {
+            widths[column] = max(
+                widths[column],
+                measuredRichTextWidth(renderedInlineText(from: table.headers[column]), font: headerFont)
+            )
+        }
+
+        for row in table.rows {
+            for column in table.headers.indices {
+                let cell = row.indices.contains(column) ? row[column] : ""
+                widths[column] = max(
+                    widths[column],
+                    measuredRichTextWidth(renderedInlineText(from: cell), font: bodyFont)
+                )
+            }
+        }
+
+        var location: CGFloat = 0
+        return widths.dropLast().map { width in
+            location += max(80, ceil(width) + 24)
+            return NSTextTab(textAlignment: .left, location: location)
+        }
+    }
+
+    private func measuredRichTextWidth(_ text: String, font: PlatformFont) -> CGFloat {
+        NSString(string: text).size(withAttributes: [.font: font]).width
+    }
+
+    private func richInlineText(markdown: String, font: PlatformFont) -> NSAttributedString {
+        let base: AttributedString
+        if let attributed = try? AttributedString(
+            markdown: markdown,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            base = attributed
+        } else {
+            base = AttributedString(markdown)
+        }
+
+        let rendered = NSMutableAttributedString(attributedString: NSAttributedString(base))
+        let fullRange = NSRange(location: 0, length: rendered.length)
+
+        guard rendered.length > 0 else { return rendered }
+
+        rendered.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+            if value == nil {
+                rendered.addAttribute(.font, value: font, range: range)
+            }
+        }
+
+        rendered.enumerateAttribute(.foregroundColor, in: fullRange) { value, range, _ in
+            if value == nil {
+                rendered.addAttribute(.foregroundColor, value: richTextForegroundColor, range: range)
+            }
+        }
+
+        return rendered
+    }
+
+    private func rtfData(for attributedText: NSAttributedString) -> Data? {
+        let range = NSRange(location: 0, length: attributedText.length)
+        return try? attributedText.data(
+            from: range,
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        )
     }
 
     private func headingFont(level: Int) -> Font {
@@ -609,6 +822,61 @@ struct MarkdownBlocksView: View {
 
         return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: base)
     }
+
+    private typealias PlatformFont = UIFont
+
+    private func richTextFont(
+        style: UIFont.TextStyle,
+        weight: UIFont.Weight = .regular,
+        italic: Bool = false,
+        monospaced: Bool = false
+    ) -> UIFont {
+        previewUIFont(textStyle: style, weight: weight, italic: italic, monospaced: monospaced)
+    }
+
+    private var richTextForegroundColor: UIColor { .label }
+    private var richTextCodeBackgroundColor: UIColor { .secondarySystemBackground }
+    #endif
+
+    #if os(macOS)
+    private typealias PlatformFont = NSFont
+
+    private func richTextFont(
+        style: NSFont.TextStyle,
+        weight: NSFont.Weight = .regular,
+        italic: Bool = false,
+        monospaced: Bool = false
+    ) -> NSFont {
+        let preferredSize = NSFont.preferredFont(forTextStyle: style).pointSize
+        let base: NSFont
+
+        if monospaced {
+            base = NSFont.monospacedSystemFont(ofSize: preferredSize, weight: weight)
+        } else {
+            let weighted = NSFont.systemFont(ofSize: preferredSize, weight: weight)
+            if italic {
+                let descriptor = weighted.fontDescriptor.withSymbolicTraits(.italic)
+                base = NSFont(descriptor: descriptor, size: preferredSize) ?? weighted
+            } else {
+                base = weighted
+            }
+        }
+
+        return base
+    }
+
+    private func headingTextStyle(_ level: Int) -> NSFont.TextStyle {
+        switch level {
+        case 1: return .largeTitle
+        case 2: return .title1
+        case 3: return .title2
+        case 4: return .headline
+        default: return .body
+        }
+    }
+
+    private var richTextForegroundColor: NSColor { .labelColor }
+    private var richTextCodeBackgroundColor: NSColor { .controlBackgroundColor }
     #endif
 }
 
