@@ -6,6 +6,7 @@ Format:
 
 ## 2026-03-19
 
+- Refreshed the app icon artwork around a centered `.md` lockup, improving baseline alignment, small-size readability, and spacing of the accompanying `©SRP` mark across icon variants.
 - Brought the same coalesced preview text-segment behavior to macOS so adjacent headings, paragraphs, and list content can be selected across block boundaries there as well.
 - Kept quote blocks, fenced code blocks, tables, and rules as explicit preview selection boundaries on macOS and iOS, preserving copy-block behavior and stable table geometry.
 - Copy actions for quote, table, and fenced code blocks now place both plain-text markdown source and rendered rich-text (`RTF`) representations on the clipboard.
