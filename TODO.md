@@ -43,13 +43,17 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Add clipboard support.
   - Add actions to paste/open markdown text directly from the clipboard.
   - Define copy behavior for source text and rendered preview content on each platform.
-  - Copy text to the clipboard as both plain text and `RTF`.
-  - Add rich-text (`RTF`) clipboard export for copy actions on quote/table/code blocks (plain-text export is already implemented).
+  - Copying from Source view should remain plain text only; do not generate `RTF` there.
+  - When drag-selection crosses a copyable block, add that block's contents to the clipboard selection.
+  - Decide what the `RTF` representation should look like when copyable blocks are included via drag-selection.
 
 ### Improve project documentation and samples.
   - Make a good `SAMPLE.md` file displaying features.
   - Make a better, more consumer-based `README.md` with screenshots displaying features.
   - Split out developer instructions to `CONTRIBUTING.md`.
+
+### Revisit app icon text.
+  - Consider changing the icon text from `MD` to `.md` so it more clearly suggests opening markdown files directly.
 
 ### Get ready for TestFlight.
   - Investigate how to submit to App Store as an individual.
@@ -97,11 +101,12 @@ This document tracks planned work for MarkdownPreviewApp.
   - Keep blockquote and fenced code blocks as independent preview blocks with both internal text selection and the existing Copy button.
   - Keep tables as independent preview blocks; later support selecting a whole table, row, column, cell, or text inside a cell.
   - Make source-file ranges the canonical selection model shared by Source and Preview.
+  - Share selection between Source and Preview; if a Source selection includes only part of a copyable block, truncate that selection to the supported Preview boundary when switching back to Preview.
   - Add multi-range selection in source and preview parity where feasible.
   - When drag-selection eventually crosses quote/code/table blocks in Preview, select those blocks as whole blocks.
   - Until preview parity exists, use Source view for precise partial selection inside quote/code/table blocks.
   - Make Select All operate on the full document and reflect that selection in both Source and Preview.
-  - Implement copy export in plain text and rich text formats.
+  - Make `Select All` include copyable blocks so copying after `Select All` captures the full document.
 
 ### Make the grid-based table view show the selection correctly.
 

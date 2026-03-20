@@ -8,6 +8,7 @@ Format:
 
 - Brought the same coalesced preview text-segment behavior to macOS so adjacent headings, paragraphs, and list content can be selected across block boundaries there as well.
 - Kept quote blocks, fenced code blocks, tables, and rules as explicit preview selection boundaries on macOS and iOS, preserving copy-block behavior and stable table geometry.
+- Copy actions for quote, table, and fenced code blocks now place both plain-text markdown source and rendered rich-text (`RTF`) representations on the clipboard.
 
 ## 2026-03-18
 
