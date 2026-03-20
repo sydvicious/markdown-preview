@@ -30,6 +30,7 @@ struct DetailPreviewPane: View {
     }
 }
 
+#if DEBUG
 #Preview("Detail Pane - Preview") {
     NavigationStack {
         DetailPreviewPanePreviewHost(file: MarkdownPreviewFixtures.fullFile)
@@ -64,3 +65,4 @@ private struct DetailPreviewPanePreviewHost: View {
             }
     }
 }
+#endif

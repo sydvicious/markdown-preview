@@ -237,6 +237,7 @@ private struct MarkdownCopyableAvailableWidthPreferenceKey: PreferenceKey {
     }
 }
 
+#if DEBUG
 #Preview("Copyable Block - Isolated Table Width") {
     ScrollView {
         MarkdownCopyableBlockContainerView(onCopy: {}, scrollContentHorizontally: true) {
@@ -286,3 +287,4 @@ func greet(_ name: String) -> String {
         .padding(20)
     }
 }
+#endif

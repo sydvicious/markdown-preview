@@ -328,6 +328,7 @@ private struct InlineTitleOnIOS: ViewModifier {
     }
 }
 
+#if DEBUG
 #Preview("App - Loaded") {
     AppLoadedPreviewHost()
         .environmentObject(FileOpenState())
@@ -383,3 +384,4 @@ private struct AppLoadedPreviewHost: View {
         }
     }
 }
+#endif

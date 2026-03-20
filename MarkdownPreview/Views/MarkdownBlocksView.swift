@@ -902,9 +902,11 @@ private extension MarkdownBlock {
     }
 }
 
+#if DEBUG
 #Preview("Blocks View") {
     MarkdownBlocksView(
         source: MarkdownPreviewFixtures.excerptFile.contents,
         selections: .constant([MarkdownSelectionRange(location: 0, length: 120)])
     )
 }
+#endif

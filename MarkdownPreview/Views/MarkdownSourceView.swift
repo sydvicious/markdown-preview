@@ -13,9 +13,11 @@ struct MarkdownSourceView: View {
     }
 }
 
+#if DEBUG
 #Preview("Markdown Source View") {
     MarkdownSourceView(
         contents: MarkdownPreviewFixtures.excerptFile.contents,
         selections: .constant([MarkdownSelectionRange(location: 0, length: 24)])
     )
 }
+#endif

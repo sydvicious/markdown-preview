@@ -191,6 +191,7 @@ private extension Array {
     }
 }
 
+#if DEBUG
 #Preview("Table Block View") {
     ScrollView {
         MarkdownTableBlockView(table: MarkdownPreviewFixtures.table)
@@ -199,3 +200,4 @@ private extension Array {
     }
     .frame(maxWidth: .infinity)
 }
+#endif

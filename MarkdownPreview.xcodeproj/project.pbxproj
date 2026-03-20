@@ -24,6 +24,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		6200A0013B7A000100000001 /* AGENTS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = AGENTS.md; sourceTree = "<group>"; };
 		621B2E752F40F94600DD1CCB /* TODO.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = TODO.md; sourceTree = "<group>"; };
 		621B2E762F40F94700DD1CCB /* Info-macOS.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info-macOS.plist"; sourceTree = "<group>"; };
 		6231AE202F40F583007D442C /* LICENSE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = LICENSE.md; sourceTree = "<group>"; };
@@ -82,6 +83,7 @@
 				62584AF32D45FB4E00831420 /* MarkdownPreview */,
 				62584B042D45FB5000831420 /* MarkdownPreviewTests */,
 				62584B0E2D45FB5000831420 /* MarkdownPreviewUITests */,
+				6200A0013B7A000100000001 /* AGENTS.md */,
 				6231AE202F40F583007D442C /* LICENSE.md */,
 				6231AE212F40F583007D442C /* README.md */,
 				621B2E752F40F94600DD1CCB /* TODO.md */,
@@ -422,6 +424,7 @@
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_LSHandlerRank = Owner;
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_LSItemContentTypes_0 = net.daringfireball.markdown;
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_LSItemContentTypes_1 = "public.plain-text";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "by Syd Polk\n©2026 All Rights Reserved";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -466,6 +469,7 @@
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_LSHandlerRank = Owner;
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_LSItemContentTypes_0 = net.daringfireball.markdown;
 				INFOPLIST_KEY_CFBundleDocumentTypes_0_LSItemContentTypes_1 = "public.plain-text";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "by Syd Polk\n©2026 All Rights Reserved";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

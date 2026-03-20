@@ -179,9 +179,11 @@ struct SelectableSourceTextView: NSViewRepresentable {
 }
 #endif
 
+#if DEBUG
 #Preview("Selectable Source Text") {
     SelectableSourceTextView(
         text: MarkdownPreviewFixtures.excerptFile.contents,
         selections: .constant([MarkdownSelectionRange(location: 0, length: 18)])
     )
 }
+#endif
