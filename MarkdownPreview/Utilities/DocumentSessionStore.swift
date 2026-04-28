@@ -56,7 +56,7 @@ final class DocumentSessionStore: ObservableObject {
     }
 
     var sortedDocuments: [OpenedDocument] {
-        openedDocuments.sorted { $0.lastOpened > $1.lastOpened }
+        openedDocuments.sorted(by: Self.sortDocumentsByFileName)
     }
 
     var currentDocument: OpenedDocument? {
@@ -303,5 +303,14 @@ final class DocumentSessionStore: ObservableObject {
         } else {
             selectionsByDocumentID[documentID] = clamped
         }
+    }
+
+    private static func sortDocumentsByFileName(_ lhs: OpenedDocument, _ rhs: OpenedDocument) -> Bool {
+        let nameComparison = lhs.file.fileName.localizedStandardCompare(rhs.file.fileName)
+        if nameComparison != .orderedSame {
+            return nameComparison == .orderedAscending
+        }
+
+        return lhs.file.url.path.localizedStandardCompare(rhs.file.url.path) == .orderedAscending
     }
 }
