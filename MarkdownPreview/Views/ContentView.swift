@@ -37,8 +37,8 @@ struct ContentView: View {
         NavigationSplitView(preferredCompactColumn: $viewModel.preferredCompactColumn) {
             NavigationStack {
                 sidebarPanel
-                    #if !os(macOS)
                     .toolbar {
+                        #if !os(macOS)
                         ToolbarItem(placement: openButtonPlacement) {
                             Button {
                                 isImporterPresented = true
@@ -48,8 +48,13 @@ struct ContentView: View {
                             .accessibilityLabel("Open")
                             .accessibilityIdentifier("Open")
                         }
+                        if store.selectedDocumentID != nil {
+                            ToolbarItem(placement: removeButtonPlacement) {
+                                removeFromListButton
+                            }
+                        }
+                        #endif
                     }
-                    #endif
             }
         } detail: {
             NavigationStack {
@@ -66,6 +71,11 @@ struct ContentView: View {
                             }
                             .accessibilityLabel("Open")
                             .accessibilityIdentifier("Open")
+                            #endif
+                            #if os(macOS)
+                            if store.selectedDocumentID != nil {
+                                removeFromListButton
+                            }
                             #endif
                             if store.currentDocument != nil {
                                 Button {
@@ -192,6 +202,22 @@ struct ContentView: View {
                             }
                             .contentShape(Rectangle())
                             .tag(document.id)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    removeDocumentFromList(id: document.id)
+                                } label: {
+                                    Label("Remove from List", systemImage: "trash")
+                                }
+                            }
+                            #if !os(macOS)
+                            .swipeActions {
+                                Button(role: .destructive) {
+                                    removeDocumentFromList(id: document.id)
+                                } label: {
+                                    Label("Remove", systemImage: "trash")
+                                }
+                            }
+                            #endif
                                 #if os(macOS)
                                 .help(viewModel.tooltipPath(for: document.file.url))
                                 #endif
@@ -200,6 +226,9 @@ struct ContentView: View {
                             store.deleteDocuments(at: offsets, isCompactWidth: isCompactWidth)
                         }
                     }
+                    #if os(macOS)
+                    .onDeleteCommand(perform: removeSelectedDocumentFromList)
+                    #endif
                 }
             }
         }
@@ -296,6 +325,36 @@ struct ContentView: View {
         #else
         return .topBarTrailing
         #endif
+    }
+
+    private var removeFromListButton: some View {
+        Button(role: .destructive) {
+            removeSelectedDocumentFromList()
+        } label: {
+            Image(systemName: "trash")
+        }
+        .accessibilityLabel("Remove from List")
+        .accessibilityIdentifier("RemoveFromList")
+    }
+
+    private var removeButtonPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        return .automatic
+        #else
+        return .topBarTrailing
+        #endif
+    }
+
+    private func removeSelectedDocumentFromList() {
+        guard let selectedDocumentID = store.selectedDocumentID else { return }
+        removeDocumentFromList(id: selectedDocumentID)
+    }
+
+    private func removeDocumentFromList(id: String) {
+        let shouldShowSidebar = store.removeDocument(id: id, isCompactWidth: isCompactWidth)
+        if shouldShowSidebar {
+            viewModel.preferredCompactColumn = .sidebar
+        }
     }
 
     #if os(macOS)
