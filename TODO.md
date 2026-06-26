@@ -2,6 +2,12 @@
 
 This document tracks planned work for MarkdownPreviewApp.
 
+### Support removal of documents from list
+### Sort list by file name
+### Setup sections in list based on directory
+
+### Convert to WKWebView
+
 ### Support image references.
 
 ### Allow editing in Source view.

@@ -9,6 +9,10 @@ Format:
 - Sorted the sidebar document list alphabetically by filename instead of most-recently opened order.
 - Added explicit file-list removal actions on macOS and iOS so opened files can be removed from the app’s list without deleting them from disk.
 
+## 2026-06-25
+
+- Updated the macOS file-drop handler to use `NSItemProvider.loadObject` instead of the deprecated `loadItem` API for macOS 27.
+
 ## 2026-03-19
 
 - Refreshed the app icon artwork around a centered `.md` lockup, improving baseline alignment, small-size readability, and spacing of the accompanying `©SRP` mark across icon variants.

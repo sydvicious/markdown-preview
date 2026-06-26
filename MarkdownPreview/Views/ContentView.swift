@@ -359,14 +359,13 @@ struct ContentView: View {
 
     #if os(macOS)
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) else {
+        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSURL.self) }) else {
             return false
         }
-        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-            guard let data = item as? Data,
-                  let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+        provider.loadObject(ofClass: NSURL.self) { item, _ in
+            guard let url = item as? NSURL else { return }
             Task { @MainActor in
-                viewModel.load(url: url, isCompactWidth: isCompactWidth)
+                viewModel.load(url: url as URL, isCompactWidth: isCompactWidth)
             }
         }
         return true

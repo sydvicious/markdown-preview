@@ -435,12 +435,12 @@
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeDescription = "Markdown Document";
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeIdentifier = net.daringfireball.markdown;
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeTagSpecification_public_filename_extension_0 = md;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sydpolk.MarkdownPreview;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -480,12 +480,12 @@
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeDescription = "Markdown Document";
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeIdentifier = net.daringfireball.markdown;
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeTagSpecification_public_filename_extension_0 = md;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sydpolk.MarkdownPreview;
 				PRODUCT_NAME = "$(TARGET_NAME)";
