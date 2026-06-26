@@ -77,15 +77,6 @@ struct ContentView: View {
                                 removeFromListButton
                             }
                             #endif
-                            if store.currentDocument != nil {
-                                Button {
-                                    viewModel.toggleDetailMode()
-                                } label: {
-                                    Image(systemName: "rectangle.2.swap")
-                                }
-                                .accessibilityLabel("View")
-                                .accessibilityIdentifier("View")
-                            }
                         }
                     }
             }
@@ -242,16 +233,24 @@ struct ContentView: View {
             )
         }
         return AnyView(
-            ZStack(alignment: .topLeading) {
-                previewPanel
-                    .opacity(viewModel.detailMode == .preview ? 1 : 0)
-                    .allowsHitTesting(viewModel.detailMode == .preview)
-                    .accessibilityHidden(viewModel.detailMode != .preview)
+            VStack(spacing: 0) {
+                detailModePicker
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
 
-                sourcePanel
-                    .opacity(viewModel.detailMode == .source ? 1 : 0)
-                    .allowsHitTesting(viewModel.detailMode == .source)
-                    .accessibilityHidden(viewModel.detailMode != .source)
+                ZStack(alignment: .topLeading) {
+                    previewPanel
+                        .opacity(viewModel.detailMode == .preview ? 1 : 0)
+                        .allowsHitTesting(viewModel.detailMode == .preview)
+                        .accessibilityHidden(viewModel.detailMode != .preview)
+
+                    sourcePanel
+                        .opacity(viewModel.detailMode == .source ? 1 : 0)
+                        .allowsHitTesting(viewModel.detailMode == .source)
+                        .accessibilityHidden(viewModel.detailMode != .source)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         )
@@ -298,6 +297,7 @@ struct ContentView: View {
             if let document = store.currentDocument {
                 MarkdownPreviewView(
                     source: document.file.contents,
+                    baseURL: document.file.url.deletingLastPathComponent(),
                     selections: Binding(
                         get: { store.selections(for: document.id) },
                         set: { store.setSelections($0, for: document.id, text: document.file.contents) }
@@ -305,6 +305,17 @@ struct ContentView: View {
                 )
             }
         }
+    }
+
+    private var detailModePicker: some View {
+        Picker("View", selection: $viewModel.detailMode) {
+            Text("Preview").tag(ContentViewModel.DetailMode.preview)
+            Text("Source").tag(ContentViewModel.DetailMode.source)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .accessibilityLabel("View")
+        .accessibilityIdentifier("DetailModePicker")
     }
 
     private var isCompactWidth: Bool {

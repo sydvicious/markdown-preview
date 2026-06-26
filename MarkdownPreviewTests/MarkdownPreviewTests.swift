@@ -56,4 +56,34 @@ struct MarkdownPreviewTests {
         #expect(store.selectedDocumentID == alpha.url.standardizedFileURL.path)
     }
 
+    @Test func htmlBuilderRendersCoreMarkdownBlocks() async throws {
+        let source = """
+        # Title
+
+        Paragraph with **bold** text, `code`, and [a link](https://example.com).
+
+        > Quoted line
+        > still quoted
+
+        | Name | Count |
+        | --- | ---: |
+        | apples | 12 |
+
+        ```
+        let value = 42
+        ```
+        """
+
+        let html = MarkdownHTMLBuilder.document(for: source)
+
+        #expect(html.contains("<h1>Title</h1>"))
+        #expect(html.contains("<strong>bold</strong>"))
+        #expect(html.contains("<code>code</code>"))
+        #expect(html.contains("<a href=\"https://example.com\">a link</a>"))
+        #expect(html.contains("<blockquote><p>Quoted line<br>still quoted</p></blockquote>"))
+        #expect(html.contains("<table>"))
+        #expect(html.contains("class=\"a-right\">12</td>"))
+        #expect(html.contains("<pre><code>let value = 42</code></pre>"))
+    }
+
 }

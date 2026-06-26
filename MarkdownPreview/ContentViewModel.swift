@@ -92,10 +92,6 @@ final class ContentViewModel: ObservableObject {
         #endif
     }
 
-    func toggleDetailMode() {
-        detailMode = detailMode == .preview ? .source : .preview
-    }
-
     func acknowledgeMissingActiveDocument(isCompactWidth: Bool) {
         let shouldShowSidebar = store.acknowledgeMissingActiveDocument(isCompactWidth: isCompactWidth)
         if shouldShowSidebar {

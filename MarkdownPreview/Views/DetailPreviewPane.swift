@@ -18,7 +18,11 @@ struct DetailPreviewPane: View {
             if let file {
                 switch mode {
                 case .preview:
-                    MarkdownBlocksView(source: file.contents, selections: .constant([]))
+                    MarkdownPreviewView(
+                        source: file.contents,
+                        baseURL: file.url.deletingLastPathComponent(),
+                        selections: .constant([])
+                    )
                 case .source:
                     MarkdownSourceView(contents: file.contents, selections: .constant([]))
                 }

@@ -11,6 +11,9 @@ Format:
 
 ## 2026-06-25
 
+- Replaced the custom SwiftUI preview renderer with a full-document `WKWebView` preview backed by generated HTML/CSS, simplifying native text selection and unifying table rendering with the rest of the preview surface.
+- Removed the temporary legacy preview comparison mode now that the `WKWebView` renderer is the preferred preview path on macOS and iOS.
+- Kept macOS support compatible with macOS 26 Tahoe while continuing the iOS 27 move.
 - Updated the macOS file-drop handler to use `NSItemProvider.loadObject` instead of the deprecated `loadItem` API for macOS 27.
 
 ## 2026-03-19

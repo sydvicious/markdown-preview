@@ -6,10 +6,14 @@ import SwiftUI
 
 struct MarkdownPreviewView: View {
     let source: String
+    let baseURL: URL?
     @Binding var selections: [MarkdownSelectionRange]
 
     var body: some View {
-        MarkdownBlocksView(source: source, selections: $selections)
+        MarkdownPreviewWebView(
+            html: MarkdownHTMLBuilder.document(for: source),
+            baseURL: baseURL
+        )
     }
 }
 
@@ -17,6 +21,7 @@ struct MarkdownPreviewView: View {
 #Preview("Markdown Preview View") {
     MarkdownPreviewView(
         source: MarkdownPreviewFixtures.excerptFile.contents,
+        baseURL: nil,
         selections: .constant([MarkdownSelectionRange(location: 0, length: 120)])
     )
 }

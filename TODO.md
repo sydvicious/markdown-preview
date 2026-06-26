@@ -2,11 +2,11 @@
 
 This document tracks planned work for MarkdownPreviewApp.
 
-### Support removal of documents from list
-### Sort list by file name
 ### Setup sections in list based on directory
 
 ### Convert to WKWebView
+
+### Support search in both preview and source view
 
 ### Support image references.
 
@@ -103,6 +103,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - This depends on the selection/copy work below.
 
 ### Selection/copy follow-ups.
+  - Restore the `Copy` button chrome on code, quote, and table blocks without letting that `Copy` label become part of text selection or copied/pasted content.
   - Keep `Grid` as the table rendering path; do not regress table geometry while adding selection support.
   - Keep blockquote and fenced code blocks as independent preview blocks with both internal text selection and the existing Copy button.
   - Keep tables as independent preview blocks; later support selecting a whole table, row, column, cell, or text inside a cell.
