@@ -7,6 +7,14 @@ import SwiftUI
 
 @MainActor
 final class DocumentSessionStore: ObservableObject {
+    struct DocumentSection: Identifiable, Equatable {
+        let directoryPath: String
+        let label: String
+        let documents: [OpenedDocument]
+
+        var id: String { directoryPath }
+    }
+
     struct MissingActiveDocumentAlert: Identifiable {
         let id: String
         let fileName: String
@@ -57,6 +65,28 @@ final class DocumentSessionStore: ObservableObject {
 
     var sortedDocuments: [OpenedDocument] {
         openedDocuments.sorted(by: Self.sortDocumentsByFileName)
+    }
+
+    var groupedDocumentsByParentDirectory: [DocumentSection] {
+        let grouped = Dictionary(grouping: openedDocuments, by: { document in
+            document.file.url.deletingLastPathComponent().standardizedFileURL.path
+        })
+
+        return grouped
+            .map { directoryPath, documents in
+                DocumentSection(
+                    directoryPath: directoryPath,
+                    label: Self.displayDirectoryPath(directoryPath),
+                    documents: documents.sorted(by: Self.sortDocumentsByFileName)
+                )
+            }
+            .sorted { lhs, rhs in
+                let labelComparison = lhs.label.localizedCaseInsensitiveCompare(rhs.label)
+                if labelComparison != .orderedSame {
+                    return labelComparison == .orderedAscending
+                }
+                return lhs.directoryPath < rhs.directoryPath
+            }
     }
 
     var currentDocument: OpenedDocument? {
@@ -312,5 +342,20 @@ final class DocumentSessionStore: ObservableObject {
         }
 
         return lhs.file.url.path.localizedStandardCompare(rhs.file.url.path) == .orderedAscending
+    }
+
+    private static func displayDirectoryPath(_ path: String) -> String {
+        let homePath = NSHomeDirectory()
+        guard !homePath.isEmpty else { return path }
+
+        if path == homePath {
+            return "~"
+        }
+
+        if path.hasPrefix(homePath + "/") {
+            return "~/" + path.dropFirst(homePath.count + 1)
+        }
+
+        return path
     }
 }

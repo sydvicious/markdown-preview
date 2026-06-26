@@ -56,6 +56,33 @@ struct MarkdownPreviewTests {
         #expect(store.selectedDocumentID == alpha.url.standardizedFileURL.path)
     }
 
+    @MainActor
+    @Test func groupsDocumentsByParentDirectoryWithSortedSections() async throws {
+        let home = NSHomeDirectory()
+        let files = [
+            MarkdownFile(url: URL(fileURLWithPath: "/tmp/notes/zeta.md"), contents: ""),
+            MarkdownFile(url: URL(fileURLWithPath: "\(home)/work/beta.md"), contents: ""),
+            MarkdownFile(url: URL(fileURLWithPath: "\(home)/work/alpha.md"), contents: ""),
+            MarkdownFile(url: URL(fileURLWithPath: "\(home)/root.md"), contents: "")
+        ]
+
+        let store = DocumentSessionStore(
+            previewFiles: files,
+            disablePersistenceRestore: true
+        )
+
+        let sections = store.groupedDocumentsByParentDirectory
+
+        #expect(sections.map(\.label) == [
+            "/tmp/notes",
+            "~",
+            "~/work"
+        ])
+        #expect(sections[0].documents.map(\.file.fileName) == ["zeta.md"])
+        #expect(sections[1].documents.map(\.file.fileName) == ["root.md"])
+        #expect(sections[2].documents.map(\.file.fileName) == ["alpha.md", "beta.md"])
+    }
+
     @Test func htmlBuilderRendersCoreMarkdownBlocks() async throws {
         let source = """
         # Title

@@ -184,38 +184,26 @@ struct ContentView: View {
                         get: { store.selectedDocumentID },
                         set: { store.selectedDocumentID = $0 }
                     )) {
-                        ForEach(store.sortedDocuments) { document in
-                            HStack {
-                                Text(document.file.fileName)
-                                    .font(.body)
+                        #if os(macOS)
+                        ForEach(store.groupedDocumentsByParentDirectory) { section in
+                            Section {
+                                ForEach(section.documents) { document in
+                                    sidebarDocumentRow(document)
+                                }
+                            } header: {
+                                Text(section.label)
                                     .lineLimit(1)
-                                Spacer(minLength: 0)
+                                    .truncationMode(.head)
                             }
-                            .contentShape(Rectangle())
-                            .tag(document.id)
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    removeDocumentFromList(id: document.id)
-                                } label: {
-                                    Label("Remove from List", systemImage: "trash")
-                                }
-                            }
-                            #if !os(macOS)
-                            .swipeActions {
-                                Button(role: .destructive) {
-                                    removeDocumentFromList(id: document.id)
-                                } label: {
-                                    Label("Remove", systemImage: "trash")
-                                }
-                            }
-                            #endif
-                                #if os(macOS)
-                                .help(viewModel.tooltipPath(for: document.file.url))
-                                #endif
+                        }
+                        #else
+                        ForEach(store.sortedDocuments) { document in
+                            sidebarDocumentRow(document)
                         }
                         .onDelete { offsets in
                             store.deleteDocuments(at: offsets, isCompactWidth: isCompactWidth)
                         }
+                        #endif
                     }
                     #if os(macOS)
                     .onDeleteCommand(perform: removeSelectedDocumentFromList)
@@ -223,6 +211,36 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func sidebarDocumentRow(_ document: DocumentSessionStore.OpenedDocument) -> some View {
+        HStack {
+            Text(document.file.fileName)
+                .font(.body)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .tag(document.id)
+        .contextMenu {
+            Button(role: .destructive) {
+                removeDocumentFromList(id: document.id)
+            } label: {
+                Label("Remove from List", systemImage: "trash")
+            }
+        }
+        #if !os(macOS)
+        .swipeActions {
+            Button(role: .destructive) {
+                removeDocumentFromList(id: document.id)
+            } label: {
+                Label("Remove", systemImage: "trash")
+            }
+        }
+        #endif
+        #if os(macOS)
+        .help(viewModel.tooltipPath(for: document.file.url))
+        #endif
     }
 
     private var detailPanel: some View {
