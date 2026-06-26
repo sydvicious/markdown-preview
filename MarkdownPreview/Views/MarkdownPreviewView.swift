@@ -11,6 +11,7 @@ struct MarkdownPreviewView: View {
 
     var body: some View {
         MarkdownPreviewWebView(
+            source: source,
             html: MarkdownHTMLBuilder.document(for: source),
             baseURL: baseURL
         )

@@ -6,7 +6,10 @@ import Foundation
 
 enum MarkdownHTMLBuilder {
     static func document(for source: String) -> String {
-        let renderedBlocks = MarkdownBlockParser.parse(source).map(renderBlock).joined(separator: "\n")
+        let sourceLineTable = MarkdownSourceLineTable(source: source)
+        let renderedBlocks = MarkdownBlockParser.parse(source)
+            .map { renderBlock($0, sourceLineTable: sourceLineTable) }
+            .joined(separator: "\n")
         let body = renderedBlocks.isEmpty ? "<p class=\"empty\"></p>" : renderedBlocks
 
         return """
@@ -195,26 +198,37 @@ enum MarkdownHTMLBuilder {
         """
     }
 
-    private static func renderBlock(_ block: MarkdownBlock) -> String {
+    private static func renderBlock(_ block: MarkdownBlock, sourceLineTable: MarkdownSourceLineTable) -> String {
+        let content: String
         switch block.kind {
         case .heading(let level, let text):
             let clampedLevel = min(max(level, 1), 6)
-            return "<h\(clampedLevel)>\(renderInlineMarkdownHTML(text))</h\(clampedLevel)>"
+            content = "<h\(clampedLevel)>\(renderInlineMarkdownHTML(text))</h\(clampedLevel)>"
         case .paragraph(let text):
-            return "<p>\(renderInlineMarkdownHTML(text))</p>"
+            content = "<p>\(renderInlineMarkdownHTML(text))</p>"
         case .list(let items):
-            return renderList(items, ordered: false)
+            content = renderList(items, ordered: false)
         case .orderedList(let items):
-            return renderList(items, ordered: true)
+            content = renderList(items, ordered: true)
         case .table(let table):
-            return renderTable(table)
+            content = renderTable(table)
         case .blockquote(let text):
-            return "<blockquote><p>\(renderLinesAsHTML(text))</p></blockquote>"
+            content = "<blockquote><p>\(renderLinesAsHTML(text))</p></blockquote>"
         case .rule:
-            return "<hr />"
+            content = "<hr />"
         case .code(let code):
-            return "<pre><code>\(escapeHTML(code))</code></pre>"
+            content = "<pre><code>\(escapeHTML(code))</code></pre>"
         }
+
+        guard let sourceRange = sourceLineTable.range(for: block.lineRange) else {
+            return content
+        }
+
+        return """
+        <div class="md-block" data-source-start="\(sourceRange.location)" data-source-end="\(sourceRange.location + sourceRange.length)">
+          \(content)
+        </div>
+        """
     }
 
     private static func renderList(_ items: [MarkdownListItem], ordered: Bool) -> String {
@@ -412,6 +426,39 @@ enum MarkdownHTMLBuilder {
 
     private static func escapeHTMLAttribute(_ text: String) -> String {
         escapeHTML(text)
+    }
+}
+
+private struct MarkdownSourceLineTable {
+    let lineStartOffsets: [Int]
+    let sourceUTF16Length: Int
+
+    init(source: String) {
+        let utf16 = Array(source.utf16)
+        sourceUTF16Length = utf16.count
+
+        var starts = [0]
+        starts.reserveCapacity(utf16.filter { $0 == 10 }.count + 1)
+        for (index, codeUnit) in utf16.enumerated() where codeUnit == 10 {
+            starts.append(index + 1)
+        }
+        lineStartOffsets = starts
+    }
+
+    func range(for lineRange: Range<Int>) -> MarkdownSelectionRange? {
+        guard !lineRange.isEmpty else { return nil }
+        guard lineRange.lowerBound >= 0, lineRange.upperBound <= lineStartOffsets.count else { return nil }
+
+        let start = lineStartOffsets[lineRange.lowerBound]
+        let end: Int
+        if lineRange.upperBound < lineStartOffsets.count {
+            end = max(start, lineStartOffsets[lineRange.upperBound] - 1)
+        } else {
+            end = sourceUTF16Length
+        }
+
+        guard end >= start else { return nil }
+        return MarkdownSelectionRange(location: start, length: end - start)
     }
 }
 

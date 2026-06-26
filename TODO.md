@@ -4,8 +4,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Setup sections in list based on directory
 
-### Convert to WKWebView
-
 ### Support search in both preview and source view
 
 ### Support image references.
@@ -49,7 +47,7 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Add clipboard support.
   - Add actions to paste/open markdown text directly from the clipboard.
   - Define copy behavior for source text and rendered preview content on each platform.
-  - Copying from Source view should remain plain text only; do not generate `RTF` there.
+  - Copying selected markdown should place both the source markdown text and an `RTF` rendering on the clipboard.
   - When drag-selection crosses a copyable block, add that block's contents to the clipboard selection.
   - Decide what the `RTF` representation should look like when copyable blocks are included via drag-selection.
 

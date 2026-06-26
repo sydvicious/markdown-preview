@@ -86,4 +86,61 @@ struct MarkdownPreviewTests {
         #expect(html.contains("<pre><code>let value = 42</code></pre>"))
     }
 
+    @Test func clipboardPayloadIncludesMarkdownAndRichText() async throws {
+        let source = """
+        # Title
+
+        Paragraph with **bold** text.
+        """
+
+        let payload = MarkdownSelectionClipboard.payload(
+            for: source,
+            ranges: [MarkdownSelectionRange(location: 0, length: source.utf16.count)]
+        )
+
+        #expect(payload?.markdown == source)
+        #expect(payload?.rtf?.isEmpty == false)
+    }
+
+    @Test func selectedMarkdownUsesSelectionRangesInSourceOrder() async throws {
+        let source = "alpha beta gamma"
+        let ranges = [
+            MarkdownSelectionRange(location: 11, length: 5),
+            MarkdownSelectionRange(location: 0, length: 5)
+        ]
+
+        #expect(MarkdownSelectionClipboard.selectedMarkdown(in: source, ranges: ranges) == "alpha\ngamma")
+    }
+
+    @Test func parserKeepsCodeFenceLinesInBlockRange() async throws {
+        let source = """
+        ```swift
+        let value = 42
+        ```
+        """
+
+        let blocks = MarkdownBlockParser.parse(source)
+        guard case let .code(code)? = blocks.first?.kind else {
+            Issue.record("Expected first block to be a code block")
+            return
+        }
+
+        #expect(code == "let value = 42")
+        #expect(blocks.first?.lineRange == 0..<3)
+    }
+
+    @Test func htmlBuilderEmbedsSourceRangeMetadata() async throws {
+        let source = """
+        # Title
+
+        Paragraph text.
+        """
+
+        let html = MarkdownHTMLBuilder.document(for: source)
+
+        #expect(html.contains("data-source-start="))
+        #expect(html.contains("data-source-end="))
+        #expect(html.contains("class=\"md-block\""))
+    }
+
 }

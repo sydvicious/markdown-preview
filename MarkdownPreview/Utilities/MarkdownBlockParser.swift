@@ -54,7 +54,8 @@ struct MarkdownBlockParser {
         var quoteLines: [String] = []
         var quoteStartLine: Int?
         var code: [String] = []
-        var codeStartLine: Int?
+        var codeContentStartLine: Int?
+        var codeFenceStartLine: Int?
         var inCodeFence = false
 
         func flushParagraph(currentLine: Int) {
@@ -122,13 +123,15 @@ struct MarkdownBlockParser {
                     blocks.append(
                         .init(
                             kind: .code(code.joined(separator: "\n")),
-                            lineRange: (codeStartLine ?? index)..<index
+                            lineRange: (codeFenceStartLine ?? index)..<(index + 1)
                         )
                     )
                     code.removeAll()
-                    codeStartLine = nil
+                    codeContentStartLine = nil
+                    codeFenceStartLine = nil
                 } else {
-                    codeStartLine = index + 1
+                    codeFenceStartLine = index
+                    codeContentStartLine = index + 1
                 }
                 inCodeFence.toggle()
                 index += 1
@@ -241,7 +244,7 @@ struct MarkdownBlockParser {
             blocks.append(
                 .init(
                     kind: .code(code.joined(separator: "\n")),
-                    lineRange: (codeStartLine ?? lines.count)..<lines.count
+                    lineRange: (codeFenceStartLine ?? codeContentStartLine ?? lines.count)..<lines.count
                 )
             )
         }

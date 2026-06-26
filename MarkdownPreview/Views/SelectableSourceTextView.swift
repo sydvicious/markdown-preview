@@ -7,6 +7,17 @@ import SwiftUI
 #if os(iOS)
 import UIKit
 
+private final class MarkdownCopyTextView: UITextView {
+    override func copy(_ sender: Any?) {
+        let didWriteSelection = MarkdownSelectionClipboard.writeSelection(
+            from: text ?? "",
+            ranges: [MarkdownSelectionRange(selectedRange)]
+        )
+        guard !didWriteSelection else { return }
+        super.copy(sender)
+    }
+}
+
 struct SelectableSourceTextView: UIViewRepresentable {
     let text: String
     @Binding var selections: [MarkdownSelectionRange]
@@ -34,7 +45,7 @@ struct SelectableSourceTextView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
+        let view = MarkdownCopyTextView()
         view.delegate = context.coordinator
         view.isEditable = false
         view.isSelectable = true
@@ -87,6 +98,18 @@ struct SelectableSourceTextView: UIViewRepresentable {
 #elseif os(macOS)
 import AppKit
 
+private final class MarkdownCopyTextView: NSTextView {
+    override func copy(_ sender: Any?) {
+        let ranges = selectedRanges.map(\.rangeValue).map(MarkdownSelectionRange.init)
+        let didWriteSelection = MarkdownSelectionClipboard.writeSelection(
+            from: string,
+            ranges: ranges
+        )
+        guard !didWriteSelection else { return }
+        super.copy(sender)
+    }
+}
+
 struct SelectableSourceTextView: NSViewRepresentable {
     let text: String
     @Binding var selections: [MarkdownSelectionRange]
@@ -124,7 +147,7 @@ struct SelectableSourceTextView: NSViewRepresentable {
         scrollView.hasHorizontalScroller = true
         scrollView.drawsBackground = false
 
-        let textView = NSTextView()
+        let textView = MarkdownCopyTextView()
         textView.delegate = context.coordinator
         textView.isEditable = false
         textView.isSelectable = true
