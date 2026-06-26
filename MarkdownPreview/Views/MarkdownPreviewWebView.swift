@@ -10,6 +10,8 @@ import UIKit
 import AppKit
 #endif
 
+private let copyBlockMessageHandlerName = "copyBlock"
+
 #if os(iOS)
 struct MarkdownPreviewWebView: UIViewRepresentable {
     let source: String
@@ -18,6 +20,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String?
+        fileprivate weak var webView: MarkdownCopyWebView?
 
         func webView(
             _ webView: WKWebView,
@@ -41,11 +44,20 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: previewCopyButtonScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+        )
+        configuration.userContentController.add(context.coordinator, name: copyBlockMessageHandlerName)
 
         let webView = MarkdownCopyWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.markdownSource = source
+        context.coordinator.webView = webView
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
@@ -61,6 +73,10 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         context.coordinator.lastHTML = html
         webView.loadHTMLString(html, baseURL: baseURL)
     }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: copyBlockMessageHandlerName)
+    }
 }
 #elseif os(macOS)
 struct MarkdownPreviewWebView: NSViewRepresentable {
@@ -70,6 +86,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String?
+        fileprivate weak var webView: MarkdownCopyWebView?
 
         func webView(
             _ webView: WKWebView,
@@ -93,11 +110,20 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: previewCopyButtonScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+        )
+        configuration.userContentController.add(context.coordinator, name: copyBlockMessageHandlerName)
 
         let webView = MarkdownCopyWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.markdownSource = source
+        context.coordinator.webView = webView
         webView.setValue(false, forKey: "drawsBackground")
         webView.loadHTMLString(html, baseURL: baseURL)
         context.coordinator.lastHTML = html
@@ -110,8 +136,38 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         context.coordinator.lastHTML = html
         webView.loadHTMLString(html, baseURL: baseURL)
     }
+
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: copyBlockMessageHandlerName)
+    }
 }
 #endif
+
+private let previewCopyButtonScript = """
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-copy-button]');
+  if (!button) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const block = button.closest('[data-source-start][data-source-end]');
+  if (!block) {
+    return;
+  }
+
+  const start = Number(block.getAttribute('data-source-start'));
+  const end = Number(block.getAttribute('data-source-end'));
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return;
+  }
+
+  window.getSelection()?.removeAllRanges();
+  window.webkit?.messageHandlers?.copyBlock?.postMessage({ start, end });
+}, { capture: true });
+"""
 
 private let previewSelectionBlockRangesScript = """
 (() => {
@@ -172,6 +228,14 @@ private final class MarkdownCopyWebView: WKWebView {
 #endif
 
 private extension MarkdownCopyWebView {
+    func writeBlockRangeToPasteboard(start: Int, end: Int) {
+        guard end > start else { return }
+        _ = MarkdownSelectionClipboard.writeSelection(
+            from: markdownSource,
+            ranges: [MarkdownSelectionRange(location: start, length: end - start)]
+        )
+    }
+
     func copySelectionToPasteboard(fallback: @escaping () -> Void) {
         let source = markdownSource
         evaluateJavaScript(previewSelectionBlockRangesScript) { result, _ in
@@ -201,6 +265,19 @@ private extension MarkdownCopyWebView {
             return (start: startValue, end: endValue)
         }
         return ranges.isEmpty ? nil : ranges
+    }
+}
+
+extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == copyBlockMessageHandlerName else { return }
+        guard let payload = message.body as? [String: Any],
+              let start = payload["start"] as? NSNumber,
+              let end = payload["end"] as? NSNumber else {
+            return
+        }
+
+        webView?.writeBlockRangeToPasteboard(start: start.intValue, end: end.intValue)
     }
 }
 

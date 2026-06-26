@@ -170,4 +170,24 @@ struct MarkdownPreviewTests {
         #expect(html.contains("class=\"md-block\""))
     }
 
+    @Test func htmlBuilderAddsCopyButtonsToCopyableBlockTypes() async throws {
+        let source = """
+        > Quoted line
+
+        | Name | Count |
+        | --- | ---: |
+        | apples | 12 |
+
+        ```
+        let value = 42
+        ```
+        """
+
+        let html = MarkdownHTMLBuilder.document(for: source)
+
+        #expect(html.contains("class=\"md-copy-button\""))
+        #expect(html.contains("data-copy-button"))
+        #expect(html.contains("class=\"md-block md-copyable-block\""))
+    }
+
 }

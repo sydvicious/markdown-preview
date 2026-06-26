@@ -30,6 +30,8 @@ enum MarkdownHTMLBuilder {
               --table-header-background: rgba(120, 120, 128, 0.12);
               --row-stripe: rgba(120, 120, 128, 0.06);
               --selection-color: rgba(0, 122, 255, 0.26);
+              --copy-button-background: rgba(120, 120, 128, 0.16);
+              --copy-button-background-active: rgba(120, 120, 128, 0.24);
             }
             @media (prefers-color-scheme: dark) {
               :root {
@@ -40,6 +42,8 @@ enum MarkdownHTMLBuilder {
                 --table-header-background: rgba(118, 118, 128, 0.22);
                 --row-stripe: rgba(118, 118, 128, 0.14);
                 --selection-color: rgba(10, 132, 255, 0.34);
+                --copy-button-background: rgba(118, 118, 128, 0.3);
+                --copy-button-background-active: rgba(118, 118, 128, 0.4);
               }
             }
             html, body {
@@ -62,6 +66,31 @@ enum MarkdownHTMLBuilder {
               max-width: var(--content-width);
               margin: 0 auto;
               padding: var(--page-padding);
+            }
+            .md-block {
+              position: relative;
+            }
+            .md-copyable-block {
+              padding-top: 2rem;
+            }
+            .md-copy-button {
+              position: absolute;
+              top: 0.25rem;
+              right: 0;
+              border: 0;
+              border-radius: 999px;
+              padding: 0.3rem 0.75rem;
+              background: var(--copy-button-background);
+              color: inherit;
+              font: -apple-system-footnote;
+              font-weight: 600;
+              cursor: pointer;
+              user-select: none;
+              -webkit-user-select: none;
+              -webkit-touch-callout: none;
+            }
+            .md-copy-button:active {
+              background: var(--copy-button-background-active);
             }
             h1, h2, h3, h4, h5, h6 {
               margin: 0 0 0.6em 0;
@@ -200,24 +229,33 @@ enum MarkdownHTMLBuilder {
 
     private static func renderBlock(_ block: MarkdownBlock, sourceLineTable: MarkdownSourceLineTable) -> String {
         let content: String
+        let copyButton: String?
         switch block.kind {
         case .heading(let level, let text):
             let clampedLevel = min(max(level, 1), 6)
             content = "<h\(clampedLevel)>\(renderInlineMarkdownHTML(text))</h\(clampedLevel)>"
+            copyButton = nil
         case .paragraph(let text):
             content = "<p>\(renderInlineMarkdownHTML(text))</p>"
+            copyButton = nil
         case .list(let items):
             content = renderList(items, ordered: false)
+            copyButton = nil
         case .orderedList(let items):
             content = renderList(items, ordered: true)
+            copyButton = nil
         case .table(let table):
             content = renderTable(table)
+            copyButton = "<button type=\"button\" class=\"md-copy-button\" data-copy-button>Copy</button>"
         case .blockquote(let text):
             content = "<blockquote><p>\(renderLinesAsHTML(text))</p></blockquote>"
+            copyButton = "<button type=\"button\" class=\"md-copy-button\" data-copy-button>Copy</button>"
         case .rule:
             content = "<hr />"
+            copyButton = nil
         case .code(let code):
             content = "<pre><code>\(escapeHTML(code))</code></pre>"
+            copyButton = "<button type=\"button\" class=\"md-copy-button\" data-copy-button>Copy</button>"
         }
 
         guard let sourceRange = sourceLineTable.range(for: block.lineRange) else {
@@ -225,7 +263,8 @@ enum MarkdownHTMLBuilder {
         }
 
         return """
-        <div class="md-block" data-source-start="\(sourceRange.location)" data-source-end="\(sourceRange.location + sourceRange.length)">
+        <div class="md-block\(copyButton == nil ? "" : " md-copyable-block")" data-source-start="\(sourceRange.location)" data-source-end="\(sourceRange.location + sourceRange.length)">
+          \(copyButton ?? "")
           \(content)
         </div>
         """
