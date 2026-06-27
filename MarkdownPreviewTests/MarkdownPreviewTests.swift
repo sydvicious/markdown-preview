@@ -166,7 +166,78 @@ struct MarkdownPreviewTests {
 
         #expect(restoredStore.openedDocuments.isEmpty)
         #expect(restoredStore.textSizesByDocumentID.isEmpty)
+        #expect(restoredStore.selectedDocumentID == nil)
         #expect(restoredStore.textSize(for: documentID) == .large)
+    }
+
+    @MainActor
+    @Test func restoreKeepsPersistedSelectionOnCompactWidth() async throws {
+        let suiteName = "MarkdownPreviewTests.\(#function).\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Unable to create isolated UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let alphaURL = temporaryDirectory.appendingPathComponent("alpha.md")
+        let betaURL = temporaryDirectory.appendingPathComponent("beta.md")
+        try "alpha".write(to: alphaURL, atomically: true, encoding: .utf8)
+        try "beta".write(to: betaURL, atomically: true, encoding: .utf8)
+
+        let store = DocumentSessionStore(disablePersistenceRestore: true, userDefaults: defaults)
+        try store.openDocument(at: alphaURL)
+        try store.openDocument(at: betaURL)
+        store.selectedDocumentID = alphaURL.standardizedFileURL.path
+        store.persistDocuments(to: defaults)
+        store.persistSelectedDocument(to: defaults)
+
+        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: true, userDefaults: defaults)
+
+        #expect(restoredStore.openedDocuments.count == 2)
+        #expect(restoredStore.selectedDocumentID == alphaURL.standardizedFileURL.path)
+    }
+
+    @MainActor
+    @Test func restoreLeavesNoSelectionWhenPersistedFileIsMissing() async throws {
+        let suiteName = "MarkdownPreviewTests.\(#function).\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Unable to create isolated UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let alphaURL = temporaryDirectory.appendingPathComponent("alpha.md")
+        let betaURL = temporaryDirectory.appendingPathComponent("beta.md")
+        try "alpha".write(to: alphaURL, atomically: true, encoding: .utf8)
+        try "beta".write(to: betaURL, atomically: true, encoding: .utf8)
+
+        let store = DocumentSessionStore(disablePersistenceRestore: true, userDefaults: defaults)
+        try store.openDocument(at: alphaURL)
+        try store.openDocument(at: betaURL)
+        store.selectedDocumentID = betaURL.standardizedFileURL.path
+        store.persistDocuments(to: defaults)
+        store.persistSelectedDocument(to: defaults)
+
+        try FileManager.default.removeItem(at: betaURL)
+
+        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
+
+        #expect(restoredStore.openedDocuments.map(\.id) == [alphaURL.standardizedFileURL.path])
+        #expect(restoredStore.selectedDocumentID == nil)
     }
 
     @Test func htmlBuilderRendersCoreMarkdownBlocks() async throws {

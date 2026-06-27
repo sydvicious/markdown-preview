@@ -78,6 +78,9 @@ final class ContentViewModel: ObservableObject {
 
     func restorePersistedDocumentsIfNeeded(isCompactWidth: Bool) {
         store.restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth)
+        if isCompactWidth, store.selectedDocumentID != nil {
+            preferredCompactColumn = .detail
+        }
     }
 
     func presentInitialOpenSheetIfNeeded() {

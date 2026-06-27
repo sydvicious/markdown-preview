@@ -330,7 +330,7 @@ final class DocumentSessionStore: ObservableObject {
         }
     }
 
-    func restorePersistedDocumentsIfNeeded(isCompactWidth: Bool, userDefaults: UserDefaults) {
+    func restorePersistedDocumentsIfNeeded(isCompactWidth _: Bool, userDefaults: UserDefaults) {
         guard !didRestoreDocuments else { return }
         didRestoreDocuments = true
 
@@ -363,15 +363,11 @@ final class DocumentSessionStore: ObservableObject {
             from: userDefaults,
             validDocumentIDs: Set(restored.map(\.id))
         )
-        if isCompactWidth {
-            selectedDocumentID = nil
+        if let persistedSelection = userDefaults.string(forKey: persistedSelectionKey),
+           restored.contains(where: { $0.id == persistedSelection }) {
+            selectedDocumentID = persistedSelection
         } else {
-            if let persistedSelection = userDefaults.string(forKey: persistedSelectionKey),
-               restored.contains(where: { $0.id == persistedSelection }) {
-                selectedDocumentID = persistedSelection
-            } else {
-                selectedDocumentID = restored.first?.id
-            }
+            selectedDocumentID = nil
         }
     }
 
