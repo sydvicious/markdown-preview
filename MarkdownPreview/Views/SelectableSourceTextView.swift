@@ -20,6 +20,7 @@ private final class MarkdownCopyTextView: UITextView {
 
 struct SelectableSourceTextView: UIViewRepresentable {
     let text: String
+    let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
 
     final class Coordinator: NSObject, UITextViewDelegate {
@@ -54,10 +55,8 @@ struct SelectableSourceTextView: UIViewRepresentable {
         view.textColor = .label
         view.textContainerInset = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         view.textContainer.lineFragmentPadding = 0
-        view.adjustsFontForContentSizeCategory = true
-        view.font = UIFontMetrics(forTextStyle: .body).scaledFont(
-            for: UIFont.monospacedSystemFont(ofSize: 16, weight: .regular)
-        )
+        view.adjustsFontForContentSizeCategory = false
+        view.font = Self.font(for: textSize)
         context.coordinator.isApplyingSelection = true
         view.text = text
         applySelection(to: view, from: selections, coordinator: context.coordinator)
@@ -75,7 +74,15 @@ struct SelectableSourceTextView: UIViewRepresentable {
         if uiView.textColor != .label {
             uiView.textColor = .label
         }
+        let desiredFont = Self.font(for: textSize)
+        if uiView.font != desiredFont {
+            uiView.font = desiredFont
+        }
         applySelection(to: uiView, from: selections, coordinator: context.coordinator)
+    }
+
+    private static func font(for textSize: DynamicTypeSize) -> UIFont {
+        UIFont.monospacedSystemFont(ofSize: 16 * textSize.scaleFactor, weight: .regular)
     }
 
     private func applySelection(
@@ -110,8 +117,28 @@ private final class MarkdownCopyTextView: NSTextView {
     }
 }
 
+private final class WidthTrackingScrollView: NSScrollView {
+    override func layout() {
+        super.layout()
+        guard let textView = documentView as? NSTextView else { return }
+
+        let contentWidth = max(contentSize.width, 0)
+        if textView.frame.width != contentWidth {
+            textView.frame.size.width = contentWidth
+        }
+
+        if let textContainer = textView.textContainer {
+            let desiredSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
+            if textContainer.containerSize != desiredSize {
+                textContainer.containerSize = desiredSize
+            }
+        }
+    }
+}
+
 struct SelectableSourceTextView: NSViewRepresentable {
     let text: String
+    let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -142,20 +169,25 @@ struct SelectableSourceTextView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
+        let scrollView = WidthTrackingScrollView()
         scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
 
-        let textView = MarkdownCopyTextView()
+        let textView = MarkdownCopyTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
         textView.delegate = context.coordinator
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
-        textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        textView.font = Self.font(for: textSize)
         textView.textContainerInset = NSSize(width: 16, height: 16)
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(
+            width: scrollView.contentSize.width,
+            height: CGFloat.greatestFiniteMagnitude
+        )
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
@@ -178,7 +210,24 @@ struct SelectableSourceTextView: NSViewRepresentable {
             textView.string = text
             context.coordinator.isApplyingSelection = false
         }
+        let desiredFont = Self.font(for: textSize)
+        if textView.font != desiredFont {
+            textView.font = desiredFont
+        }
+        if let textContainer = textView.textContainer {
+            let desiredSize = NSSize(width: nsView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+            if textContainer.containerSize != desiredSize {
+                textContainer.containerSize = desiredSize
+            }
+        }
+        if textView.frame.width != nsView.contentSize.width {
+            textView.frame.size.width = nsView.contentSize.width
+        }
         applySelection(to: textView, from: selections, coordinator: context.coordinator)
+    }
+
+    private static func font(for textSize: DynamicTypeSize) -> NSFont {
+        NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize * textSize.scaleFactor, weight: .regular)
     }
 
     private func applySelection(
@@ -206,6 +255,7 @@ struct SelectableSourceTextView: NSViewRepresentable {
 #Preview("Selectable Source Text") {
     SelectableSourceTextView(
         text: MarkdownPreviewFixtures.excerptFile.contents,
+        textSize: .large,
         selections: .constant([MarkdownSelectionRange(location: 0, length: 18)])
     )
 }

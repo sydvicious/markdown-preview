@@ -4,6 +4,14 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-06-27
+
+- Added per-file text size controls on macOS, iPhone, and iPad, with sizes persisted by file path and cleaned up automatically when files are removed from the app list or disappear from disk.
+- Added keyboard shortcuts for text sizing, including `Command--` to decrease text size and both `Command-=` and `Command-+` to increase it when a hardware keyboard is present.
+- Extended iPhone and iPad text sizing to the full Dynamic Type range, including the larger accessibility sizes exposed by the iOS/iPadOS Accessibility settings.
+- Fixed macOS detail-pane sizing so reducing source text size no longer causes the source view to collapse horizontally.
+- Updated the `WKWebView` preview renderer to scale typography without shrinking the rendered page width, and removed the centered max-width reading column so preview content stays pinned to the available detail width as text size changes.
+
 ## 2026-04-27
 
 - Sorted the sidebar document list alphabetically by filename instead of most-recently opened order.

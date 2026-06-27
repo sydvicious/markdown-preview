@@ -72,6 +72,27 @@ struct ContentView: View {
                             .accessibilityLabel("Open")
                             .accessibilityIdentifier("Open")
                             #endif
+                            if let selectedDocumentID = store.selectedDocumentID {
+                                Button {
+                                    decreaseTextSize(for: selectedDocumentID)
+                                } label: {
+                                    Image(systemName: "textformat.size.smaller")
+                                }
+                                .disabled(!store.canDecreaseTextSize(for: selectedDocumentID))
+                                .keyboardShortcut("-", modifiers: [.command])
+                                .accessibilityLabel("Decrease Text Size")
+                                .accessibilityIdentifier("DecreaseTextSize")
+
+                                Button {
+                                    increaseTextSize(for: selectedDocumentID)
+                                } label: {
+                                    Image(systemName: "textformat.size.larger")
+                                }
+                                .disabled(!store.canIncreaseTextSize(for: selectedDocumentID))
+                                .keyboardShortcut("=", modifiers: [.command, .shift])
+                                .accessibilityLabel("Increase Text Size")
+                                .accessibilityIdentifier("IncreaseTextSize")
+                            }
                             #if os(macOS)
                             if store.selectedDocumentID != nil {
                                 removeFromListButton
@@ -81,6 +102,7 @@ struct ContentView: View {
                     }
             }
         }
+        .background(keyboardShortcutBridge)
         #if os(macOS)
         .fileImporter(
             isPresented: $isImporterPresented,
@@ -132,6 +154,9 @@ struct ContentView: View {
         }
         .onChange(of: store.selectedDocumentID) { _, _ in
             viewModel.onSelectionChanged()
+        }
+        .onChange(of: store.textSizesByDocumentID) { _, _ in
+            store.persistTextSizes()
         }
         .onAppear {
             viewModel.restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth)
@@ -301,6 +326,7 @@ struct ContentView: View {
             if let document = store.currentDocument {
                 MarkdownSourceView(
                     contents: document.file.contents,
+                    textSize: store.textSize(for: document.id),
                     selections: Binding(
                         get: { store.selections(for: document.id) },
                         set: { store.setSelections($0, for: document.id, text: document.file.contents) }
@@ -316,6 +342,7 @@ struct ContentView: View {
                 MarkdownPreviewView(
                     source: document.file.contents,
                     baseURL: document.file.url.deletingLastPathComponent(),
+                    textSize: store.textSize(for: document.id),
                     selections: Binding(
                         get: { store.selections(for: document.id) },
                         set: { store.setSelections($0, for: document.id, text: document.file.contents) }
@@ -374,9 +401,34 @@ struct ContentView: View {
         #endif
     }
 
+    @ViewBuilder
+    private var keyboardShortcutBridge: some View {
+        if let selectedDocumentID = store.selectedDocumentID {
+            Button {
+                increaseTextSize(for: selectedDocumentID)
+            } label: {
+                EmptyView()
+            }
+            .keyboardShortcut("=", modifiers: [.command])
+            .disabled(!store.canIncreaseTextSize(for: selectedDocumentID))
+            .accessibilityHidden(true)
+            .opacity(0.001)
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+        }
+    }
+
     private func removeSelectedDocumentFromList() {
         guard let selectedDocumentID = store.selectedDocumentID else { return }
         removeDocumentFromList(id: selectedDocumentID)
+    }
+
+    private func increaseTextSize(for documentID: String) {
+        store.increaseTextSize(for: documentID)
+    }
+
+    private func decreaseTextSize(for documentID: String) {
+        store.decreaseTextSize(for: documentID)
     }
 
     private func removeDocumentFromList(id: String) {
@@ -433,21 +485,21 @@ private struct InlineTitleOnIOS: ViewModifier {
 
 #Preview("Detail - Preview") {
     NavigationStack {
-        DetailPreviewPane(file: MarkdownPreviewFixtures.fullFile, mode: .preview)
+        DetailPreviewPane(file: MarkdownPreviewFixtures.fullFile, mode: .preview, textSize: .large)
             .navigationTitle(MarkdownPreviewFixtures.fullFile.fileName)
     }
 }
 
 #Preview("Detail - Source") {
     NavigationStack {
-        DetailPreviewPane(file: MarkdownPreviewFixtures.fullFile, mode: .source)
+        DetailPreviewPane(file: MarkdownPreviewFixtures.fullFile, mode: .source, textSize: .large)
             .navigationTitle(MarkdownPreviewFixtures.fullFile.fileName)
     }
 }
 
 #Preview("Detail - Empty") {
     NavigationStack {
-        DetailPreviewPane(file: nil, mode: .preview)
+        DetailPreviewPane(file: nil, mode: .preview, textSize: .large)
             .navigationTitle("Markdown Preview")
     }
 }

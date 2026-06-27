@@ -3,9 +3,10 @@
 //
 
 import Foundation
+import SwiftUI
 
 enum MarkdownHTMLBuilder {
-    static func document(for source: String) -> String {
+    static func document(for source: String, textSize: DynamicTypeSize = .defaultValue) -> String {
         let sourceLineTable = MarkdownSourceLineTable(source: source)
         let renderedBlocks = MarkdownBlockParser.parse(source)
             .map { renderBlock($0, sourceLineTable: sourceLineTable) }
@@ -22,7 +23,6 @@ enum MarkdownHTMLBuilder {
             :root {
               color-scheme: light dark;
               --page-padding: 20px;
-              --content-width: 920px;
               --border-color: rgba(60, 60, 67, 0.24);
               --secondary-border-color: rgba(60, 60, 67, 0.16);
               --blockquote-border: rgba(60, 60, 67, 0.32);
@@ -32,6 +32,8 @@ enum MarkdownHTMLBuilder {
               --selection-color: rgba(0, 122, 255, 0.26);
               --copy-button-background: rgba(120, 120, 128, 0.16);
               --copy-button-background-active: rgba(120, 120, 128, 0.24);
+              --content-scale: \(textSize.scaleFactor);
+              --body-font-size: calc(17px * var(--content-scale));
             }
             @media (prefers-color-scheme: dark) {
               :root {
@@ -55,7 +57,9 @@ enum MarkdownHTMLBuilder {
               text-size-adjust: 100%;
             }
             body {
-              font: -apple-system-body;
+              font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+              font-size: var(--body-font-size);
+              font-weight: 400;
               line-height: 1.55;
             }
             ::selection {
@@ -63,8 +67,8 @@ enum MarkdownHTMLBuilder {
             }
             article {
               box-sizing: border-box;
-              max-width: var(--content-width);
-              margin: 0 auto;
+              width: 100%;
+              margin: 0;
               padding: var(--page-padding);
             }
             .md-block {
@@ -82,7 +86,7 @@ enum MarkdownHTMLBuilder {
               padding: 0.3rem 0.75rem;
               background: var(--copy-button-background);
               color: inherit;
-              font: -apple-system-footnote;
+              font-size: 0.82em;
               font-weight: 600;
               cursor: pointer;
               user-select: none;
@@ -97,11 +101,11 @@ enum MarkdownHTMLBuilder {
               line-height: 1.2;
               font-weight: 650;
             }
-            h1 { font: -apple-system-large-title; }
-            h2 { font: -apple-system-title1; }
-            h3 { font: -apple-system-title2; }
-            h4 { font: -apple-system-headline; }
-            h5, h6 { font: -apple-system-subheadline; }
+            h1 { font-size: 2em; }
+            h2 { font-size: 1.65em; }
+            h3 { font-size: 1.35em; }
+            h4 { font-size: 1em; }
+            h5, h6 { font-size: 0.9em; }
             p, ul, ol, blockquote, pre, .table-wrap {
               margin: 0 0 1rem 0;
             }
@@ -204,7 +208,8 @@ enum MarkdownHTMLBuilder {
             }
             th {
               background: var(--table-header-background);
-              font: -apple-system-headline;
+              font-size: 1em;
+              font-weight: 650;
               text-align: left;
             }
             tbody tr:nth-child(even) td {

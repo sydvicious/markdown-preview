@@ -12,6 +12,7 @@ struct DetailPreviewPane: View {
 
     let file: MarkdownFile?
     let mode: Mode
+    let textSize: DynamicTypeSize
 
     var body: some View {
         Group {
@@ -21,15 +22,17 @@ struct DetailPreviewPane: View {
                     MarkdownPreviewView(
                         source: file.contents,
                         baseURL: file.url.deletingLastPathComponent(),
+                        textSize: textSize,
                         selections: .constant([])
                     )
                 case .source:
-                    MarkdownSourceView(contents: file.contents, selections: .constant([]))
+                    MarkdownSourceView(contents: file.contents, textSize: textSize, selections: .constant([]))
                 }
             } else {
                 Color.clear
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .dynamicTypeSize(.xSmall ... .accessibility5)
     }
 }
@@ -44,14 +47,14 @@ struct DetailPreviewPane: View {
 
 #Preview("Detail Pane - Source") {
     NavigationStack {
-        DetailPreviewPane(file: MarkdownPreviewFixtures.fullFile, mode: .source)
+        DetailPreviewPane(file: MarkdownPreviewFixtures.fullFile, mode: .source, textSize: .large)
             .navigationTitle(MarkdownPreviewFixtures.fullFile.fileName)
     }
 }
 
 #Preview("Detail Pane - Empty") {
     NavigationStack {
-        DetailPreviewPane(file: nil, mode: .preview)
+        DetailPreviewPane(file: nil, mode: .preview, textSize: .large)
             .navigationTitle("Markdown Preview")
     }
 }
@@ -61,7 +64,7 @@ private struct DetailPreviewPanePreviewHost: View {
     @State private var mode: DetailPreviewPane.Mode = .source
 
     var body: some View {
-        DetailPreviewPane(file: file, mode: mode)
+        DetailPreviewPane(file: file, mode: mode, textSize: .large)
             .task {
                 guard mode == .source else { return }
                 try? await Task.sleep(for: .milliseconds(100))

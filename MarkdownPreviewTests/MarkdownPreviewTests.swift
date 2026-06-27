@@ -16,6 +16,55 @@ import Testing
 struct MarkdownPreviewTests {
 
     @MainActor
+    @Test func textSizePreferencePersistsPerDocumentAndClearsWhenRemoved() async throws {
+        let suiteName = "MarkdownPreviewTests.\(#function).\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Unable to create isolated UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/notes/alpha.md"), contents: "alpha")
+        let documentID = file.url.standardizedFileURL.path
+
+        let store = DocumentSessionStore(
+            previewFiles: [file],
+            disablePersistenceRestore: true,
+            userDefaults: defaults
+        )
+
+        #expect(store.textSize(for: documentID) == .large)
+        #expect(store.canIncreaseTextSize(for: documentID))
+        #expect(store.canDecreaseTextSize(for: documentID))
+
+        store.increaseTextSize(for: documentID)
+        store.increaseTextSize(for: documentID)
+        store.persistTextSizes(to: defaults)
+
+        #expect(store.textSize(for: documentID) == .xxLarge)
+
+        let restoredStore = DocumentSessionStore(
+            previewFiles: [file],
+            disablePersistenceRestore: true,
+            userDefaults: defaults
+        )
+
+        #expect(restoredStore.textSize(for: documentID) == .xxLarge)
+
+        _ = restoredStore.removeDocument(id: documentID, isCompactWidth: false)
+        restoredStore.persistTextSizes(to: defaults)
+
+        let cleanedStore = DocumentSessionStore(
+            previewFiles: [file],
+            disablePersistenceRestore: true,
+            userDefaults: defaults
+        )
+
+        #expect(cleanedStore.textSize(for: documentID) == .large)
+    }
+
+    @MainActor
     @Test func sortsOpenedDocumentsByFileName() async throws {
         let files = [
             MarkdownFile(url: URL(fileURLWithPath: "/tmp/notes/zeta.md"), contents: ""),
@@ -81,6 +130,43 @@ struct MarkdownPreviewTests {
         #expect(sections[0].documents.map(\.file.fileName) == ["zeta.md"])
         #expect(sections[1].documents.map(\.file.fileName) == ["root.md"])
         #expect(sections[2].documents.map(\.file.fileName) == ["alpha.md", "beta.md"])
+    }
+
+    @MainActor
+    @Test func restorePrunesTextSizePreferenceForMissingFile() async throws {
+        let suiteName = "MarkdownPreviewTests.\(#function).\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Unable to create isolated UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let fileURL = temporaryDirectory.appendingPathComponent("missing.md")
+        try "# Title".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let store = DocumentSessionStore(disablePersistenceRestore: true, userDefaults: defaults)
+        try store.openDocument(at: fileURL)
+
+        let documentID = fileURL.standardizedFileURL.path
+        store.increaseTextSize(for: documentID)
+        store.persistTextSizes(to: defaults)
+        store.persistDocuments(to: defaults)
+        store.persistSelectedDocument(to: defaults)
+
+        try FileManager.default.removeItem(at: fileURL)
+
+        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
+
+        #expect(restoredStore.openedDocuments.isEmpty)
+        #expect(restoredStore.textSizesByDocumentID.isEmpty)
+        #expect(restoredStore.textSize(for: documentID) == .large)
     }
 
     @Test func htmlBuilderRendersCoreMarkdownBlocks() async throws {

@@ -4,6 +4,132 @@
 
 import Foundation
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
+
+extension DynamicTypeSize {
+    static let defaultValue: DynamicTypeSize = .large
+
+    private static let persistenceOrder: [DynamicTypeSize] = [
+        .xSmall,
+        .small,
+        .medium,
+        .large,
+        .xLarge,
+        .xxLarge,
+        .xxxLarge,
+        .accessibility1,
+        .accessibility2,
+        .accessibility3,
+        .accessibility4,
+        .accessibility5
+    ]
+
+    var persistedValue: String {
+        switch self {
+        case .xSmall: return "xSmall"
+        case .small: return "small"
+        case .medium: return "medium"
+        case .large: return "large"
+        case .xLarge: return "xLarge"
+        case .xxLarge: return "xxLarge"
+        case .xxxLarge: return "xxxLarge"
+        case .accessibility1: return "accessibility1"
+        case .accessibility2: return "accessibility2"
+        case .accessibility3: return "accessibility3"
+        case .accessibility4: return "accessibility4"
+        case .accessibility5: return "accessibility5"
+        @unknown default: return Self.defaultValue.persistedValue
+        }
+    }
+
+    init?(persistedValue: String) {
+        switch persistedValue {
+        case "xSmall": self = .xSmall
+        case "small": self = .small
+        case "medium": self = .medium
+        case "large": self = .large
+        case "xLarge": self = .xLarge
+        case "xxLarge": self = .xxLarge
+        case "xxxLarge": self = .xxxLarge
+        case "accessibility1": self = .accessibility1
+        case "accessibility2": self = .accessibility2
+        case "accessibility3": self = .accessibility3
+        case "accessibility4": self = .accessibility4
+        case "accessibility5": self = .accessibility5
+        default: return nil
+        }
+    }
+
+    var scaleFactor: CGFloat {
+        #if canImport(UIKit)
+        let baseFont = UIFont.monospacedSystemFont(ofSize: 16, weight: .regular)
+        let metrics = UIFontMetrics(forTextStyle: .body)
+        let basePointSize = metrics.scaledFont(
+            for: baseFont,
+            compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)
+        ).pointSize
+        let scaledPointSize = metrics.scaledFont(
+            for: baseFont,
+            compatibleWith: UITraitCollection(preferredContentSizeCategory: uiContentSizeCategory)
+        ).pointSize
+        return scaledPointSize / basePointSize
+        #else
+        switch self {
+        case .xSmall: return 14.0 / 17.0
+        case .small: return 15.0 / 17.0
+        case .medium: return 16.0 / 17.0
+        case .large: return 1.0
+        case .xLarge: return 19.0 / 17.0
+        case .xxLarge: return 21.0 / 17.0
+        case .xxxLarge: return 23.0 / 17.0
+        case .accessibility1: return 28.0 / 17.0
+        case .accessibility2: return 33.0 / 17.0
+        case .accessibility3: return 40.0 / 17.0
+        case .accessibility4: return 47.0 / 17.0
+        case .accessibility5: return 53.0 / 17.0
+        @unknown default: return Self.defaultValue.scaleFactor
+        }
+        #endif
+    }
+
+    #if canImport(UIKit)
+    var uiContentSizeCategory: UIContentSizeCategory {
+        switch self {
+        case .xSmall: return .extraSmall
+        case .small: return .small
+        case .medium: return .medium
+        case .large: return .large
+        case .xLarge: return .extraLarge
+        case .xxLarge: return .extraExtraLarge
+        case .xxxLarge: return .extraExtraExtraLarge
+        case .accessibility1: return .accessibilityMedium
+        case .accessibility2: return .accessibilityLarge
+        case .accessibility3: return .accessibilityExtraLarge
+        case .accessibility4: return .accessibilityExtraExtraLarge
+        case .accessibility5: return .accessibilityExtraExtraExtraLarge
+        @unknown default: return .large
+        }
+    }
+    #endif
+
+    var nextLarger: DynamicTypeSize? {
+        guard let index = Self.persistenceOrder.firstIndex(of: self),
+              index < Self.persistenceOrder.index(before: Self.persistenceOrder.endIndex) else {
+            return nil
+        }
+        return Self.persistenceOrder[index + 1]
+    }
+
+    var nextSmaller: DynamicTypeSize? {
+        guard let index = Self.persistenceOrder.firstIndex(of: self),
+              index > Self.persistenceOrder.startIndex else {
+            return nil
+        }
+        return Self.persistenceOrder[index - 1]
+    }
+}
 
 @MainActor
 final class DocumentSessionStore: ObservableObject {
@@ -35,11 +161,13 @@ final class DocumentSessionStore: ObservableObject {
 
     private let persistedDocumentsKey = "openedMarkdownDocuments"
     private let persistedSelectionKey = "selectedMarkdownDocumentID"
+    private static let persistedTextSizesKey = "markdownDocumentTextSizes"
 
     @Published var openedDocuments: [OpenedDocument]
     @Published var selectedDocumentID: OpenedDocument.ID?
     @Published var knownModificationDates: [String: Date] = [:]
     @Published private(set) var selectionsByDocumentID: [String: [MarkdownSelectionRange]] = [:]
+    @Published private(set) var textSizesByDocumentID: [String: DynamicTypeSize] = [:]
     @Published var missingActiveDocumentAlert: MissingActiveDocumentAlert?
 
     private(set) var didRestoreDocuments = false
@@ -47,7 +175,8 @@ final class DocumentSessionStore: ObservableObject {
     init(
         previewFiles: [MarkdownFile] = [],
         selectedPreviewFileID: String? = nil,
-        disablePersistenceRestore: Bool = false
+        disablePersistenceRestore: Bool = false,
+        userDefaults: UserDefaults = .standard
     ) {
         let now = Date()
         let opened = previewFiles.map {
@@ -61,6 +190,10 @@ final class DocumentSessionStore: ObservableObject {
         self.openedDocuments = opened
         self.selectedDocumentID = selectedPreviewFileID ?? opened.first?.id
         self.didRestoreDocuments = disablePersistenceRestore
+        self.textSizesByDocumentID = Self.restoreTextSizes(
+            from: userDefaults,
+            validDocumentIDs: Set(opened.map(\.id))
+        )
     }
 
     var sortedDocuments: [OpenedDocument] {
@@ -92,6 +225,28 @@ final class DocumentSessionStore: ObservableObject {
     var currentDocument: OpenedDocument? {
         guard let selectedDocumentID else { return nil }
         return openedDocuments.first(where: { $0.id == selectedDocumentID })
+    }
+
+    func textSize(for documentID: String) -> DynamicTypeSize {
+        textSizesByDocumentID[documentID] ?? .defaultValue
+    }
+
+    func canIncreaseTextSize(for documentID: String) -> Bool {
+        textSize(for: documentID).nextLarger != nil
+    }
+
+    func canDecreaseTextSize(for documentID: String) -> Bool {
+        textSize(for: documentID).nextSmaller != nil
+    }
+
+    func increaseTextSize(for documentID: String) {
+        guard let next = textSize(for: documentID).nextLarger else { return }
+        setTextSize(next, for: documentID)
+    }
+
+    func decreaseTextSize(for documentID: String) {
+        guard let next = textSize(for: documentID).nextSmaller else { return }
+        setTextSize(next, for: documentID)
     }
 
     func openDocument(at url: URL) throws {
@@ -130,6 +285,7 @@ final class DocumentSessionStore: ObservableObject {
         idsToDelete.forEach {
             knownModificationDates.removeValue(forKey: $0)
             selectionsByDocumentID.removeValue(forKey: $0)
+            textSizesByDocumentID.removeValue(forKey: $0)
         }
         if let selectedDocumentID, idsToDelete.contains(selectedDocumentID) {
             self.selectedDocumentID = isCompactWidth ? nil : sortedDocuments.first?.id
@@ -137,11 +293,16 @@ final class DocumentSessionStore: ObservableObject {
     }
 
     @discardableResult
-    func removeDocument(id: String, forceShowSidebarOnCompact: Bool = false, isCompactWidth: Bool) -> Bool {
+    func removeDocument(
+        id: String,
+        forceShowSidebarOnCompact: Bool = false,
+        isCompactWidth: Bool
+    ) -> Bool {
         let wasSelected = selectedDocumentID == id
         openedDocuments.removeAll(where: { $0.id == id })
         knownModificationDates.removeValue(forKey: id)
         selectionsByDocumentID.removeValue(forKey: id)
+        textSizesByDocumentID.removeValue(forKey: id)
 
         var shouldShowSidebar = false
         if wasSelected {
@@ -169,12 +330,12 @@ final class DocumentSessionStore: ObservableObject {
         }
     }
 
-    func restorePersistedDocumentsIfNeeded(isCompactWidth: Bool) {
+    func restorePersistedDocumentsIfNeeded(isCompactWidth: Bool, userDefaults: UserDefaults) {
         guard !didRestoreDocuments else { return }
         didRestoreDocuments = true
 
         let decoder = JSONDecoder()
-        guard let data = UserDefaults.standard.data(forKey: persistedDocumentsKey),
+        guard let data = userDefaults.data(forKey: persistedDocumentsKey),
               let persisted = try? decoder.decode([PersistedDocument].self, from: data) else {
             return
         }
@@ -198,10 +359,14 @@ final class DocumentSessionStore: ObservableObject {
 
         openedDocuments = restored
         knownModificationDates = restoredModificationDates
+        textSizesByDocumentID = Self.restoreTextSizes(
+            from: userDefaults,
+            validDocumentIDs: Set(restored.map(\.id))
+        )
         if isCompactWidth {
             selectedDocumentID = nil
         } else {
-            if let persistedSelection = UserDefaults.standard.string(forKey: persistedSelectionKey),
+            if let persistedSelection = userDefaults.string(forKey: persistedSelectionKey),
                restored.contains(where: { $0.id == persistedSelection }) {
                 selectedDocumentID = persistedSelection
             } else {
@@ -210,22 +375,38 @@ final class DocumentSessionStore: ObservableObject {
         }
     }
 
-    func persistDocuments() {
+    func restorePersistedDocumentsIfNeeded(isCompactWidth: Bool) {
+        restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth, userDefaults: .standard)
+    }
+
+    func persistDocuments(to userDefaults: UserDefaults) {
         let encoder = JSONEncoder()
         let persisted = openedDocuments.map {
             PersistedDocument(id: $0.id, lastOpened: $0.lastOpened, bookmarkData: $0.bookmarkData)
         }
         guard let data = try? encoder.encode(persisted) else { return }
-        UserDefaults.standard.set(data, forKey: persistedDocumentsKey)
+        userDefaults.set(data, forKey: persistedDocumentsKey)
+    }
+
+    func persistDocuments() {
+        persistDocuments(to: .standard)
+    }
+
+    func persistSelectedDocument(to userDefaults: UserDefaults) {
+        userDefaults.set(selectedDocumentID, forKey: persistedSelectionKey)
     }
 
     func persistSelectedDocument() {
-        UserDefaults.standard.set(selectedDocumentID, forKey: persistedSelectionKey)
+        persistSelectedDocument(to: .standard)
     }
 
     func checkActiveDocumentForChanges(isCompactWidth: Bool) {
         guard let selectedDocumentID else { return }
-        reloadDocumentIfNeeded(documentID: selectedDocumentID, alertIfMissing: true, isCompactWidth: isCompactWidth)
+        reloadDocumentIfNeeded(
+            documentID: selectedDocumentID,
+            alertIfMissing: true,
+            isCompactWidth: isCompactWidth
+        )
     }
 
     func checkAllDocumentsForChanges(isCompactWidth: Bool) {
@@ -233,7 +414,11 @@ final class DocumentSessionStore: ObservableObject {
         let activeID = selectedDocumentID
         let ids = openedDocuments.map(\.id)
         for id in ids where id != activeID {
-            reloadDocumentIfNeeded(documentID: id, alertIfMissing: false, isCompactWidth: isCompactWidth)
+            reloadDocumentIfNeeded(
+                documentID: id,
+                alertIfMissing: false,
+                isCompactWidth: isCompactWidth
+            )
         }
     }
 
@@ -248,12 +433,20 @@ final class DocumentSessionStore: ObservableObject {
         return shouldShowSidebar
     }
 
-    private func reloadDocumentIfNeeded(documentID: String, alertIfMissing: Bool, isCompactWidth: Bool) {
+    private func reloadDocumentIfNeeded(
+        documentID: String,
+        alertIfMissing: Bool,
+        isCompactWidth: Bool
+    ) {
         guard let index = openedDocuments.firstIndex(where: { $0.id == documentID }) else { return }
         let document = openedDocuments[index]
 
         guard let loaded = loadFromBookmarkData(document.bookmarkData) else {
-            handleMissingDocument(document, alertIfMissing: alertIfMissing, isCompactWidth: isCompactWidth)
+            handleMissingDocument(
+                document,
+                alertIfMissing: alertIfMissing,
+                isCompactWidth: isCompactWidth
+            )
             return
         }
 
@@ -270,7 +463,11 @@ final class DocumentSessionStore: ObservableObject {
         clampSelections(for: document.id, text: loaded.file.contents)
     }
 
-    private func handleMissingDocument(_ document: OpenedDocument, alertIfMissing: Bool, isCompactWidth: Bool) {
+    private func handleMissingDocument(
+        _ document: OpenedDocument,
+        alertIfMissing: Bool,
+        isCompactWidth: Bool
+    ) {
         if alertIfMissing {
             guard missingActiveDocumentAlert?.id != document.id else { return }
             missingActiveDocumentAlert = .init(id: document.id, fileName: document.file.fileName)
@@ -332,6 +529,45 @@ final class DocumentSessionStore: ObservableObject {
             selectionsByDocumentID.removeValue(forKey: documentID)
         } else {
             selectionsByDocumentID[documentID] = clamped
+        }
+    }
+
+    private func setTextSize(_ textSize: DynamicTypeSize, for documentID: String) {
+        if textSize == .defaultValue {
+            textSizesByDocumentID.removeValue(forKey: documentID)
+        } else {
+            textSizesByDocumentID[documentID] = textSize
+        }
+    }
+
+    func persistTextSizes(to userDefaults: UserDefaults) {
+        let persisted = textSizesByDocumentID.reduce(into: [String: String]()) { partialResult, entry in
+            partialResult[entry.key] = entry.value.persistedValue
+        }
+        userDefaults.set(persisted, forKey: Self.persistedTextSizesKey)
+    }
+
+    func persistTextSizes() {
+        persistTextSizes(to: .standard)
+    }
+
+    private static func restoreTextSizes(
+        from userDefaults: UserDefaults,
+        validDocumentIDs: Set<String>
+    ) -> [String: DynamicTypeSize] {
+        guard let persisted = userDefaults.dictionary(forKey: Self.persistedTextSizesKey) as? [String: String] else {
+            return [:]
+        }
+
+        return persisted.reduce(into: [String: DynamicTypeSize]()) { partialResult, entry in
+            guard validDocumentIDs.contains(entry.key) else {
+                return
+            }
+            guard let textSize = DynamicTypeSize(persistedValue: entry.value),
+                  textSize != .defaultValue else {
+                return
+            }
+            partialResult[entry.key] = textSize
         }
     }
 
