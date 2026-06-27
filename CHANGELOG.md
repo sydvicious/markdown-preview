@@ -6,11 +6,13 @@ Format:
 
 ## 2026-06-27
 
+- Restored the last selected file on relaunch when it is still available, including reopening directly into the detail pane on iPhone; if that file no longer restores, the app now leaves the selection empty instead of choosing a different document.
 - Added per-file text size controls on macOS, iPhone, and iPad, with sizes persisted by file path and cleaned up automatically when files are removed from the app list or disappear from disk.
 - Added keyboard shortcuts for text sizing, including `Command--` to decrease text size and both `Command-=` and `Command-+` to increase it when a hardware keyboard is present.
 - Extended iPhone and iPad text sizing to the full Dynamic Type range, including the larger accessibility sizes exposed by the iOS/iPadOS Accessibility settings.
 - Fixed macOS detail-pane sizing so reducing source text size no longer causes the source view to collapse horizontally.
 - Updated the `WKWebView` preview renderer to scale typography without shrinking the rendered page width, and removed the centered max-width reading column so preview content stays pinned to the available detail width as text size changes.
+- Simplified the generated UI launch smoke test so it only launches the app, avoiding the extra screenshot-capture work in the macOS launch-template test.
 
 ## 2026-04-27
 
