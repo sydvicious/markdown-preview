@@ -6,6 +6,7 @@ import SwiftUI
 
 final class FileOpenState: ObservableObject {
     @Published var openedURL: URL?
+    @Published var didReceiveExternalOpenRequest = false
 }
 
 @main
@@ -18,6 +19,7 @@ struct MarkdownPreviewApp: App {
             ContentView()
                 .environmentObject(fileOpenState)
                 .onOpenURL { url in
+                    fileOpenState.didReceiveExternalOpenRequest = true
                     fileOpenState.openedURL = url
                 }
         }
@@ -26,6 +28,7 @@ struct MarkdownPreviewApp: App {
             ContentView()
                 .environmentObject(fileOpenState)
                 .onOpenURL { url in
+                    fileOpenState.didReceiveExternalOpenRequest = true
                     fileOpenState.openedURL = url
                 }
         }

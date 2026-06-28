@@ -240,6 +240,92 @@ struct MarkdownPreviewTests {
         #expect(restoredStore.selectedDocumentID == nil)
     }
 
+    @MainActor
+    @Test func openingFinderDocumentAfterRestoreKeepsRestoredSessionDocuments() async throws {
+        let suiteName = "MarkdownPreviewTests.\(#function).\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Unable to create isolated UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let alphaURL = temporaryDirectory.appendingPathComponent("alpha.md")
+        let betaURL = temporaryDirectory.appendingPathComponent("beta.md")
+        let gammaURL = temporaryDirectory.appendingPathComponent("gamma.md")
+        try "alpha".write(to: alphaURL, atomically: true, encoding: .utf8)
+        try "beta".write(to: betaURL, atomically: true, encoding: .utf8)
+        try "gamma".write(to: gammaURL, atomically: true, encoding: .utf8)
+
+        let store = DocumentSessionStore(disablePersistenceRestore: true, userDefaults: defaults)
+        try store.openDocument(at: alphaURL)
+        try store.openDocument(at: betaURL)
+        store.selectedDocumentID = alphaURL.standardizedFileURL.path
+        store.persistDocuments(to: defaults)
+        store.persistSelectedDocument(to: defaults)
+
+        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
+        try restoredStore.openDocument(at: gammaURL)
+
+        #expect(
+            Set(restoredStore.openedDocuments.map(\.id)) == Set([
+                alphaURL.standardizedFileURL.path,
+                betaURL.standardizedFileURL.path,
+                gammaURL.standardizedFileURL.path
+            ])
+        )
+        #expect(restoredStore.selectedDocumentID == gammaURL.standardizedFileURL.path)
+    }
+
+    @Test func initialOpenPresentationUsesFileImporterOnMacWhenRestoreIsEmpty() async throws {
+        #expect(
+            ContentViewModel.initialOpenPresentation(
+                hasPresentedPrompt: false,
+                didRestoreDocuments: true,
+                openedDocumentsEmpty: true,
+                allowsFileImporter: true
+            ) == .fileImporter
+        )
+        #expect(
+            ContentViewModel.initialOpenPresentation(
+                hasPresentedPrompt: true,
+                didRestoreDocuments: true,
+                openedDocumentsEmpty: true,
+                allowsFileImporter: true
+            ) == .none
+        )
+        #expect(
+            ContentViewModel.initialOpenPresentation(
+                hasPresentedPrompt: false,
+                didRestoreDocuments: false,
+                openedDocumentsEmpty: true,
+                allowsFileImporter: true
+            ) == .none
+        )
+        #expect(
+            ContentViewModel.initialOpenPresentation(
+                hasPresentedPrompt: false,
+                didRestoreDocuments: true,
+                openedDocumentsEmpty: false,
+                allowsFileImporter: true
+            ) == .none
+        )
+        #expect(
+            ContentViewModel.initialOpenPresentation(
+                hasPresentedPrompt: false,
+                didRestoreDocuments: true,
+                openedDocumentsEmpty: true,
+                allowsFileImporter: false
+            ) == .none
+        )
+    }
+
     @Test func htmlBuilderRendersCoreMarkdownBlocks() async throws {
         let source = """
         # Title

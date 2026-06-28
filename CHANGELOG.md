@@ -6,6 +6,7 @@ Format:
 
 ## 2026-06-27
 
+- On macOS, the app now automatically presents the file picker on direct launch when restore finds no valid files, while Finder/Open With launches keep any restored session files open, add the requested file to the list, and suppress the automatic picker.
 - Restored the last selected file on relaunch when it is still available, including reopening directly into the detail pane on iPhone; if that file no longer restores, the app now leaves the selection empty instead of choosing a different document.
 - Added per-file text size controls on macOS, iPhone, and iPad, with sizes persisted by file path and cleaned up automatically when files are removed from the app list or disappear from disk.
 - Added keyboard shortcuts for text sizing, including `Command--` to decrease text size and both `Command-=` and `Command-+` to increase it when a hardware keyboard is present.

@@ -8,11 +8,15 @@ import Foundation
 
 struct ContentView: View {
     private let disableLiveFileMonitoring: Bool
+    #if os(macOS)
+    private static let startupImporterDelayNanoseconds: UInt64 = 300_000_000
+    #endif
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var fileOpenState: FileOpenState
     @State private var isImporterPresented = false
+    @State private var pendingStartupImporterTask: Task<Void, Never>?
     @StateObject private var viewModel: ContentViewModel
 
     init(
@@ -150,7 +154,7 @@ struct ContentView: View {
         }
         .onChange(of: store.openedDocuments) { _, _ in
             viewModel.onDocumentsChanged()
-            viewModel.presentInitialOpenSheetIfNeeded()
+            presentInitialOpenPromptIfNeeded()
         }
         .onChange(of: store.selectedDocumentID) { _, _ in
             viewModel.onSelectionChanged()
@@ -160,7 +164,7 @@ struct ContentView: View {
         }
         .onAppear {
             viewModel.restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth)
-            viewModel.presentInitialOpenSheetIfNeeded()
+            presentInitialOpenPromptIfNeeded()
             #if !os(macOS)
             if !disableLiveFileMonitoring {
                 store.checkActiveDocumentForChanges(isCompactWidth: isCompactWidth)
@@ -178,6 +182,7 @@ struct ContentView: View {
         }
         #endif
         .onReceive(fileOpenState.$openedURL.compactMap { $0 }) { url in
+            cancelPendingStartupImporter()
             viewModel.load(url: url, isCompactWidth: isCompactWidth)
             fileOpenState.openedURL = nil
         }
@@ -437,6 +442,46 @@ struct ContentView: View {
             viewModel.preferredCompactColumn = .sidebar
         }
     }
+
+    private func presentInitialOpenPromptIfNeeded() {
+        #if os(macOS)
+        scheduleStartupImporterIfNeeded()
+        #else
+        _ = viewModel.presentInitialOpenPromptIfNeeded()
+        #endif
+    }
+
+    #if os(macOS)
+    private func scheduleStartupImporterIfNeeded() {
+        cancelPendingStartupImporter()
+
+        let presentation = viewModel.initialOpenPresentationIfNeeded(
+            allowsFileImporter: !fileOpenState.didReceiveExternalOpenRequest
+        )
+        guard presentation == .fileImporter else { return }
+
+        pendingStartupImporterTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.startupImporterDelayNanoseconds)
+            guard !Task.isCancelled else { return }
+            guard viewModel.initialOpenPresentationIfNeeded(
+                allowsFileImporter: !fileOpenState.didReceiveExternalOpenRequest
+            ) == .fileImporter else {
+                return
+            }
+            if viewModel.presentInitialOpenPromptIfNeeded() == .fileImporter {
+                isImporterPresented = true
+            }
+            pendingStartupImporterTask = nil
+        }
+    }
+
+    private func cancelPendingStartupImporter() {
+        pendingStartupImporterTask?.cancel()
+        pendingStartupImporterTask = nil
+    }
+    #else
+    private func cancelPendingStartupImporter() {}
+    #endif
 
     #if os(macOS)
     private func handleDrop(providers: [NSItemProvider]) -> Bool {

@@ -4,9 +4,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Investigate using Liquid Glass controls.
 
-### macOS startup behavior.
-  - If there are no valid files after restore, automatically present the file picker.
-
 ### Support search in both preview and source view
 ### New from clipboard.
   - File -> New (Cmd-N): if clipboard has text, create a new unsaved document with that content.
@@ -80,5 +77,6 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Investigate a native visionOS (Vision Pro) app.
 
 ### BUG: Investigate why macOS sometimes opens a second list window when a file is double-clicked.
+  - Verify whether this still reproduces after the startup/open-flow changes that now restore the previous session and append the Finder-opened file in the main window.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*

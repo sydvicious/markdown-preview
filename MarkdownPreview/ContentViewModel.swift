@@ -13,6 +13,12 @@ final class ContentViewModel: ObservableObject {
         case source
     }
 
+    enum InitialOpenPresentation {
+        case none
+        case fileImporter
+        case sheet
+    }
+
     @Published var detailMode: DetailMode = .preview
     @Published var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
     @Published var openErrorMessage: String?
@@ -20,7 +26,7 @@ final class ContentViewModel: ObservableObject {
 
     let store: DocumentSessionStore
 
-    private var hasPresentedInitialOpenSheet: Bool
+    private var hasPresentedInitialOpenPrompt: Bool
     private var cancellables = Set<AnyCancellable>()
 
     init(
@@ -35,7 +41,7 @@ final class ContentViewModel: ObservableObject {
             disablePersistenceRestore: disablePersistenceRestore
         )
         self.detailMode = showsSourceInPreview ? .source : .preview
-        self.hasPresentedInitialOpenSheet = disablePersistenceRestore
+        self.hasPresentedInitialOpenPrompt = disablePersistenceRestore
 
         // Bridge nested store updates so SwiftUI redraws when document data changes.
         store.objectWillChange
@@ -83,15 +89,40 @@ final class ContentViewModel: ObservableObject {
         }
     }
 
-    func presentInitialOpenSheetIfNeeded() {
+    func presentInitialOpenPromptIfNeeded() -> InitialOpenPresentation {
+        let presentation = initialOpenPresentationIfNeeded(allowsFileImporter: true)
+        guard presentation != .none else { return .none }
+
+        hasPresentedInitialOpenPrompt = true
+        if presentation == .sheet {
+            isInitialOpenSheetPresented = true
+        }
+        return presentation
+    }
+
+    func initialOpenPresentationIfNeeded(allowsFileImporter: Bool) -> InitialOpenPresentation {
+        Self.initialOpenPresentation(
+            hasPresentedPrompt: hasPresentedInitialOpenPrompt,
+            didRestoreDocuments: store.didRestoreDocuments,
+            openedDocumentsEmpty: store.openedDocuments.isEmpty,
+            allowsFileImporter: allowsFileImporter
+        )
+    }
+
+    nonisolated static func initialOpenPresentation(
+        hasPresentedPrompt: Bool,
+        didRestoreDocuments: Bool,
+        openedDocumentsEmpty: Bool,
+        allowsFileImporter: Bool
+    ) -> InitialOpenPresentation {
+        guard !hasPresentedPrompt else { return .none }
+        guard didRestoreDocuments else { return .none }
+        guard openedDocumentsEmpty else { return .none }
         #if os(macOS)
-        return
+        guard allowsFileImporter else { return .none }
+        return .fileImporter
         #else
-        guard !hasPresentedInitialOpenSheet else { return }
-        guard store.didRestoreDocuments else { return }
-        guard store.openedDocuments.isEmpty else { return }
-        hasPresentedInitialOpenSheet = true
-        isInitialOpenSheetPresented = true
+        return .sheet
         #endif
     }
 
