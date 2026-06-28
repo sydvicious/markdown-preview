@@ -4,6 +4,16 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-06-28
+
+- Added file-list and in-document search UI on macOS, iPhone, and iPad, including compact search controls in the toolbar/detail chrome, match counts, next/previous navigation, search suggestions, and keyboard shortcuts for find navigation.
+- Added cross-pane search handoff so choosing a file from list-search results opens that file, seeds the detail search, and lets `Esc` back out through the handoff state in order.
+- Updated find command behavior so `Command-F` targets detail search when a document is selected, falls back to list search when only the file list is available, and `Command-Shift-F` focuses the file-list search.
+- Shared macOS find behavior with the system find pasteboard, including populating searches from the shared buffer and supporting `Command-E` from the current selection.
+- Reworked search/index plumbing around stripped-text mappings so file-list search and detail search operate on source-derived text while preview selections still map back into the rendered `WKWebView`.
+- Fixed iPhone file-list search after session restore by migrating restored document IDs to their resolved bookmark paths before restoring selection, text-size preferences, and the search index.
+- Added the `MarkdownPreview` title to the iPhone list view and kept search filtering active only while the app is foregrounded so external system searches do not unexpectedly hide files.
+
 ## 2026-06-27
 
 - On macOS, the app now automatically presents the file picker on direct launch when restore finds no valid files, while Finder/Open With launches keep any restored session files open, add the requested file to the list, and suppress the automatic picker.

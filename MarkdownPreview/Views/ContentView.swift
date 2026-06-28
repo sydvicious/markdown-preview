@@ -5,6 +5,17 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import Foundation
+#if os(macOS)
+import AppKit
+#endif
+#if os(iOS)
+import UIKit
+#endif
+
+private enum SearchField: Hashable {
+    case list
+    case detail
+}
 
 struct ContentView: View {
     private let disableLiveFileMonitoring: Bool
@@ -14,10 +25,22 @@ struct ContentView: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var commandCenter: MarkdownAppCommandCenter
     @EnvironmentObject private var fileOpenState: FileOpenState
     @State private var isImporterPresented = false
+    @State private var listSearchText = ""
+    @State private var detailSearch = MarkdownSearchSession()
+    @State private var didApplyDetailSearchSelection = false
+    @State private var previewSelectedText: String?
+    @State private var savedSelectionsBeforeDetailSearch: [String: [MarkdownSelectionRange]] = [:]
+    @State private var listToDetailSearchHandoffQuery: String?
     @State private var pendingStartupImporterTask: Task<Void, Never>?
+    @State private var pendingSearchFocusTask: Task<Void, Never>?
     @StateObject private var viewModel: ContentViewModel
+    @FocusState private var focusedSearchField: SearchField?
+    #if os(macOS)
+    @State private var macFirstResponderSink = MacFirstResponderSink()
+    #endif
 
     init(
         previewFiles: [MarkdownFile] = [],
@@ -41,6 +64,7 @@ struct ContentView: View {
         NavigationSplitView(preferredCompactColumn: $viewModel.preferredCompactColumn) {
             NavigationStack {
                 sidebarPanel
+                    .modifier(SidebarTitleOnIPhone(isActive: usesSingleColumnNavigation))
                     .toolbar {
                         #if !os(macOS)
                         ToolbarItem(placement: openButtonPlacement) {
@@ -66,6 +90,11 @@ struct ContentView: View {
                     .navigationTitle(viewModel.detailNavigationTitle())
                     .modifier(InlineTitleOnIOS())
                     .toolbar {
+                        if store.currentDocument != nil, showsToolbarDetailSearch {
+                            ToolbarItem(placement: detailSearchToolbarPlacement) {
+                                detailSearchToolbarItem
+                            }
+                        }
                         ToolbarItemGroup(placement: viewButtonPlacement) {
                             #if os(macOS)
                             Button {
@@ -83,7 +112,6 @@ struct ContentView: View {
                                     Image(systemName: "textformat.size.smaller")
                                 }
                                 .disabled(!store.canDecreaseTextSize(for: selectedDocumentID))
-                                .keyboardShortcut("-", modifiers: [.command])
                                 .accessibilityLabel("Decrease Text Size")
                                 .accessibilityIdentifier("DecreaseTextSize")
 
@@ -93,7 +121,6 @@ struct ContentView: View {
                                     Image(systemName: "textformat.size.larger")
                                 }
                                 .disabled(!store.canIncreaseTextSize(for: selectedDocumentID))
-                                .keyboardShortcut("=", modifiers: [.command, .shift])
                                 .accessibilityLabel("Increase Text Size")
                                 .accessibilityIdentifier("IncreaseTextSize")
                             }
@@ -106,19 +133,22 @@ struct ContentView: View {
                     }
             }
         }
-        .background(keyboardShortcutBridge)
+        .background(macFirstResponderSinkBackground)
+        #if os(macOS)
+        .onExitCommand(perform: cancelFocusedSearch)
+        #endif
         #if os(macOS)
         .fileImporter(
             isPresented: $isImporterPresented,
             allowedContentTypes: MarkdownFile.supportedTypes,
             allowsMultipleSelection: false
         ) { result in
-            viewModel.handleImport(result, isCompactWidth: isCompactWidth)
+            viewModel.handleImport(result, isCompactWidth: usesSingleColumnNavigation)
         }
         #else
         .sheet(isPresented: $isImporterPresented) {
             MarkdownDocumentPicker { url in
-                viewModel.load(url: url, isCompactWidth: isCompactWidth)
+                viewModel.load(url: url, isCompactWidth: usesSingleColumnNavigation)
                 isImporterPresented = false
             } onCancel: {
                 isImporterPresented = false
@@ -147,53 +177,89 @@ struct ContentView: View {
             presenting: store.missingActiveDocumentAlert
         ) { alert in
             Button("OK") {
-                viewModel.acknowledgeMissingActiveDocument(isCompactWidth: isCompactWidth)
+                viewModel.acknowledgeMissingActiveDocument(isCompactWidth: usesSingleColumnNavigation)
             }
         } message: { alert in
             Text("\"\(alert.fileName)\" is no longer available.")
         }
         .onChange(of: store.openedDocuments) { _, _ in
             viewModel.onDocumentsChanged()
+            refreshDetailSearch()
             presentInitialOpenPromptIfNeeded()
+            clearMacDefaultSearchFocusIfNeeded()
+            syncCommandCenter()
         }
         .onChange(of: store.selectedDocumentID) { _, _ in
+            previewSelectedText = nil
             viewModel.onSelectionChanged()
+            if isListSearchFiltering, store.currentDocument != nil {
+                activateDetailSearchFromListSearch()
+            } else {
+                refreshDetailSearch()
+                clearMacDefaultSearchFocusIfNeeded()
+            }
+            syncCommandCenter()
         }
         .onChange(of: store.textSizesByDocumentID) { _, _ in
             store.persistTextSizes()
+            syncCommandCenter()
+        }
+        .onChange(of: store.selectionsByDocumentID) { _, _ in
+            syncCommandCenter()
+        }
+        .onChange(of: detailSearch.resultCount) { _, _ in
+            syncCommandCenter()
+        }
+        .onChange(of: previewSelectedText) { _, _ in
+            syncCommandCenter()
+        }
+        .onChange(of: viewModel.detailMode) { _, _ in
+            previewSelectedText = nil
+            syncCommandCenter()
+        }
+        .onChange(of: focusedSearchField) { _, _ in
+            syncCommandCenter()
         }
         .onAppear {
-            viewModel.restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth)
+            viewModel.restorePersistedDocumentsIfNeeded(isCompactWidth: usesSingleColumnNavigation)
+            refreshDetailSearch()
             presentInitialOpenPromptIfNeeded()
+            clearMacDefaultSearchFocusIfNeeded()
+            syncCommandCenter()
             #if !os(macOS)
             if !disableLiveFileMonitoring {
-                store.checkActiveDocumentForChanges(isCompactWidth: isCompactWidth)
-                store.checkAllDocumentsForChanges(isCompactWidth: isCompactWidth)
+                store.checkActiveDocumentForChanges(isCompactWidth: usesSingleColumnNavigation)
+                store.checkAllDocumentsForChanges(isCompactWidth: usesSingleColumnNavigation)
             }
             #endif
+        }
+        .onDisappear {
+            pendingSearchFocusTask?.cancel()
+            commandCenter.reset()
         }
         #if !os(macOS)
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             if !disableLiveFileMonitoring {
-                store.checkActiveDocumentForChanges(isCompactWidth: isCompactWidth)
-                store.checkAllDocumentsForChanges(isCompactWidth: isCompactWidth)
+                store.checkActiveDocumentForChanges(isCompactWidth: usesSingleColumnNavigation)
+                store.checkAllDocumentsForChanges(isCompactWidth: usesSingleColumnNavigation)
             }
         }
         #endif
         .onReceive(fileOpenState.$openedURL.compactMap { $0 }) { url in
             cancelPendingStartupImporter()
-            viewModel.load(url: url, isCompactWidth: isCompactWidth)
+            viewModel.load(url: url, isCompactWidth: usesSingleColumnNavigation)
+            refreshDetailSearch()
             fileOpenState.openedURL = nil
         }
         .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
             if !disableLiveFileMonitoring {
-                store.checkActiveDocumentForChanges(isCompactWidth: isCompactWidth)
+                store.checkActiveDocumentForChanges(isCompactWidth: usesSingleColumnNavigation)
             }
         }
         .onReceive(Timer.publish(every: 10.0, on: .main, in: .common).autoconnect()) { _ in
             if !disableLiveFileMonitoring {
-                store.checkAllDocumentsForChanges(isCompactWidth: isCompactWidth)
+                store.checkAllDocumentsForChanges(isCompactWidth: usesSingleColumnNavigation)
             }
         }
         .dynamicTypeSize(.xSmall ... .accessibility5)
@@ -201,6 +267,11 @@ struct ContentView: View {
 
     private var sidebarPanel: some View {
         VStack(spacing: 0) {
+            listSearchBar
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
             Group {
                 if !store.didRestoreDocuments {
                     ProgressView("Loading Files")
@@ -209,13 +280,18 @@ struct ContentView: View {
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else if isListSearchFiltering, filteredDocumentsCount == 0 {
+                    Text("No matching files")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
+                    #if os(macOS)
                     List(selection: Binding(
                         get: { store.selectedDocumentID },
                         set: { store.selectedDocumentID = $0 }
                     )) {
-                        #if os(macOS)
-                        ForEach(store.groupedDocumentsByParentDirectory) { section in
+                        ForEach(filteredGroupedDocumentsByParentDirectory) { section in
                             Section {
                                 ForEach(section.documents) { document in
                                     sidebarDocumentRow(document)
@@ -226,17 +302,18 @@ struct ContentView: View {
                                     .truncationMode(.head)
                             }
                         }
-                        #else
-                        ForEach(store.sortedDocuments) { document in
+                    }
+                    .onDeleteCommand(perform: removeSelectedDocumentFromList)
+                    #else
+                    List {
+                        ForEach(filteredSortedDocuments) { document in
                             sidebarDocumentRow(document)
                         }
                         .onDelete { offsets in
-                            store.deleteDocuments(at: offsets, isCompactWidth: isCompactWidth)
+                            deleteFilteredDocuments(at: offsets)
                         }
-                        #endif
                     }
-                    #if os(macOS)
-                    .onDeleteCommand(perform: removeSelectedDocumentFromList)
+                    .id(trimmedListSearchText)
                     #endif
                 }
             }
@@ -251,7 +328,16 @@ struct ContentView: View {
             Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
-        .tag(document.id)
+        .modifier(SidebarRowSelectionTag(documentID: document.id))
+        .modifier(SidebarRowTapAction(
+            isCompactWidth: usesSingleColumnNavigation,
+            action: {
+                store.selectedDocumentID = document.id
+                if usesSingleColumnNavigation {
+                    viewModel.preferredCompactColumn = .detail
+                }
+            }
+        ))
         .contextMenu {
             Button(role: .destructive) {
                 removeDocumentFromList(id: document.id)
@@ -287,16 +373,18 @@ struct ContentView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 8)
 
-                ZStack(alignment: .topLeading) {
-                    previewPanel
-                        .opacity(viewModel.detailMode == .preview ? 1 : 0)
-                        .allowsHitTesting(viewModel.detailMode == .preview)
-                        .accessibilityHidden(viewModel.detailMode != .preview)
+                if showsToolbarDetailSearch == false {
+                    detailSearchBar
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 8)
+                }
 
-                    sourcePanel
-                        .opacity(viewModel.detailMode == .source ? 1 : 0)
-                        .allowsHitTesting(viewModel.detailMode == .source)
-                        .accessibilityHidden(viewModel.detailMode != .source)
+                Group {
+                    if viewModel.detailMode == .preview {
+                        previewPanel
+                    } else {
+                        sourcePanel
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
@@ -351,7 +439,8 @@ struct ContentView: View {
                     selections: Binding(
                         get: { store.selections(for: document.id) },
                         set: { store.setSelections($0, for: document.id, text: document.file.contents) }
-                    )
+                    ),
+                    onSelectedTextChange: { previewSelectedText = $0 }
                 )
             }
         }
@@ -372,6 +461,22 @@ struct ContentView: View {
         horizontalSizeClass == .compact
     }
 
+    private var showsToolbarDetailSearch: Bool {
+        #if os(macOS)
+        true
+        #else
+        UIDevice.current.userInterfaceIdiom != .phone
+        #endif
+    }
+
+    private var usesSingleColumnNavigation: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone && isCompactWidth
+        #else
+        false
+        #endif
+    }
+
     private var openButtonPlacement: ToolbarItemPlacement {
         #if os(macOS)
         return .automatic
@@ -385,6 +490,14 @@ struct ContentView: View {
         return .automatic
         #else
         return .topBarTrailing
+        #endif
+    }
+
+    private var detailSearchToolbarPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        .automatic
+        #else
+        .principal
         #endif
     }
 
@@ -407,20 +520,12 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private var keyboardShortcutBridge: some View {
-        if let selectedDocumentID = store.selectedDocumentID {
-            Button {
-                increaseTextSize(for: selectedDocumentID)
-            } label: {
-                EmptyView()
-            }
-            .keyboardShortcut("=", modifiers: [.command])
-            .disabled(!store.canIncreaseTextSize(for: selectedDocumentID))
-            .accessibilityHidden(true)
-            .opacity(0.001)
+    private var macFirstResponderSinkBackground: some View {
+        #if os(macOS)
+        MacFirstResponderSinkView(sink: macFirstResponderSink)
             .frame(width: 0, height: 0)
-            .allowsHitTesting(false)
-        }
+            .accessibilityHidden(true)
+        #endif
     }
 
     private func removeSelectedDocumentFromList() {
@@ -436,10 +541,186 @@ struct ContentView: View {
         store.decreaseTextSize(for: documentID)
     }
 
+    private func syncCommandCenter() {
+        let canIncreaseTextSize = store.selectedDocumentID.map(store.canIncreaseTextSize(for:)) ?? false
+        let canDecreaseTextSize = store.selectedDocumentID.map(store.canDecreaseTextSize(for:)) ?? false
+        commandCenter.update(
+            canFind: canHandleFindCommand,
+            handleFind: handleFindCommand,
+            canProjectFind: !store.openedDocuments.isEmpty,
+            handleProjectFind: focusListSearch,
+            canUseSelectionForFind: currentSelectionSearchText != nil,
+            handleUseSelectionForFind: useCurrentSelectionForFind,
+            canFindNext: detailSearch.resultCount > 0,
+            handleFindNext: { navigateDetailSearch(.forward) },
+            canFindPrevious: detailSearch.resultCount > 0,
+            handleFindPrevious: { navigateDetailSearch(.backward) },
+            canIncreaseTextSize: canIncreaseTextSize,
+            handleIncreaseTextSize: {
+                guard let selectedDocumentID = store.selectedDocumentID else { return }
+                increaseTextSize(for: selectedDocumentID)
+            },
+            canDecreaseTextSize: canDecreaseTextSize,
+            handleDecreaseTextSize: {
+                guard let selectedDocumentID = store.selectedDocumentID else { return }
+                decreaseTextSize(for: selectedDocumentID)
+            },
+            handleCancelSearch: cancelFocusedSearch
+        )
+    }
+
+    private var listSearchBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+
+                TextField("Search files", text: listSearchBinding)
+                    .searchFieldTextInputBehavior()
+                    .focused($focusedSearchField, equals: .list)
+                    .accessibilityIdentifier("ListSearchField")
+
+                Button {
+                    clearListSearch()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .opacity(trimmedListSearchText.isEmpty ? 0 : 1)
+                }
+                .buttonStyle(.plain)
+                .disabled(trimmedListSearchText.isEmpty)
+                .accessibilityHidden(trimmedListSearchText.isEmpty)
+                .accessibilityLabel("Clear File Search")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(searchFieldBackground)
+
+            if focusedSearchField == .list, !listSearchSuggestions.isEmpty {
+                searchSuggestionsRow(listSearchSuggestions) { suggestion in
+                    listSearchText = suggestion
+                }
+            }
+        }
+    }
+
+    private var detailSearchBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                detailSearchField(compact: false)
+                detailSearchStatusLabel
+                detailSearchNavigationButtons
+            }
+
+            if focusedSearchField == .detail, !detailSearchSuggestions.isEmpty {
+                searchSuggestionsRow(detailSearchSuggestions) { suggestion in
+                    setDetailSearchQuery(suggestion, focus: true)
+                }
+            }
+        }
+    }
+
+    private var detailSearchToolbarItem: some View {
+        HStack(spacing: 8) {
+            detailSearchField(compact: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            detailSearchStatusLabel
+                .fixedSize()
+            detailSearchNavigationButtons
+                .fixedSize()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func detailSearchField(compact: Bool) -> some View {
+        HStack(spacing: compact ? 6 : 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+
+            TextField("Search in file", text: detailSearchBinding)
+                .searchFieldTextInputBehavior()
+                .focused($focusedSearchField, equals: .detail)
+                .onSubmit {
+                    navigateDetailSearch(.forward)
+                }
+                .accessibilityIdentifier("DetailSearchField")
+
+            Button {
+                clearDetailSearch()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+                    .opacity(detailSearch.query.isEmpty ? 0 : 1)
+            }
+            .buttonStyle(.plain)
+            .disabled(detailSearch.query.isEmpty)
+            .accessibilityHidden(detailSearch.query.isEmpty)
+            .accessibilityLabel("Clear Detail Search")
+        }
+        .padding(.horizontal, compact ? 10 : 12)
+        .padding(.vertical, compact ? 6 : 10)
+        .frame(maxWidth: compact ? .infinity : nil, alignment: .leading)
+        .background(searchFieldBackground)
+        .modifier(CompactControlSize(isCompact: compact))
+        .layoutPriority(compact ? 1 : 0)
+    }
+
+    private var detailSearchStatusLabel: some View {
+        Text(detailSearchStatusText ?? "0 results")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .frame(minWidth: 56, alignment: .trailing)
+    }
+
+    private var detailSearchNavigationButtons: some View {
+        HStack(spacing: 6) {
+            Button {
+                navigateDetailSearch(.backward)
+            } label: {
+                Image(systemName: "chevron.up")
+            }
+            .disabled(detailSearch.resultCount == 0)
+            .accessibilityLabel("Previous Result")
+
+            Button {
+                navigateDetailSearch(.forward)
+            } label: {
+                Image(systemName: "chevron.down")
+            }
+            .disabled(detailSearch.resultCount == 0)
+            .accessibilityLabel("Next Result")
+        }
+        .modifier(CompactControlSize(isCompact: showsToolbarDetailSearch))
+    }
+
+    private var searchFieldBackground: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(.thinMaterial)
+    }
+
+    private func searchSuggestionsRow(_ suggestions: [String], onSelect: @escaping (String) -> Void) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(suggestions, id: \.self) { suggestion in
+                    Button(suggestion) {
+                        onSelect(suggestion)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+        }
+    }
+
     private func removeDocumentFromList(id: String) {
-        let shouldShowSidebar = store.removeDocument(id: id, isCompactWidth: isCompactWidth)
+        let shouldShowSidebar = store.removeDocument(id: id, isCompactWidth: usesSingleColumnNavigation)
         if shouldShowSidebar {
             viewModel.preferredCompactColumn = .sidebar
+        }
+        if store.selectedDocumentID == nil {
+            clearDetailSearch()
+        } else {
+            refreshDetailSearch()
         }
     }
 
@@ -479,8 +760,27 @@ struct ContentView: View {
         pendingStartupImporterTask?.cancel()
         pendingStartupImporterTask = nil
     }
+
+    private func clearMacDefaultSearchFocusIfNeeded() {
+        guard focusedSearchField == nil, !isImporterPresented else { return }
+
+        Task { @MainActor in
+            let delays: [UInt64] = [0, 50_000_000, 150_000_000]
+            for delay in delays {
+                if delay == 0 {
+                    await Task.yield()
+                } else {
+                    try? await Task.sleep(nanoseconds: delay)
+                }
+                guard focusedSearchField == nil, !isImporterPresented else { return }
+                focusedSearchField = nil
+                macFirstResponderSink.focus()
+            }
+        }
+    }
     #else
     private func cancelPendingStartupImporter() {}
+    private func clearMacDefaultSearchFocusIfNeeded() {}
     #endif
 
     #if os(macOS)
@@ -491,7 +791,7 @@ struct ContentView: View {
         provider.loadObject(ofClass: NSURL.self) { item, _ in
             guard let url = item as? NSURL else { return }
             Task { @MainActor in
-                viewModel.load(url: url as URL, isCompactWidth: isCompactWidth)
+                viewModel.load(url: url as URL, isCompactWidth: usesSingleColumnNavigation)
             }
         }
         return true
@@ -499,6 +799,320 @@ struct ContentView: View {
     #endif
 
     private var store: DocumentSessionStore { viewModel.store }
+    private var listSearchBinding: Binding<String> {
+        Binding(
+            get: { listSearchText },
+            set: { setListSearchQuery($0, focus: false) }
+        )
+    }
+
+    private var detailSearchBinding: Binding<String> {
+        Binding(
+            get: { detailSearch.query },
+            set: { setDetailSearchQuery($0, focus: false) }
+        )
+    }
+
+    private var trimmedListSearchText: String {
+        listSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasListSearch: Bool {
+        !trimmedListSearchText.isEmpty
+    }
+
+    private var isListSearchFiltering: Bool {
+        #if os(macOS)
+        hasListSearch && focusedSearchField == .list && isSearchHostAppActive
+        #else
+        hasListSearch && isSearchHostAppActive
+        #endif
+    }
+
+    private var isSearchHostAppActive: Bool {
+        guard scenePhase == .active else { return false }
+        #if os(macOS)
+        return NSApp.isActive
+        #else
+        return true
+        #endif
+    }
+
+    private var filteredSortedDocuments: [DocumentSessionStore.OpenedDocument] {
+        guard isListSearchFiltering else { return store.sortedDocuments }
+        return store.sortedDocuments.filter(matchesListSearch)
+    }
+
+    private var filteredGroupedDocumentsByParentDirectory: [DocumentSessionStore.DocumentSection] {
+        guard isListSearchFiltering else { return store.groupedDocumentsByParentDirectory }
+
+        return store.groupedDocumentsByParentDirectory.compactMap { section in
+            let documents = section.documents.filter(matchesListSearch)
+            guard !documents.isEmpty else { return nil }
+            return DocumentSessionStore.DocumentSection(
+                directoryPath: section.directoryPath,
+                label: section.label,
+                documents: documents
+            )
+        }
+    }
+
+    private var filteredDocumentsCount: Int {
+        filteredSortedDocuments.count
+    }
+
+    private var detailSearchStatusText: String? {
+        guard !detailSearch.query.isEmpty else { return nil }
+        return detailSearch.resultPositionText ?? "0 results"
+    }
+
+    private var listSearchSuggestions: [String] {
+        store.listSearchSuggestions(prefix: listSearchText)
+    }
+
+    private var detailSearchSuggestions: [String] {
+        guard let currentDocument = store.currentDocument else { return [] }
+        return store.detailSearchSuggestions(for: currentDocument.id, prefix: detailSearch.query)
+    }
+
+    private var currentSelectionSearchText: String? {
+        if viewModel.detailMode == .preview {
+            let normalizedPreviewSelection = previewSelectedText?
+                .replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if normalizedPreviewSelection?.isEmpty == false {
+                return normalizedPreviewSelection
+            }
+        }
+
+        guard let currentDocument = store.currentDocument else { return nil }
+        let selected = MarkdownSelectionClipboard.selectedMarkdown(
+            in: currentDocument.file.contents,
+            ranges: store.selections(for: currentDocument.id)
+        )
+        let normalized = selected?
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized?.isEmpty == false ? normalized : nil
+    }
+
+    private var canHandleFindCommand: Bool {
+        if usesSingleColumnNavigation {
+            if viewModel.preferredCompactColumn == .detail {
+                return store.currentDocument != nil
+            }
+            return !store.openedDocuments.isEmpty
+        }
+
+        if store.currentDocument != nil {
+            return true
+        }
+
+        return !store.openedDocuments.isEmpty
+    }
+
+    private func matchesListSearch(_ document: DocumentSessionStore.OpenedDocument) -> Bool {
+        store.documentMatchesListSearch(document.id, query: trimmedListSearchText)
+    }
+
+    private func deleteFilteredDocuments(at offsets: IndexSet) {
+        let idsToDelete = offsets.compactMap { filteredSortedDocuments[safe: $0]?.id }
+        idsToDelete.forEach { removeDocumentFromList(id: $0) }
+    }
+
+    private func setListSearchQuery(_ query: String, focus: Bool) {
+        listSearchText = query
+        #if os(macOS)
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedQuery.isEmpty {
+            SystemFindPasteboard.setQuery(trimmedQuery)
+        }
+        #endif
+        if focus {
+            focusedSearchField = .list
+        }
+    }
+
+    private func setDetailSearchQuery(_ query: String, focus: Bool) {
+        let wasEmpty = detailSearch.query.isEmpty
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if wasEmpty, !trimmedQuery.isEmpty, let currentDocument = store.currentDocument {
+            savedSelectionsBeforeDetailSearch[currentDocument.id] = store.selections(for: currentDocument.id)
+        }
+
+        detailSearch.updateQuery(query, in: store.currentDocument?.file.contents ?? "")
+        applyDetailSearchSelection()
+        #if os(macOS)
+        if !detailSearch.query.isEmpty {
+            SystemFindPasteboard.setQuery(detailSearch.query)
+        }
+        #endif
+        if focus {
+            focusedSearchField = .detail
+        }
+    }
+
+    private func refreshDetailSearch() {
+        if !detailSearch.query.isEmpty, let currentDocument = store.currentDocument,
+           savedSelectionsBeforeDetailSearch[currentDocument.id] == nil {
+            savedSelectionsBeforeDetailSearch[currentDocument.id] = store.selections(for: currentDocument.id)
+        }
+        detailSearch.refresh(in: store.currentDocument?.file.contents ?? "")
+        applyDetailSearchSelection()
+    }
+
+    private func applyDetailSearchSelection() {
+        guard let currentDocument = store.currentDocument else {
+            didApplyDetailSearchSelection = false
+            return
+        }
+        if let match = detailSearch.currentMatch {
+            store.setSelections([match], for: currentDocument.id, text: currentDocument.file.contents)
+            didApplyDetailSearchSelection = true
+        } else if didApplyDetailSearchSelection {
+            let previousSelection = savedSelectionsBeforeDetailSearch.removeValue(forKey: currentDocument.id) ?? []
+            store.setSelections(previousSelection, for: currentDocument.id, text: currentDocument.file.contents)
+            didApplyDetailSearchSelection = false
+        }
+    }
+
+    private func clearListSearch() {
+        pendingSearchFocusTask?.cancel()
+        setListSearchQuery("", focus: false)
+        listToDetailSearchHandoffQuery = nil
+        if focusedSearchField == .list {
+            focusedSearchField = nil
+        }
+    }
+
+    private func clearDetailSearch() {
+        pendingSearchFocusTask?.cancel()
+        setDetailSearchQuery("", focus: false)
+        if focusedSearchField == .detail {
+            focusedSearchField = nil
+        }
+    }
+
+    private func focusListSearch() {
+        if usesSingleColumnNavigation {
+            viewModel.preferredCompactColumn = .sidebar
+        }
+        #if os(macOS)
+        if trimmedListSearchText.isEmpty, let existingQuery = SystemFindPasteboard.currentQuery(), !existingQuery.isEmpty {
+            setListSearchQuery(existingQuery, focus: false)
+        }
+        #endif
+        requestSearchFocus(.list)
+    }
+
+    private func focusDetailSearch() {
+        guard store.currentDocument != nil else { return }
+        if usesSingleColumnNavigation {
+            viewModel.preferredCompactColumn = .detail
+        }
+        #if os(macOS)
+        if detailSearch.query.isEmpty, let existingQuery = SystemFindPasteboard.currentQuery(), !existingQuery.isEmpty {
+            setDetailSearchQuery(existingQuery, focus: false)
+        }
+        #endif
+        requestSearchFocus(.detail)
+    }
+
+    private func requestSearchFocus(_ field: SearchField) {
+        pendingSearchFocusTask?.cancel()
+        focusedSearchField = field
+
+        #if os(macOS)
+        pendingSearchFocusTask = Task { @MainActor in
+            let delays: [UInt64] = [0, 20_000_000, 80_000_000]
+            for delay in delays {
+                if delay == 0 {
+                    await Task.yield()
+                } else {
+                    try? await Task.sleep(nanoseconds: delay)
+                }
+                guard !Task.isCancelled else { return }
+                focusedSearchField = field
+            }
+        }
+        #endif
+    }
+
+    private func handleFindCommand() {
+        if usesSingleColumnNavigation {
+            if viewModel.preferredCompactColumn == .detail, store.currentDocument != nil {
+                focusDetailSearch()
+            } else if !store.openedDocuments.isEmpty {
+                focusListSearch()
+            }
+            return
+        }
+
+        if store.currentDocument != nil {
+            focusDetailSearch()
+        } else if !store.openedDocuments.isEmpty {
+            focusListSearch()
+        }
+    }
+
+    private func activateDetailSearchFromListSearch() {
+        let query = trimmedListSearchText
+        listToDetailSearchHandoffQuery = query
+        setListSearchQuery("", focus: false)
+        setDetailSearchQuery(query, focus: true)
+        if usesSingleColumnNavigation {
+            viewModel.preferredCompactColumn = .detail
+        }
+    }
+
+    private func navigateDetailSearch(_ direction: MarkdownSearchDirection) {
+        guard !detailSearch.query.isEmpty else {
+            focusDetailSearch()
+            return
+        }
+        _ = detailSearch.move(direction)
+        applyDetailSearchSelection()
+    }
+
+    private func useCurrentSelectionForFind() {
+        guard let currentSelectionSearchText else { return }
+        #if os(macOS)
+        SystemFindPasteboard.setQuery(currentSelectionSearchText)
+        #endif
+        setDetailSearchQuery(currentSelectionSearchText, focus: true)
+    }
+
+    private func cancelFocusedSearch() {
+        switch focusedSearchField {
+        case .list:
+            clearListSearch()
+        case .detail:
+            if restoreListSearchAfterHandoffIfNeeded() == false {
+                clearDetailSearch()
+            }
+        case nil:
+            if !detailSearch.query.isEmpty {
+                if restoreListSearchAfterHandoffIfNeeded() == false {
+                    clearDetailSearch()
+                }
+            } else if hasListSearch {
+                clearListSearch()
+            }
+        }
+    }
+
+    @discardableResult
+    private func restoreListSearchAfterHandoffIfNeeded() -> Bool {
+        guard let query = listToDetailSearchHandoffQuery else { return false }
+        clearDetailSearch()
+        setListSearchQuery(query, focus: false)
+        listToDetailSearchHandoffQuery = nil
+        requestSearchFocus(.list)
+        if usesSingleColumnNavigation {
+            viewModel.preferredCompactColumn = .sidebar
+        }
+        return true
+    }
 
 }
 
@@ -512,9 +1126,120 @@ private struct InlineTitleOnIOS: ViewModifier {
     }
 }
 
+private struct SidebarTitleOnIPhone: ViewModifier {
+    let isActive: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if isActive {
+            content
+                .navigationTitle("MarkdownPreview")
+                .navigationBarTitleDisplayMode(.inline)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+private struct SidebarRowSelectionTag: ViewModifier {
+    let documentID: String
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.tag(documentID)
+        #else
+        content
+        #endif
+    }
+}
+
+private struct SidebarRowTapAction: ViewModifier {
+    let isCompactWidth: Bool
+    let action: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content
+        #else
+        content.onTapGesture(perform: action)
+        #endif
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func searchFieldTextInputBehavior() -> some View {
+        #if os(iOS)
+        self
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+        #else
+        self
+        #endif
+    }
+}
+
+private struct CompactControlSize: ViewModifier {
+    let isCompact: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isCompact {
+            content.controlSize(.small)
+        } else {
+            content
+        }
+    }
+}
+
+#if os(macOS)
+private final class MacFirstResponderSink {
+    weak var view: NSView?
+
+    func focus() {
+        guard let view else { return }
+        let window = view.window ?? NSApp.keyWindow ?? NSApp.mainWindow
+        window?.makeFirstResponder(view)
+    }
+}
+
+private struct MacFirstResponderSinkView: NSViewRepresentable {
+    let sink: MacFirstResponderSink
+
+    func makeNSView(context: Context) -> MacFirstResponderSinkNSView {
+        let view = MacFirstResponderSinkNSView(frame: .zero)
+        view.setAccessibilityElement(false)
+        sink.view = view
+        return view
+    }
+
+    func updateNSView(_ nsView: MacFirstResponderSinkNSView, context: Context) {
+        sink.view = nsView
+    }
+}
+
+private final class MacFirstResponderSinkNSView: NSView {
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { true }
+}
+#endif
+
 #if DEBUG
 #Preview("App - Loaded") {
     AppLoadedPreviewHost()
+        .environmentObject(MarkdownAppCommandCenter())
         .environmentObject(FileOpenState())
         .frame(width: 393, height: 852)
 }
@@ -524,6 +1249,7 @@ private struct InlineTitleOnIOS: ViewModifier {
         disablePersistenceRestore: true,
         disableLiveFileMonitoring: true
     )
+        .environmentObject(MarkdownAppCommandCenter())
         .environmentObject(FileOpenState())
         .frame(width: 393, height: 852)
 }
@@ -561,6 +1287,7 @@ private struct AppLoadedPreviewHost: View {
             disableLiveFileMonitoring: true
         )
         .id(showsSource)
+        .environmentObject(MarkdownAppCommandCenter())
         .task {
             guard showsSource else { return }
             try? await Task.sleep(for: .milliseconds(2000))

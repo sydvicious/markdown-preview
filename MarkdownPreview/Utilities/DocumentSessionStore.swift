@@ -159,16 +159,23 @@ final class DocumentSessionStore: ObservableObject {
         let bookmarkData: Data
     }
 
+    private struct RestoreMigration {
+        let documents: [OpenedDocument]
+        let modificationDates: [String: Date]
+        let idMap: [String: String]
+    }
+
     private let persistedDocumentsKey = "openedMarkdownDocuments"
     private let persistedSelectionKey = "selectedMarkdownDocumentID"
     private static let persistedTextSizesKey = "markdownDocumentTextSizes"
 
     @Published var openedDocuments: [OpenedDocument]
     @Published var selectedDocumentID: OpenedDocument.ID?
-    @Published var knownModificationDates: [String: Date] = [:]
+    private var knownModificationDates: [String: Date] = [:]
     @Published private(set) var selectionsByDocumentID: [String: [MarkdownSelectionRange]] = [:]
     @Published private(set) var textSizesByDocumentID: [String: DynamicTypeSize] = [:]
     @Published var missingActiveDocumentAlert: MissingActiveDocumentAlert?
+    private let documentSearchIndex: DocumentSearchIndex
 
     private(set) var didRestoreDocuments = false
 
@@ -194,6 +201,7 @@ final class DocumentSessionStore: ObservableObject {
             from: userDefaults,
             validDocumentIDs: Set(opened.map(\.id))
         )
+        self.documentSearchIndex = DocumentSearchIndex(documents: opened.map(\.file))
     }
 
     var sortedDocuments: [OpenedDocument] {
@@ -225,6 +233,18 @@ final class DocumentSessionStore: ObservableObject {
     var currentDocument: OpenedDocument? {
         guard let selectedDocumentID else { return nil }
         return openedDocuments.first(where: { $0.id == selectedDocumentID })
+    }
+
+    func documentMatchesListSearch(_ documentID: String, query: String) -> Bool {
+        documentSearchIndex.containsMatch(in: documentID, query: query)
+    }
+
+    func listSearchSuggestions(prefix: String, limit: Int = 5) -> [String] {
+        documentSearchIndex.suggestedCompletions(prefix: prefix, limit: limit)
+    }
+
+    func detailSearchSuggestions(for documentID: String, prefix: String, limit: Int = 5) -> [String] {
+        documentSearchIndex.suggestedCompletions(in: documentID, prefix: prefix, limit: limit)
     }
 
     func textSize(for documentID: String) -> DynamicTypeSize {
@@ -276,6 +296,7 @@ final class DocumentSessionStore: ObservableObject {
         if let modificationDate {
             knownModificationDates[id] = modificationDate
         }
+        documentSearchIndex.upsert(file)
         selectedDocumentID = id
     }
 
@@ -286,6 +307,7 @@ final class DocumentSessionStore: ObservableObject {
             knownModificationDates.removeValue(forKey: $0)
             selectionsByDocumentID.removeValue(forKey: $0)
             textSizesByDocumentID.removeValue(forKey: $0)
+            documentSearchIndex.remove(documentID: $0)
         }
         if let selectedDocumentID, idsToDelete.contains(selectedDocumentID) {
             self.selectedDocumentID = isCompactWidth ? nil : sortedDocuments.first?.id
@@ -303,6 +325,7 @@ final class DocumentSessionStore: ObservableObject {
         knownModificationDates.removeValue(forKey: id)
         selectionsByDocumentID.removeValue(forKey: id)
         textSizesByDocumentID.removeValue(forKey: id)
+        documentSearchIndex.remove(documentID: id)
 
         var shouldShowSidebar = false
         if wasSelected {
@@ -340,32 +363,25 @@ final class DocumentSessionStore: ObservableObject {
             return
         }
 
-        var restored: [OpenedDocument] = []
-        var restoredModificationDates: [String: Date] = [:]
-        for entry in persisted.sorted(by: { $0.lastOpened > $1.lastOpened }) {
-            guard let loaded = loadFromBookmarkData(entry.bookmarkData) else { continue }
-            restored.append(
-                .init(
-                    id: entry.id,
-                    file: loaded.file,
-                    lastOpened: entry.lastOpened,
-                    bookmarkData: entry.bookmarkData
-                )
-            )
-            if let modificationDate = loaded.modificationDate {
-                restoredModificationDates[entry.id] = modificationDate
-            }
-        }
+        let migration = restoreMigration(
+            from: persisted.sorted(by: { $0.lastOpened > $1.lastOpened })
+        )
 
-        openedDocuments = restored
-        knownModificationDates = restoredModificationDates
+        openedDocuments = migration.documents
+        knownModificationDates = migration.modificationDates
         textSizesByDocumentID = Self.restoreTextSizes(
             from: userDefaults,
-            validDocumentIDs: Set(restored.map(\.id))
+            validDocumentIDs: Set(migration.documents.map(\.id)),
+            idMap: migration.idMap
         )
-        if let persistedSelection = userDefaults.string(forKey: persistedSelectionKey),
-           restored.contains(where: { $0.id == persistedSelection }) {
-            selectedDocumentID = persistedSelection
+        documentSearchIndex.rebuild(with: migration.documents.map(\.file))
+        if let persistedSelection = userDefaults.string(forKey: persistedSelectionKey) {
+            let resolvedSelection = migration.idMap[persistedSelection] ?? persistedSelection
+            if migration.documents.contains(where: { $0.id == resolvedSelection }) {
+                selectedDocumentID = resolvedSelection
+            } else {
+                selectedDocumentID = nil
+            }
         } else {
             selectedDocumentID = nil
         }
@@ -437,7 +453,23 @@ final class DocumentSessionStore: ObservableObject {
         guard let index = openedDocuments.firstIndex(where: { $0.id == documentID }) else { return }
         let document = openedDocuments[index]
 
-        guard let loaded = loadFromBookmarkData(document.bookmarkData) else {
+        guard let url = resolveBookmarkURL(from: document.bookmarkData) else {
+            handleMissingDocument(
+                document,
+                alertIfMissing: alertIfMissing,
+                isCompactWidth: isCompactWidth
+            )
+            return
+        }
+
+        if let modificationDate = currentModificationDate(for: url) {
+            let knownDate = knownModificationDates[document.id]
+            if knownDate != nil, modificationDate <= knownDate! {
+                return
+            }
+        }
+
+        guard let loaded = loadDocument(at: url) else {
             handleMissingDocument(
                 document,
                 alertIfMissing: alertIfMissing,
@@ -447,15 +479,12 @@ final class DocumentSessionStore: ObservableObject {
         }
 
         if let modificationDate = loaded.modificationDate {
-            let knownDate = knownModificationDates[document.id]
-            if knownDate != nil, modificationDate <= knownDate! {
-                return
-            }
             knownModificationDates[document.id] = modificationDate
         }
 
         guard loaded.file.contents != document.file.contents else { return }
         openedDocuments[index].file = loaded.file
+        documentSearchIndex.upsert(loaded.file)
         clampSelections(for: document.id, text: loaded.file.contents)
     }
 
@@ -485,6 +514,13 @@ final class DocumentSessionStore: ObservableObject {
     }
 
     private func loadFromBookmarkData(_ bookmarkData: Data) -> (file: MarkdownFile, modificationDate: Date?)? {
+        guard let url = resolveBookmarkURL(from: bookmarkData) else {
+            return nil
+        }
+        return loadDocument(at: url)
+    }
+
+    private func resolveBookmarkURL(from bookmarkData: Data) -> URL? {
         var isStale = false
         do {
             #if os(macOS)
@@ -498,12 +534,21 @@ final class DocumentSessionStore: ObservableObject {
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             )
-            let hasAccess = url.startAccessingSecurityScopedResource()
-            defer {
-                if hasAccess {
-                    url.stopAccessingSecurityScopedResource()
-                }
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    private func loadDocument(at url: URL) -> (file: MarkdownFile, modificationDate: Date?)? {
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasAccess {
+                url.stopAccessingSecurityScopedResource()
             }
+        }
+
+        do {
             let file = try MarkdownFile.load(from: url)
             let modificationDate = currentModificationDate(for: url)
             return (file, modificationDate)
@@ -547,23 +592,54 @@ final class DocumentSessionStore: ObservableObject {
         persistTextSizes(to: .standard)
     }
 
+    private func restoreMigration(from persisted: [PersistedDocument]) -> RestoreMigration {
+        var restored: [OpenedDocument] = []
+        var restoredModificationDates: [String: Date] = [:]
+        var idMap: [String: String] = [:]
+
+        for entry in persisted {
+            guard let loaded = loadFromBookmarkData(entry.bookmarkData) else { continue }
+            let resolvedID = loaded.file.url.standardizedFileURL.path
+            idMap[entry.id] = resolvedID
+            restored.append(
+                .init(
+                    id: resolvedID,
+                    file: loaded.file,
+                    lastOpened: entry.lastOpened,
+                    bookmarkData: entry.bookmarkData
+                )
+            )
+            if let modificationDate = loaded.modificationDate {
+                restoredModificationDates[resolvedID] = modificationDate
+            }
+        }
+
+        return RestoreMigration(
+            documents: restored,
+            modificationDates: restoredModificationDates,
+            idMap: idMap
+        )
+    }
+
     private static func restoreTextSizes(
         from userDefaults: UserDefaults,
-        validDocumentIDs: Set<String>
+        validDocumentIDs: Set<String>,
+        idMap: [String: String] = [:]
     ) -> [String: DynamicTypeSize] {
         guard let persisted = userDefaults.dictionary(forKey: Self.persistedTextSizesKey) as? [String: String] else {
             return [:]
         }
 
         return persisted.reduce(into: [String: DynamicTypeSize]()) { partialResult, entry in
-            guard validDocumentIDs.contains(entry.key) else {
+            let resolvedID = idMap[entry.key] ?? entry.key
+            guard validDocumentIDs.contains(resolvedID) else {
                 return
             }
             guard let textSize = DynamicTypeSize(persistedValue: entry.value),
                   textSize != .defaultValue else {
                 return
             }
-            partialResult[entry.key] = textSize
+            partialResult[resolvedID] = textSize
         }
     }
 

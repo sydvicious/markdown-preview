@@ -241,6 +241,72 @@ struct MarkdownPreviewTests {
     }
 
     @MainActor
+    @Test func restoreMigratesPersistedDocumentIDsToResolvedBookmarkPaths() async throws {
+        struct PersistedDocumentRecord: Codable {
+            let id: String
+            let lastOpened: Date
+            let bookmarkData: Data
+        }
+
+        let suiteName = "MarkdownPreviewTests.\(#function).\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Unable to create isolated UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let fileURL = temporaryDirectory.appendingPathComponent("readme.md")
+        try "The repository includes unit/UI test targets.".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let originalStore = DocumentSessionStore(disablePersistenceRestore: true, userDefaults: defaults)
+        try originalStore.openDocument(at: fileURL)
+        let resolvedID = fileURL.standardizedFileURL.path
+        originalStore.selectedDocumentID = resolvedID
+        originalStore.increaseTextSize(for: resolvedID)
+        originalStore.increaseTextSize(for: resolvedID)
+        originalStore.persistDocuments(to: defaults)
+        originalStore.persistSelectedDocument(to: defaults)
+        originalStore.persistTextSizes(to: defaults)
+
+        let legacyID = "/legacy/readme.md"
+        let persistedDocumentsData = defaults.data(forKey: "openedMarkdownDocuments")
+        let persistedDocuments = try #require(
+            persistedDocumentsData.flatMap {
+                try? JSONDecoder().decode([PersistedDocumentRecord].self, from: $0)
+            }
+        )
+        defaults.set(
+            try JSONEncoder().encode(
+                persistedDocuments.map { document in
+                    PersistedDocumentRecord(
+                        id: legacyID,
+                        lastOpened: document.lastOpened,
+                        bookmarkData: document.bookmarkData
+                    )
+                }
+            ),
+            forKey: "openedMarkdownDocuments"
+        )
+        defaults.set(legacyID, forKey: "selectedMarkdownDocumentID")
+        defaults.set([legacyID: "xxLarge"], forKey: "markdownDocumentTextSizes")
+
+        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
+
+        #expect(restoredStore.openedDocuments.count == 1)
+        #expect(restoredStore.openedDocuments.first?.id == resolvedID)
+        #expect(restoredStore.selectedDocumentID == resolvedID)
+        #expect(restoredStore.textSize(for: resolvedID) == .xxLarge)
+        #expect(restoredStore.documentMatchesListSearch(resolvedID, query: "repo"))
+    }
+
+    @MainActor
     @Test func openingFinderDocumentAfterRestoreKeepsRestoredSessionDocuments() async throws {
         let suiteName = "MarkdownPreviewTests.\(#function).\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -431,6 +497,494 @@ struct MarkdownPreviewTests {
         #expect(html.contains("class=\"md-copy-button\""))
         #expect(html.contains("data-copy-button"))
         #expect(html.contains("class=\"md-block md-copyable-block\""))
+    }
+
+    @Test func htmlBuilderAvoidsLeadingWhitespaceInsideParagraphBlocks() async throws {
+        let source = """
+        Copyright (c) 2026, Syd Polk
+        All rights reserved.
+        """
+
+        let html = MarkdownHTMLBuilder.document(for: source)
+
+        #expect(
+            html.contains(
+                "<div class=\"md-block\" data-source-start=\"0\" data-source-end=\"49\"><p>Copyright (c) 2026, Syd Polk All rights reserved.</p></div>"
+            )
+        )
+    }
+
+    @Test func previewSelectionReflectionFindsSydInLicenseParagraph() async throws {
+        let source = """
+        Copyright (c) 2026, Syd Polk
+        All rights reserved.
+        """
+        let selection = MarkdownSearch.matches(in: source, query: "Syd").first
+
+        let reflectedSelection = PreviewSelectionReflection.reflectedSelection(
+            in: source,
+            selectedRange: selection
+        )
+
+        #expect(reflectedSelection?.blockStart == 0)
+        #expect(reflectedSelection?.blockEnd == 49)
+        #expect(reflectedSelection?.displayRange == MarkdownSelectionRange(location: 20, length: 3))
+    }
+
+    @Test func previewSelectionReflectionAdjustsForOrderedListOffsets() async throws {
+        let source = """
+        1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+        2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+        3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+        """
+        let selection = MarkdownSearch.matches(in: source, query: "be").first
+
+        let reflectedSelection = PreviewSelectionReflection.reflectedSelection(
+            in: source,
+            selectedRange: selection
+        )
+
+        #expect(reflectedSelection?.blockStart == 0)
+        #expect(reflectedSelection?.blockEnd == source.utf16.count)
+        #expect(reflectedSelection?.displayRange == MarkdownSelectionRange(location: 405, length: 2))
+    }
+
+    @Test func markdownPreviewTextOffsetMappingUsesPreviewVisibleTextRules() async throws {
+        let source = """
+        # **Alpha**
+
+        Paragraph with [beta](https://example.com), `gamma`, and ![diagram](image.png).
+        """
+        let mapping = MarkdownPreviewTextOffsetMapping(sourceText: source)
+
+        #expect(mapping.displayText == "Alpha\nParagraph with beta, gamma, and .")
+
+        let alphaRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 0, length: 5)
+        )
+        let betaRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 21, length: 4)
+        )
+        let gammaRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 27, length: 5)
+        )
+
+        #expect(alphaRange?.range(in: source).map { String(source[$0]) } == "Alpha")
+        #expect(betaRange?.range(in: source).map { String(source[$0]) } == "beta")
+        #expect(gammaRange?.range(in: source).map { String(source[$0]) } == "gamma")
+        #expect(mapping.displayText.contains("diagram") == false)
+    }
+
+    @Test func markdownPreviewTextOffsetMappingCollapsesListBoundariesLikePreview() async throws {
+        let source = """
+        - Alpha
+        - Beta
+
+        1. Gamma
+        2. Delta
+        """
+        let mapping = MarkdownPreviewTextOffsetMapping(sourceText: source)
+
+        #expect(mapping.displayText == "AlphaBeta\nGammaDelta")
+
+        let betaRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 5, length: 4)
+        )
+        let gammaRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 10, length: 5)
+        )
+
+        #expect(betaRange?.range(in: source).map { String(source[$0]) } == "Beta")
+        #expect(gammaRange?.range(in: source).map { String(source[$0]) } == "Gamma")
+    }
+
+    @Test func markdownPreviewTextOffsetMappingHandlesBlockquotesTablesAndCode() async throws {
+        let source = """
+        > Quote line
+        > second line
+
+        | Name | Count |
+        | --- | ---: |
+        | apples | 12 |
+
+        ```
+        let value = 42
+        next line
+        ```
+        """
+        let mapping = MarkdownPreviewTextOffsetMapping(sourceText: source)
+
+        #expect(mapping.displayText == "Quote linesecond line\nNameCountapples12\nlet value = 42\nnext line")
+    }
+
+    @Test func markdownPreviewTextOffsetMappingHandlesSetextHeadingsAndChecklistSyntax() async throws {
+        let source = """
+        Alpha Heading
+        ============
+
+        - [x] Completed item
+        - [ ] Pending item
+        """
+        let mapping = MarkdownPreviewTextOffsetMapping(sourceText: source)
+
+        #expect(mapping.displayText == "Alpha Heading\nCompleted itemPending item")
+
+        let headingRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 0, length: 13)
+        )
+        let completedRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 14, length: 14)
+        )
+        let pendingRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 28, length: 12)
+        )
+
+        #expect(headingRange?.range(in: source).map { String(source[$0]) } == "Alpha Heading")
+        #expect(completedRange?.range(in: source).map { String(source[$0]) } == "Completed item")
+        #expect(pendingRange?.range(in: source).map { String(source[$0]) } == "Pending item")
+    }
+
+    @Test func markdownPreviewTextOffsetMappingRoundTripsSearchMatchesAcrossSupportedMarkdown() async throws {
+        let source = """
+        Alpha Heading
+        ============
+
+        Paragraph with [beta](https://example.com), **gamma**, _delta_, `epsilon`, and ![diagram](image.png).
+
+        - [x] Theta item
+        - [ ] Iota item
+
+        > Kappa quote
+
+        | Name | Count |
+        | --- | ---: |
+        | Lambda | 12 |
+
+        ```
+        let value = 42
+        ```
+        """
+        let mapping = MarkdownPreviewTextOffsetMapping(sourceText: source)
+        let queries = [
+            "Alpha",
+            "beta",
+            "gamma",
+            "delta",
+            "epsilon",
+            "Theta",
+            "Iota",
+            "Kappa",
+            "Name",
+            "Lambda",
+            "12",
+            "let value = 42"
+        ]
+
+        #expect(mapping.displayText.contains("diagram") == false)
+
+        for query in queries {
+            guard let sourceRange = MarkdownSearch.matches(in: source, query: query).first else {
+                Issue.record("Expected to find source match for \(query)")
+                continue
+            }
+
+            guard let displayRange = mapping.displayRange(forSourceRange: sourceRange) else {
+                Issue.record("Expected preview display range for \(query)")
+                continue
+            }
+
+            let displaySnippet = (mapping.displayText as NSString).substring(with: displayRange.nsRange)
+            #expect(displaySnippet == query)
+
+            guard let roundTrippedSourceRange = mapping.sourceRange(forDisplayRange: displayRange) else {
+                Issue.record("Expected round-tripped source range for \(query)")
+                continue
+            }
+
+            let sourceSnippet = (source as NSString).substring(with: roundTrippedSourceRange.nsRange)
+            #expect(sourceSnippet == query)
+        }
+    }
+
+    @Test func previewSelectionReflectionMapsVisibleSearchMatchesInsideMixedMarkdownBlocks() async throws {
+        let source = """
+        Paragraph with [beta](https://example.com), **gamma**, and `delta`.
+
+        1. Theta item
+        2. Iota item
+
+        | Name | Count |
+        | --- | ---: |
+        | Lambda | 12 |
+        """
+        let queries = ["beta", "gamma", "delta", "Iota", "Lambda", "12"]
+
+        for query in queries {
+            guard let selection = MarkdownSearch.matches(in: source, query: query).first else {
+                Issue.record("Expected source match for \(query)")
+                continue
+            }
+
+            guard let reflectedSelection = PreviewSelectionReflection.reflectedSelection(
+                in: source,
+                selectedRange: selection
+            ) else {
+                Issue.record("Expected reflected selection for \(query)")
+                continue
+            }
+
+            let blockSource = (source as NSString).substring(
+                with: NSRange(
+                    location: reflectedSelection.blockStart,
+                    length: reflectedSelection.blockEnd - reflectedSelection.blockStart
+                )
+            )
+            let previewMapping = MarkdownPreviewTextOffsetMapping(sourceText: blockSource)
+            let previewSnippet = (previewMapping.displayText as NSString).substring(
+                with: reflectedSelection.displayRange.nsRange
+            )
+
+            #expect(previewSnippet == query)
+        }
+    }
+
+    @Test func markdownSearchFindsCaseInsensitiveMatchesInSourceOrder() async throws {
+        let source = "**Alpha** beta [ALPHA](https://example.com)\nalpha"
+        let matches = MarkdownSearch.matches(in: source, query: "alpha")
+
+        #expect(matches.count == 3)
+        #expect(matches.compactMap { $0.range(in: source).map { String(source[$0]) } } == [
+            "Alpha",
+            "ALPHA",
+            "alpha"
+        ])
+    }
+
+    @Test func markdownTextOffsetMappingStripsMarkdownSyntax() async throws {
+        let source = "# **Alpha** [beta](https://example.com)"
+        let mapping = MarkdownTextOffsetMapping(sourceText: source)
+
+        #expect(mapping.displayText == "Alpha beta")
+
+        let alphaSourceRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 0, length: 5)
+        )
+        let betaSourceRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 6, length: 4)
+        )
+
+        #expect(alphaSourceRange?.range(in: source).map { String(source[$0]) } == "Alpha")
+        #expect(betaSourceRange?.range(in: source).map { String(source[$0]) } == "beta")
+    }
+
+    @Test func markdownTextOffsetMappingUsesSearchVisibleTextRules() async throws {
+        let source = """
+        # **Alpha**
+
+        Paragraph with [beta](https://example.com), `gamma`, and ![diagram](image.png).
+        """
+        let mapping = MarkdownTextOffsetMapping(sourceText: source)
+
+        #expect(mapping.displayText == "Alpha\nParagraph with beta, gamma, and diagram.")
+
+        let alphaRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 0, length: 5)
+        )
+        let betaRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 21, length: 4)
+        )
+        let gammaRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 27, length: 5)
+        )
+        let diagramRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 38, length: 7)
+        )
+
+        #expect(alphaRange?.range(in: source).map { String(source[$0]) } == "Alpha")
+        #expect(betaRange?.range(in: source).map { String(source[$0]) } == "beta")
+        #expect(gammaRange?.range(in: source).map { String(source[$0]) } == "gamma")
+        #expect(diagramRange?.range(in: source).map { String(source[$0]) } == "diagram")
+    }
+
+    @Test func markdownTextOffsetMappingPreservesListBoundariesForSearch() async throws {
+        let source = """
+        - Alpha
+        - Beta
+
+        1. Gamma
+        2. Delta
+        """
+        let mapping = MarkdownTextOffsetMapping(sourceText: source)
+
+        #expect(mapping.displayText == "Alpha\nBeta\nGamma\nDelta")
+
+        let betaRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 6, length: 4)
+        )
+        let gammaRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 11, length: 5)
+        )
+
+        #expect(betaRange?.range(in: source).map { String(source[$0]) } == "Beta")
+        #expect(gammaRange?.range(in: source).map { String(source[$0]) } == "Gamma")
+    }
+
+    @Test func markdownTextOffsetMappingHandlesSetextHeadingsChecklistTablesAndCode() async throws {
+        let source = """
+        Alpha Heading
+        ============
+
+        - [x] Completed item
+        - [ ] Pending item
+
+        | Name | Count |
+        | --- | ---: |
+        | apples | 12 |
+
+        ```
+        let value = 42
+        ```
+        """
+        let mapping = MarkdownTextOffsetMapping(sourceText: source)
+
+        #expect(mapping.displayText == "Alpha Heading\nCompleted item\nPending item\nNameCountapples12\nlet value = 42")
+    }
+
+    @Test func markdownTextOffsetMappingRoundTripsSearchMatchesAcrossSupportedMarkdown() async throws {
+        let source = """
+        Alpha Heading
+        ============
+
+        Paragraph with [beta](https://example.com), **gamma**, _delta_, `epsilon`, and ![diagram](image.png).
+
+        - [x] Theta item
+        - [ ] Iota item
+
+        > Kappa quote
+
+        | Name | Count |
+        | --- | ---: |
+        | Lambda | 12 |
+
+        ```
+        let value = 42
+        ```
+        """
+        let mapping = MarkdownTextOffsetMapping(sourceText: source)
+        let queries = [
+            "Alpha",
+            "beta",
+            "gamma",
+            "delta",
+            "epsilon",
+            "diagram",
+            "Theta",
+            "Iota",
+            "Kappa",
+            "Name",
+            "Lambda",
+            "12",
+            "let value = 42"
+        ]
+
+        for query in queries {
+            guard let sourceRange = MarkdownSearch.matches(in: source, query: query).first else {
+                Issue.record("Expected to find source match for \(query)")
+                continue
+            }
+
+            guard let displayRange = mapping.displayRange(forSourceRange: sourceRange) else {
+                Issue.record("Expected search display range for \(query)")
+                continue
+            }
+
+            let displaySnippet = (mapping.displayText as NSString).substring(with: displayRange.nsRange)
+            #expect(displaySnippet == query)
+
+            guard let roundTrippedSourceRange = mapping.sourceRange(forDisplayRange: displayRange) else {
+                Issue.record("Expected round-tripped source range for \(query)")
+                continue
+            }
+
+            let sourceSnippet = (source as NSString).substring(with: roundTrippedSourceRange.nsRange)
+            #expect(sourceSnippet == query)
+        }
+    }
+
+    @Test func htmlTextOffsetMappingStripsTagsAndDecodesEntities() async throws {
+        let html = "<html><body><p>Alpha &amp; <strong>beta</strong></p></body></html>"
+        let mapping = HTMLTextOffsetMapping(sourceText: html)
+
+        #expect(mapping.displayText == "Alpha & beta")
+
+        let ampersandRange = mapping.sourceRange(
+            forDisplayRange: MarkdownSelectionRange(location: 6, length: 1)
+        )
+        #expect(ampersandRange?.range(in: html).map { String(html[$0]) } == "&amp;")
+    }
+
+    @Test func documentSearchIndexMatchesAgainstStrippedText() async throws {
+        let file = MarkdownFile(
+            url: URL(fileURLWithPath: "/tmp/example.md"),
+            contents: "# **Alpha** [beta](https://example.com)"
+        )
+        let index = DocumentSearchIndex(documents: [file])
+        let documentID = file.url.standardizedFileURL.path
+
+        #expect(index.containsMatch(in: documentID, query: "Alpha"))
+        #expect(index.containsMatch(in: documentID, query: "beta"))
+        #expect(index.containsMatch(in: documentID, query: "example.md"))
+        #expect(index.containsMatch(in: documentID, query: "https") == false)
+    }
+
+    @Test func documentSearchIndexMatchesSubstringsWithinWords() async throws {
+        let file = MarkdownFile(
+            url: URL(fileURLWithPath: "/tmp/readme.md"),
+            contents: "The repository includes unit/UI test targets."
+        )
+        let index = DocumentSearchIndex(documents: [file])
+        let documentID = file.url.standardizedFileURL.path
+
+        #expect(index.containsMatch(in: documentID, query: "repo"))
+    }
+
+    @MainActor
+    @Test func storeListSearchUsesStrippedTextIndexAfterReload() async throws {
+        let fileURL = URL(fileURLWithPath: "/tmp/notes.md")
+        let initial = MarkdownFile(url: fileURL, contents: "# [Alpha](https://example.com)")
+        let updated = MarkdownFile(url: fileURL, contents: "Gamma")
+
+        let store = DocumentSessionStore(
+            previewFiles: [initial],
+            disablePersistenceRestore: true
+        )
+
+        #expect(store.documentMatchesListSearch(fileURL.standardizedFileURL.path, query: "Alpha"))
+        #expect(store.documentMatchesListSearch(fileURL.standardizedFileURL.path, query: "https") == false)
+
+        store.upsertDocument(updated, bookmarkData: Data(), modificationDate: nil)
+
+        #expect(store.documentMatchesListSearch(fileURL.standardizedFileURL.path, query: "Alpha") == false)
+        #expect(store.documentMatchesListSearch(fileURL.standardizedFileURL.path, query: "Gamma"))
+    }
+
+    @Test func markdownSearchSessionWrapsOnSecondNavigationAtBoundary() async throws {
+        var session = MarkdownSearchSession()
+        session.updateQuery("alpha", in: "alpha beta alpha")
+
+        #expect(session.resultPositionText == "1 of 2")
+
+        let firstAdvance = session.move(.forward)
+        #expect(firstAdvance)
+        #expect(session.resultPositionText == "2 of 2")
+
+        let boundaryAdvance = session.move(.forward)
+        #expect(boundaryAdvance == false)
+        #expect(session.resultPositionText == "2 of 2")
+
+        let wrappedAdvance = session.move(.forward)
+        #expect(wrappedAdvance)
+        #expect(session.resultPositionText == "1 of 2")
     }
 
 }

@@ -9,12 +9,15 @@ struct MarkdownPreviewView: View {
     let baseURL: URL?
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
+    var onSelectedTextChange: (String?) -> Void = { _ in }
 
     var body: some View {
         MarkdownPreviewWebView(
             source: source,
             html: MarkdownHTMLBuilder.document(for: source, textSize: textSize),
-            baseURL: baseURL
+            baseURL: baseURL,
+            selectedRange: selections.first,
+            onSelectedTextChange: onSelectedTextChange
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

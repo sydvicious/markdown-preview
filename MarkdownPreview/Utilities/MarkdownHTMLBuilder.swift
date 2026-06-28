@@ -32,6 +32,8 @@ enum MarkdownHTMLBuilder {
               --selection-color: rgba(0, 122, 255, 0.26);
               --copy-button-background: rgba(120, 120, 128, 0.16);
               --copy-button-background-active: rgba(120, 120, 128, 0.24);
+              --search-active-background: rgba(255, 214, 10, 0.22);
+              --search-active-outline: rgba(255, 159, 10, 0.65);
               --content-scale: \(textSize.scaleFactor);
               --body-font-size: calc(17px * var(--content-scale));
             }
@@ -46,6 +48,8 @@ enum MarkdownHTMLBuilder {
                 --selection-color: rgba(10, 132, 255, 0.34);
                 --copy-button-background: rgba(118, 118, 128, 0.3);
                 --copy-button-background-active: rgba(118, 118, 128, 0.4);
+                --search-active-background: rgba(255, 214, 10, 0.18);
+                --search-active-outline: rgba(255, 214, 10, 0.7);
               }
             }
             html, body {
@@ -73,9 +77,14 @@ enum MarkdownHTMLBuilder {
             }
             .md-block {
               position: relative;
+              border-radius: 12px;
             }
             .md-copyable-block {
               padding-top: 2rem;
+            }
+            .md-search-active {
+              background: var(--search-active-background);
+              box-shadow: inset 0 0 0 1px var(--search-active-outline);
             }
             .md-copy-button {
               position: absolute;
@@ -268,10 +277,7 @@ enum MarkdownHTMLBuilder {
         }
 
         return """
-        <div class="md-block\(copyButton == nil ? "" : " md-copyable-block")" data-source-start="\(sourceRange.location)" data-source-end="\(sourceRange.location + sourceRange.length)">
-          \(copyButton ?? "")
-          \(content)
-        </div>
+        <div class="md-block\(copyButton == nil ? "" : " md-copyable-block")" data-source-start="\(sourceRange.location)" data-source-end="\(sourceRange.location + sourceRange.length)">\(copyButton ?? "")\(content)</div>
         """
     }
 
@@ -280,14 +286,7 @@ enum MarkdownHTMLBuilder {
         let rows = items.map { item -> String in
             let depthClass = "depth-\(min(item.indent, 4))"
             if let checked = item.checkbox {
-                return """
-                <li class="task \(depthClass)">
-                  <label>
-                    <input type="checkbox" disabled \(checked ? "checked" : "") />
-                    <span>\(renderInlineMarkdownHTML(item.text))</span>
-                  </label>
-                </li>
-                """
+                return "<li class=\"task \(depthClass)\"><label><input type=\"checkbox\" disabled \(checked ? "checked" : "") /><span>\(renderInlineMarkdownHTML(item.text))</span></label></li>"
             }
 
             let valueAttribute: String
@@ -298,9 +297,9 @@ enum MarkdownHTMLBuilder {
             }
 
             return "<li class=\"\(depthClass)\"\(valueAttribute)>\(renderInlineMarkdownHTML(item.text))</li>"
-        }.joined(separator: "\n")
+        }.joined()
 
-        return "<\(tag)>\n\(rows)\n</\(tag)>"
+        return "<\(tag)>\(rows)</\(tag)>"
     }
 
     private static func renderTable(_ table: MarkdownTable) -> String {
@@ -316,18 +315,9 @@ enum MarkdownHTMLBuilder {
                 return "<td class=\"\(alignmentClass(alignment))\">\(renderLinesAsHTML(text))</td>"
             }.joined()
             return "<tr>\(cells)</tr>"
-        }.joined(separator: "\n")
+        }.joined()
 
-        return """
-        <div class="table-wrap">
-          <table>
-            <thead><tr>\(headerRow)</tr></thead>
-            <tbody>
-              \(bodyRows)
-            </tbody>
-          </table>
-        </div>
-        """
+        return "<div class=\"table-wrap\"><table><thead><tr>\(headerRow)</tr></thead><tbody>\(bodyRows)</tbody></table></div>"
     }
 
     private static func alignmentClass(_ alignment: MarkdownTableAlignment) -> String {
@@ -470,39 +460,6 @@ enum MarkdownHTMLBuilder {
 
     private static func escapeHTMLAttribute(_ text: String) -> String {
         escapeHTML(text)
-    }
-}
-
-private struct MarkdownSourceLineTable {
-    let lineStartOffsets: [Int]
-    let sourceUTF16Length: Int
-
-    init(source: String) {
-        let utf16 = Array(source.utf16)
-        sourceUTF16Length = utf16.count
-
-        var starts = [0]
-        starts.reserveCapacity(utf16.filter { $0 == 10 }.count + 1)
-        for (index, codeUnit) in utf16.enumerated() where codeUnit == 10 {
-            starts.append(index + 1)
-        }
-        lineStartOffsets = starts
-    }
-
-    func range(for lineRange: Range<Int>) -> MarkdownSelectionRange? {
-        guard !lineRange.isEmpty else { return nil }
-        guard lineRange.lowerBound >= 0, lineRange.upperBound <= lineStartOffsets.count else { return nil }
-
-        let start = lineStartOffsets[lineRange.lowerBound]
-        let end: Int
-        if lineRange.upperBound < lineStartOffsets.count {
-            end = max(start, lineStartOffsets[lineRange.upperBound] - 1)
-        } else {
-            end = sourceUTF16Length
-        }
-
-        guard end >= start else { return nil }
-        return MarkdownSelectionRange(location: start, length: end - start)
     }
 }
 

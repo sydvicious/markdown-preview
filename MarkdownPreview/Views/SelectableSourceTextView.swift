@@ -90,14 +90,12 @@ struct SelectableSourceTextView: UIViewRepresentable {
         from ranges: [MarkdownSelectionRange],
         coordinator: Coordinator
     ) {
-        // Don't fight native selection gestures while user is editing selection.
-        if textView.isFirstResponder { return }
-        guard let desired = ranges.first else { return }
         let textLength = textView.text.utf16.count
-        let next = desired.clamped(toUTF16Length: textLength)?.nsRange ?? NSRange(location: 0, length: 0)
+        let next = ranges.first?.clamped(toUTF16Length: textLength)?.nsRange ?? NSRange(location: 0, length: 0)
         guard textView.selectedRange != next else { return }
         coordinator.isApplyingSelection = true
         textView.selectedRange = next
+        textView.scrollRangeToVisible(next)
         coordinator.isApplyingSelection = false
     }
 }
@@ -235,8 +233,6 @@ struct SelectableSourceTextView: NSViewRepresentable {
         from ranges: [MarkdownSelectionRange],
         coordinator: Coordinator
     ) {
-        // Avoid resetting selection while the text view is actively focused.
-        if textView.window?.firstResponder === textView { return }
         let textLength = textView.string.utf16.count
         var nsRanges = ranges.compactMap { $0.clamped(toUTF16Length: textLength)?.nsRange }
         if nsRanges.isEmpty {
@@ -246,6 +242,9 @@ struct SelectableSourceTextView: NSViewRepresentable {
         guard current != nsRanges else { return }
         coordinator.isApplyingSelection = true
         textView.selectedRanges = nsRanges.map(NSValue.init(range:))
+        if let firstRange = nsRanges.first {
+            textView.scrollRangeToVisible(firstRange)
+        }
         coordinator.isApplyingSelection = false
     }
 }

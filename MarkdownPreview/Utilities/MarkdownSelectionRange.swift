@@ -21,6 +21,10 @@ struct MarkdownSelectionRange: Equatable, Hashable, Codable {
         NSRange(location: location, length: length)
     }
 
+    func range(in text: String) -> Range<String.Index>? {
+        Range(nsRange, in: text)
+    }
+
     func clamped(toUTF16Length utf16Length: Int) -> MarkdownSelectionRange? {
         guard utf16Length >= 0 else { return nil }
         guard location <= utf16Length else { return nil }

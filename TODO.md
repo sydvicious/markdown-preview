@@ -1,10 +1,36 @@
 # TODO
 
 This document tracks planned work for MarkdownPreviewApp.
-
+### Bug fixes
+- iPadOS/iOS search boxes need to share text
+- On Mac and iPad, search box should have a minimum width, but should fill the title bar otherwise. Mac, of course, has the filename, and it shoud be full. Priority is full file name, then expand Search Bar.
+### Refactor
+- MarkdownAppCommandCenter should be in its own file.
+- MarkdownPreviewTextOffsetMapping and HTMLTextOffsetMapping should be in their own files.
+- 
 ### Investigate using Liquid Glass controls.
 
-### Support search in both preview and source view
+### Expand search and indexing
+  - Sync selection between Preview and Source views while search results move between rendered and source representations.
+  - `Command-Shift-F` should go to project-wide source search.
+  - On iOS/iPadOS, investigate whether keyboard-level search suggestions can be populated for the existing search fields.
+  - Add backend indexing optimizations now that the GUI/search interaction is stable.
+  - Maintain a disk-backed word index mapping terms to files and source offsets.
+  - Update the index incrementally as files are added, removed, or changed.
+  - Use the index to accelerate file-list search and detail-search handoff across larger document sets.
+
+### Generate a spotlight index for content
+
+### macOS redesign as a document-based app.
+  - Use `DocumentGroup` (or `NSDocument`) so each document opens in its own window.
+  - Replace in-app file list with system Recents.
+  - Opening a file (for example, double-click in Finder) opens a new window for that doc.
+  - Build a sensible menu structure for the document-based app.
+  - File menu (macOS and iPad).
+    - Open (Cmd-O): present a file picker filtering for `.md`.
+    - Print (Cmd-P): show system print panel and print current document/preview.
+    - Quit (Cmd-Q): quit the app (macOS only).
+
 ### New from clipboard.
   - File -> New (Cmd-N): if clipboard has text, create a new unsaved document with that content.
   - File -> Save (Cmd-S): prompt to save as `.md`.
@@ -12,14 +38,6 @@ This document tracks planned work for MarkdownPreviewApp.
   - If `.onOpenURL` receives an `http(s)` link to a markdown file, fetch into memory and open in a new window.
   - Provide "Save as.".. to persist locally if desired.
 ### Refactor using YMMV
-### macOS redesign as a document-based app.
-  - Use `DocumentGroup` (or `NSDocument`) so each document opens in its own window.
-  - Replace in-app file list with system Recents.
-  - Opening a file (for example, double-click in Finder) opens a new window for that doc.
-  - File menu (macOS and iPad).
-    - Open (Cmd-O): present a file picker filtering for `.md`.
-    - Print (Cmd-P): show system print panel and print current document/preview.
-    - Quit (Cmd-Q): quit the app (macOS only).
 ### Investigate iPad multi-window mode.
   - Evaluate scene/window behavior when opening multiple markdown files in Split View/Stage Manager.
   - Decide whether to keep single-window split navigation or support multiple app windows on iPadOS.
@@ -65,18 +83,18 @@ This document tracks planned work for MarkdownPreviewApp.
   - Investigate checking file existence and polling in a separate `Task` as well.
   - Schedule this work after the YMMV-related refactor work.
 
-### Add list title.
-  - Add the title `Markdown Preview` to the list panel.
-
 ### Add list toolbar menu.
   - Add a hamburger menu next to the `+` button.
   - Include a menu entry that says `©2026 Syd Polk`.
-
-### Make the grid-based table view show the selection correctly.
 
 ### Investigate a native visionOS (Vision Pro) app.
 
 ### BUG: Investigate why macOS sometimes opens a second list window when a file is double-clicked.
   - Verify whether this still reproduces after the startup/open-flow changes that now restore the previous session and append the Finder-opened file in the main window.
 
+### BUG: Investigate intermittent detail-view flashing/redraw on macOS.
+  - Reproduce cases where the currently displayed file flashes even when the file contents have not changed.
+  - Verify whether the flash is tied to WKWebView navigation/reload, selection updates, focus changes, or file-monitor polling.
+
 *Copyright ©2026 Syd Polk. All Rights Reserved.*
+
