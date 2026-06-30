@@ -37,6 +37,7 @@ struct ContentView: View {
     @State private var pendingStartupImporterTask: Task<Void, Never>?
     @State private var pendingSearchFocusTask: Task<Void, Never>?
     @StateObject private var viewModel: ContentViewModel
+    @StateObject private var previewSelectionSynchronizer = PreviewSelectionSynchronizer()
     @FocusState private var focusedSearchField: SearchField?
     #if os(macOS)
     @State private var macFirstResponderSink = MacFirstResponderSink()
@@ -440,14 +441,18 @@ struct ContentView: View {
                         get: { store.selections(for: document.id) },
                         set: { store.setSelections($0, for: document.id, text: document.file.contents) }
                     ),
-                    onSelectedTextChange: { previewSelectedText = $0 }
+                    selectionSynchronizer: previewSelectionSynchronizer,
+                    onSelectedTextChange: { previewSelectedText = $0 },
+                    onSelectedRangesChange: { ranges in
+                        store.setSelections(ranges, for: document.id, text: document.file.contents)
+                    }
                 )
             }
         }
     }
 
     private var detailModePicker: some View {
-        Picker("View", selection: $viewModel.detailMode) {
+        Picker("View", selection: detailModeBinding) {
             Text("Preview").tag(ContentViewModel.DetailMode.preview)
             Text("Source").tag(ContentViewModel.DetailMode.source)
         }
@@ -455,6 +460,27 @@ struct ContentView: View {
         .labelsHidden()
         .accessibilityLabel("View")
         .accessibilityIdentifier("DetailModePicker")
+    }
+
+    private var detailModeBinding: Binding<ContentViewModel.DetailMode> {
+        Binding(
+            get: { viewModel.detailMode },
+            set: { setDetailMode($0) }
+        )
+    }
+
+    private func setDetailMode(_ nextMode: ContentViewModel.DetailMode) {
+        guard nextMode != viewModel.detailMode else { return }
+        guard viewModel.detailMode == .preview, nextMode == .source else {
+            viewModel.detailMode = nextMode
+            return
+        }
+
+        previewSelectionSynchronizer.flushSelection {
+            Task { @MainActor in
+                viewModel.detailMode = nextMode
+            }
+        }
     }
 
     private var isCompactWidth: Bool {

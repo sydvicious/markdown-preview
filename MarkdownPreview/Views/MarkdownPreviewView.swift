@@ -4,12 +4,31 @@
 
 import SwiftUI
 
+final class PreviewSelectionSynchronizer: ObservableObject {
+    private var flushSelectionHandler: ((@escaping () -> Void) -> Void)?
+
+    func flushSelection(completion: @escaping () -> Void) {
+        guard let flushSelectionHandler else {
+            completion()
+            return
+        }
+
+        flushSelectionHandler(completion)
+    }
+
+    func setFlushSelectionHandler(_ handler: ((@escaping () -> Void) -> Void)?) {
+        flushSelectionHandler = handler
+    }
+}
+
 struct MarkdownPreviewView: View {
     let source: String
     let baseURL: URL?
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
+    var selectionSynchronizer: PreviewSelectionSynchronizer?
     var onSelectedTextChange: (String?) -> Void = { _ in }
+    var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
 
     var body: some View {
         MarkdownPreviewWebView(
@@ -17,7 +36,9 @@ struct MarkdownPreviewView: View {
             html: MarkdownHTMLBuilder.document(for: source, textSize: textSize),
             baseURL: baseURL,
             selectedRange: selections.first,
-            onSelectedTextChange: onSelectedTextChange
+            selectionSynchronizer: selectionSynchronizer,
+            onSelectedTextChange: onSelectedTextChange,
+            onSelectedRangesChange: onSelectedRangesChange
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

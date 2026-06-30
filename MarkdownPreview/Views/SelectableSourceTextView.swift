@@ -4,6 +4,24 @@
 
 import SwiftUI
 
+/// The selection update the iOS source text view should apply for a given model
+/// selection. Factored out of `applySelection` so the empty-vs-non-empty
+/// decision — which drives whether the text view must claim first responder — is
+/// unit-testable without standing up UIKit.
+enum SourceSelectionUpdate: Equatable {
+    /// A real, copyable selection. The text view must be first responder for iOS
+    /// to render it and for Cmd-C / the edit menu to reach it.
+    case select(NSRange)
+    /// No selection; collapse the caret without claiming focus.
+    case clear(NSRange)
+
+    static func resolve(from ranges: [MarkdownSelectionRange], textUTF16Length: Int) -> SourceSelectionUpdate {
+        let next = ranges.first?.clamped(toUTF16Length: textUTF16Length)?.nsRange
+            ?? NSRange(location: 0, length: 0)
+        return next.length > 0 ? .select(next) : .clear(next)
+    }
+}
+
 #if os(iOS)
 import UIKit
 
@@ -90,13 +108,35 @@ struct SelectableSourceTextView: UIViewRepresentable {
         from ranges: [MarkdownSelectionRange],
         coordinator: Coordinator
     ) {
-        let textLength = textView.text.utf16.count
-        let next = ranges.first?.clamped(toUTF16Length: textLength)?.nsRange ?? NSRange(location: 0, length: 0)
-        guard textView.selectedRange != next else { return }
-        coordinator.isApplyingSelection = true
-        textView.selectedRange = next
-        textView.scrollRangeToVisible(next)
-        coordinator.isApplyingSelection = false
+        switch SourceSelectionUpdate.resolve(from: ranges, textUTF16Length: textView.text.utf16.count) {
+        case let .clear(range):
+            // An empty selection just clears the range; no need to claim focus.
+            guard textView.selectedRange != range else { return }
+            coordinator.isApplyingSelection = true
+            textView.selectedRange = range
+            coordinator.isApplyingSelection = false
+
+        case let .select(range):
+            guard textView.selectedRange != range else { return }
+            // iOS only renders — and only lets you copy — a selection on the
+            // first responder. A programmatic range on an unfocused text view is
+            // invisible and unreachable by Cmd-C / the edit menu. So make the
+            // view first responder and set the range, deferred to the next
+            // runloop so this also works the moment the view is first added to
+            // the window. The whole sequence runs inside isApplyingSelection so
+            // the focus change can't fire textViewDidChangeSelection and clobber
+            // the model with a collapsed range.
+            DispatchQueue.main.async {
+                guard textView.selectedRange != range else { return }
+                coordinator.isApplyingSelection = true
+                if !textView.isFirstResponder {
+                    textView.becomeFirstResponder()
+                }
+                textView.selectedRange = range
+                textView.scrollRangeToVisible(range)
+                coordinator.isApplyingSelection = false
+            }
+        }
     }
 }
 

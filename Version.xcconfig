@@ -1,0 +1,3 @@
+// Keep marketing and build versions in lock step for releases.
+MARKETING_VERSION = 0.4
+CURRENT_PROJECT_VERSION = 4

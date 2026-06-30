@@ -68,6 +68,7 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Hardening for production use.
   - Improve handling/performance for very large markdown files.
   - Add robustness for markdown edge cases and malformed input across parser/renderer paths.
+  - Please write a test suite which generates .md snippets based on everything we support. Test the generated HTML page and make sure that the HTML is correct. Test the mapping from .md to source and source to HTML and back again.
 
 ### Internationalization (i18n) and localization (l10n).
   - Localize all user-facing strings across iOS, iPadOS, and macOS.
@@ -97,4 +98,3 @@ This document tracks planned work for MarkdownPreviewApp.
   - Verify whether the flash is tied to WKWebView navigation/reload, selection updates, focus changes, or file-monitor polling.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*
-

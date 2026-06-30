@@ -4,6 +4,18 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-06-30
+
+- Bumped the app marketing version to `0.4` and build number to `4` for this release, with both values now centralized in `Version.xcconfig`.
+- Fixed Preview-mode copy so copying a text selection writes only the selected rendered text's corresponding markdown source, instead of expanding to the whole rendered block.
+- Fixed Preview-to-Source selection handoff so selections made in the `WKWebView` preview are retained when switching back to Source mode.
+- Tightened Preview `WKWebView` selection handling by using typed bridge payload parsing, display-to-source range mapping, and guarded replay of preview-originated selections so native WebKit selection behavior is not immediately overwritten.
+- Preserved native macOS word selection behavior in Preview by avoiding immediate re-application of selections that originated inside the preview WebView.
+- Added focused unit coverage for preview selection bridge payload validation, copy-block message validation, rendered display range mapping, inline markdown selections, multi-block selections, list/table selections, and out-of-bounds payload handling.
+- Stopped the UI launch test from running across alternate target application UI configurations so it no longer flips the Mac appearance setting to Dark after test runs.
+- Improved iPhone Preview-to-Source selection handoff by explicitly flushing the current `WKWebView` selection before switching modes and retaining the last non-empty preview selection when WebKit collapses selection during focus handoff.
+- Fixed iOS so a selection carried from Preview to Source is a real, copyable selection rather than an invisible range: the source text view now claims first responder and applies the range, so it renders on arrival and works with Cmd-C and the edit menu (macOS unchanged). Added unit coverage for the empty-vs-non-empty selection resolution, including clamping and out-of-bounds handling.
+
 ## 2026-06-28
 
 - Added file-list and in-document search UI on macOS, iPhone, and iPad, including compact search controls in the toolbar/detail chrome, match counts, next/previous navigation, search suggestions, and keyboard shortcuts for find navigation.
