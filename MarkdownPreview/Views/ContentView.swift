@@ -472,7 +472,9 @@ struct ContentView: View {
     private func setDetailMode(_ nextMode: ContentViewModel.DetailMode) {
         guard nextMode != viewModel.detailMode else { return }
         guard viewModel.detailMode == .preview, nextMode == .source else {
-            viewModel.detailMode = nextMode
+            Task { @MainActor in
+                viewModel.detailMode = nextMode
+            }
             return
         }
 
