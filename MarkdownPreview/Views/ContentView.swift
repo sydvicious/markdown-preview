@@ -28,12 +28,20 @@ struct ContentView: View {
     @EnvironmentObject private var commandCenter: MarkdownAppCommandCenter
     @EnvironmentObject private var fileOpenState: FileOpenState
     @State private var isImporterPresented = false
-    @State private var listSearchText = ""
+    // The single search string shared by the file-list and in-document search
+    // boxes. Both fields display it and both searches (file-list filtering and
+    // in-document find) run off it.
+    @State private var searchText = ""
     @State private var detailSearch = MarkdownSearchSession()
     @State private var didApplyDetailSearchSelection = false
     @State private var previewSelectedText: String?
     @State private var savedSelectionsBeforeDetailSearch: [String: [MarkdownSelectionRange]] = [:]
-    @State private var listToDetailSearchHandoffQuery: String?
+    #if os(macOS)
+    // Last-seen system find-pasteboard change count, used to adopt find-term
+    // changes made by other apps (or a native find bar) without re-adopting our
+    // own writes.
+    @State private var lastFindPasteboardChangeCount: Int?
+    #endif
     @State private var pendingStartupImporterTask: Task<Void, Never>?
     @State private var pendingSearchFocusTask: Task<Void, Never>?
     @StateObject private var viewModel: ContentViewModel
@@ -193,12 +201,8 @@ struct ContentView: View {
         .onChange(of: store.selectedDocumentID) { _, _ in
             previewSelectedText = nil
             viewModel.onSelectionChanged()
-            if isListSearchFiltering, store.currentDocument != nil {
-                activateDetailSearchFromListSearch()
-            } else {
-                refreshDetailSearch()
-                clearMacDefaultSearchFocusIfNeeded()
-            }
+            refreshDetailSearch()
+            clearMacDefaultSearchFocusIfNeeded()
             syncCommandCenter()
         }
         .onChange(of: store.textSizesByDocumentID) { _, _ in
@@ -227,7 +231,9 @@ struct ContentView: View {
             presentInitialOpenPromptIfNeeded()
             clearMacDefaultSearchFocusIfNeeded()
             syncCommandCenter()
-            #if !os(macOS)
+            #if os(macOS)
+            adoptSystemFindQueryIfChanged()
+            #else
             if !disableLiveFileMonitoring {
                 store.checkActiveDocumentForChanges(isCompactWidth: usesSingleColumnNavigation)
                 store.checkAllDocumentsForChanges(isCompactWidth: usesSingleColumnNavigation)
@@ -238,7 +244,12 @@ struct ContentView: View {
             pendingSearchFocusTask?.cancel()
             commandCenter.reset()
         }
-        #if !os(macOS)
+        #if os(macOS)
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            adoptSystemFindQueryIfChanged()
+        }
+        #else
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             if !disableLiveFileMonitoring {
@@ -314,7 +325,7 @@ struct ContentView: View {
                             deleteFilteredDocuments(at: offsets)
                         }
                     }
-                    .id(trimmedListSearchText)
+                    .id(trimmedSearchText)
                     #endif
                 }
             }
@@ -424,7 +435,8 @@ struct ContentView: View {
                     selections: Binding(
                         get: { store.selections(for: document.id) },
                         set: { store.setSelections($0, for: document.id, text: document.file.contents) }
-                    )
+                    ),
+                    onSearchSelection: searchForSelection
                 )
             }
         }
@@ -445,7 +457,8 @@ struct ContentView: View {
                     onSelectedTextChange: { previewSelectedText = $0 },
                     onSelectedRangesChange: { ranges in
                         store.setSelections(ranges, for: document.id, text: document.file.contents)
-                    }
+                    },
+                    onSearchSelection: searchForSelection
                 )
             }
         }
@@ -603,21 +616,21 @@ struct ContentView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
 
-                TextField("Search files", text: listSearchBinding)
+                TextField("Search files", text: searchBinding)
                     .searchFieldTextInputBehavior()
                     .focused($focusedSearchField, equals: .list)
                     .accessibilityIdentifier("ListSearchField")
 
                 Button {
-                    clearListSearch()
+                    clearSearch()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
-                        .opacity(trimmedListSearchText.isEmpty ? 0 : 1)
+                        .opacity(trimmedSearchText.isEmpty ? 0 : 1)
                 }
                 .buttonStyle(.plain)
-                .disabled(trimmedListSearchText.isEmpty)
-                .accessibilityHidden(trimmedListSearchText.isEmpty)
+                .disabled(trimmedSearchText.isEmpty)
+                .accessibilityHidden(trimmedSearchText.isEmpty)
                 .accessibilityLabel("Clear File Search")
             }
             .padding(.horizontal, 12)
@@ -626,7 +639,7 @@ struct ContentView: View {
 
             if focusedSearchField == .list, !listSearchSuggestions.isEmpty {
                 searchSuggestionsRow(listSearchSuggestions) { suggestion in
-                    listSearchText = suggestion
+                    setSearchText(suggestion)
                 }
             }
         }
@@ -642,7 +655,7 @@ struct ContentView: View {
 
             if focusedSearchField == .detail, !detailSearchSuggestions.isEmpty {
                 searchSuggestionsRow(detailSearchSuggestions) { suggestion in
-                    setDetailSearchQuery(suggestion, focus: true)
+                    setSearchText(suggestion, focus: .detail)
                 }
             }
         }
@@ -665,7 +678,7 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
 
-            TextField("Search in file", text: detailSearchBinding)
+            TextField("Search in file", text: searchBinding)
                 .searchFieldTextInputBehavior()
                 .focused($focusedSearchField, equals: .detail)
                 .onSubmit {
@@ -674,15 +687,15 @@ struct ContentView: View {
                 .accessibilityIdentifier("DetailSearchField")
 
             Button {
-                clearDetailSearch()
+                clearSearch()
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.secondary)
-                    .opacity(detailSearch.query.isEmpty ? 0 : 1)
+                    .opacity(searchText.isEmpty ? 0 : 1)
             }
             .buttonStyle(.plain)
-            .disabled(detailSearch.query.isEmpty)
-            .accessibilityHidden(detailSearch.query.isEmpty)
+            .disabled(searchText.isEmpty)
+            .accessibilityHidden(searchText.isEmpty)
             .accessibilityLabel("Clear Detail Search")
         }
         .padding(.horizontal, compact ? 10 : 12)
@@ -745,11 +758,9 @@ struct ContentView: View {
         if shouldShowSidebar {
             viewModel.preferredCompactColumn = .sidebar
         }
-        if store.selectedDocumentID == nil {
-            clearDetailSearch()
-        } else {
-            refreshDetailSearch()
-        }
+        // Keep the shared search string intact (the file list stays filtered);
+        // just re-run the in-document search against whatever is now current.
+        refreshDetailSearch()
     }
 
     private func presentInitialOpenPromptIfNeeded() {
@@ -827,34 +838,23 @@ struct ContentView: View {
     #endif
 
     private var store: DocumentSessionStore { viewModel.store }
-    private var listSearchBinding: Binding<String> {
+    private var searchBinding: Binding<String> {
         Binding(
-            get: { listSearchText },
-            set: { setListSearchQuery($0, focus: false) }
+            get: { searchText },
+            set: { setSearchText($0) }
         )
     }
 
-    private var detailSearchBinding: Binding<String> {
-        Binding(
-            get: { detailSearch.query },
-            set: { setDetailSearchQuery($0, focus: false) }
-        )
+    private var trimmedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var trimmedListSearchText: String {
-        listSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var hasListSearch: Bool {
-        !trimmedListSearchText.isEmpty
+    private var hasSearchText: Bool {
+        !trimmedSearchText.isEmpty
     }
 
     private var isListSearchFiltering: Bool {
-        #if os(macOS)
-        hasListSearch && focusedSearchField == .list && isSearchHostAppActive
-        #else
-        hasListSearch && isSearchHostAppActive
-        #endif
+        hasSearchText && isSearchHostAppActive
     }
 
     private var isSearchHostAppActive: Bool {
@@ -895,7 +895,7 @@ struct ContentView: View {
     }
 
     private var listSearchSuggestions: [String] {
-        store.listSearchSuggestions(prefix: listSearchText)
+        store.listSearchSuggestions(prefix: searchText)
     }
 
     private var detailSearchSuggestions: [String] {
@@ -940,7 +940,7 @@ struct ContentView: View {
     }
 
     private func matchesListSearch(_ document: DocumentSessionStore.OpenedDocument) -> Bool {
-        store.documentMatchesListSearch(document.id, query: trimmedListSearchText)
+        store.documentMatchesListSearch(document.id, query: trimmedSearchText)
     }
 
     private func deleteFilteredDocuments(at offsets: IndexSet) {
@@ -948,20 +948,42 @@ struct ContentView: View {
         idsToDelete.forEach { removeDocumentFromList(id: $0) }
     }
 
-    private func setListSearchQuery(_ query: String, focus: Bool) {
-        listSearchText = query
-        #if os(macOS)
+    private func setSearchText(_ query: String, focus: SearchField? = nil) {
+        searchText = query
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedQuery.isEmpty {
             SystemFindPasteboard.setQuery(trimmedQuery)
+            #if os(macOS)
+            // Remember our own write so it is not re-adopted as an external change.
+            lastFindPasteboardChangeCount = SystemFindPasteboard.changeCount()
+            #endif
         }
-        #endif
-        if focus {
-            focusedSearchField = .list
+        updateDetailSearch(for: query)
+        if let focus {
+            focusedSearchField = focus
         }
     }
 
-    private func setDetailSearchQuery(_ query: String, focus: Bool) {
+    #if os(macOS)
+    private func adoptSystemFindQueryIfChanged() {
+        let changeCount = SystemFindPasteboard.changeCount()
+        guard let lastChangeCount = lastFindPasteboardChangeCount else {
+            // First observation only establishes a baseline; don't inherit a
+            // stale find term from before the app started running.
+            lastFindPasteboardChangeCount = changeCount
+            return
+        }
+        guard changeCount != lastChangeCount else { return }
+        lastFindPasteboardChangeCount = changeCount
+
+        guard let query = SystemFindPasteboard.currentQuery(),
+              !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              query != searchText else { return }
+        setSearchText(query)
+    }
+    #endif
+
+    private func updateDetailSearch(for query: String) {
         let wasEmpty = detailSearch.query.isEmpty
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if wasEmpty, !trimmedQuery.isEmpty, let currentDocument = store.currentDocument {
@@ -970,14 +992,6 @@ struct ContentView: View {
 
         detailSearch.updateQuery(query, in: store.currentDocument?.file.contents ?? "")
         applyDetailSearchSelection()
-        #if os(macOS)
-        if !detailSearch.query.isEmpty {
-            SystemFindPasteboard.setQuery(detailSearch.query)
-        }
-        #endif
-        if focus {
-            focusedSearchField = .detail
-        }
     }
 
     private func refreshDetailSearch() {
@@ -994,42 +1008,47 @@ struct ContentView: View {
             didApplyDetailSearchSelection = false
             return
         }
-        if let match = detailSearch.currentMatch {
-            store.setSelections([match], for: currentDocument.id, text: currentDocument.file.contents)
+
+        if !detailSearch.query.isEmpty {
+            // While a search is active it owns the detail selection: highlight the
+            // current match, or show no selection at all when nothing matches.
+            let searchSelection = detailSearch.currentMatch.map { [$0] } ?? []
+            if store.selections(for: currentDocument.id) != searchSelection {
+                store.setSelections(searchSelection, for: currentDocument.id, text: currentDocument.file.contents)
+            }
             didApplyDetailSearchSelection = true
-        } else if didApplyDetailSearchSelection {
+            return
+        }
+
+        // The query is empty. Restore whatever selection existed before the
+        // search took over the detail selection, if any.
+        if didApplyDetailSearchSelection {
             let previousSelection = savedSelectionsBeforeDetailSearch.removeValue(forKey: currentDocument.id) ?? []
             store.setSelections(previousSelection, for: currentDocument.id, text: currentDocument.file.contents)
             didApplyDetailSearchSelection = false
+        } else {
+            savedSelectionsBeforeDetailSearch.removeValue(forKey: currentDocument.id)
         }
     }
 
-    private func clearListSearch() {
+    private func clearSearch() {
         pendingSearchFocusTask?.cancel()
-        setListSearchQuery("", focus: false)
-        listToDetailSearchHandoffQuery = nil
-        if focusedSearchField == .list {
-            focusedSearchField = nil
-        }
+        setSearchText("")
+        focusedSearchField = nil
     }
 
-    private func clearDetailSearch() {
-        pendingSearchFocusTask?.cancel()
-        setDetailSearchQuery("", focus: false)
-        if focusedSearchField == .detail {
-            focusedSearchField = nil
-        }
+    private func seedSearchFromPasteboardIfEmpty() {
+        guard trimmedSearchText.isEmpty,
+              let existingQuery = SystemFindPasteboard.currentQuery(),
+              !existingQuery.isEmpty else { return }
+        setSearchText(existingQuery)
     }
 
     private func focusListSearch() {
         if usesSingleColumnNavigation {
             viewModel.preferredCompactColumn = .sidebar
         }
-        #if os(macOS)
-        if trimmedListSearchText.isEmpty, let existingQuery = SystemFindPasteboard.currentQuery(), !existingQuery.isEmpty {
-            setListSearchQuery(existingQuery, focus: false)
-        }
-        #endif
+        seedSearchFromPasteboardIfEmpty()
         requestSearchFocus(.list)
     }
 
@@ -1038,11 +1057,7 @@ struct ContentView: View {
         if usesSingleColumnNavigation {
             viewModel.preferredCompactColumn = .detail
         }
-        #if os(macOS)
-        if detailSearch.query.isEmpty, let existingQuery = SystemFindPasteboard.currentQuery(), !existingQuery.isEmpty {
-            setDetailSearchQuery(existingQuery, focus: false)
-        }
-        #endif
+        seedSearchFromPasteboardIfEmpty()
         requestSearchFocus(.detail)
     }
 
@@ -1083,16 +1098,6 @@ struct ContentView: View {
         }
     }
 
-    private func activateDetailSearchFromListSearch() {
-        let query = trimmedListSearchText
-        listToDetailSearchHandoffQuery = query
-        setListSearchQuery("", focus: false)
-        setDetailSearchQuery(query, focus: true)
-        if usesSingleColumnNavigation {
-            viewModel.preferredCompactColumn = .detail
-        }
-    }
-
     private func navigateDetailSearch(_ direction: MarkdownSearchDirection) {
         guard !detailSearch.query.isEmpty else {
             focusDetailSearch()
@@ -1104,42 +1109,23 @@ struct ContentView: View {
 
     private func useCurrentSelectionForFind() {
         guard let currentSelectionSearchText else { return }
-        #if os(macOS)
-        SystemFindPasteboard.setQuery(currentSelectionSearchText)
-        #endif
-        setDetailSearchQuery(currentSelectionSearchText, focus: true)
+        setSearchText(currentSelectionSearchText, focus: .detail)
+    }
+
+    /// Runs the shared search for text chosen from a selection's "Search" edit-menu
+    /// action. Does not steal keyboard focus, so the highlighted match stays visible
+    /// instead of being covered by the on-screen keyboard.
+    private func searchForSelection(_ rawText: String) {
+        let normalized = rawText
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        setSearchText(normalized)
     }
 
     private func cancelFocusedSearch() {
-        switch focusedSearchField {
-        case .list:
-            clearListSearch()
-        case .detail:
-            if restoreListSearchAfterHandoffIfNeeded() == false {
-                clearDetailSearch()
-            }
-        case nil:
-            if !detailSearch.query.isEmpty {
-                if restoreListSearchAfterHandoffIfNeeded() == false {
-                    clearDetailSearch()
-                }
-            } else if hasListSearch {
-                clearListSearch()
-            }
-        }
-    }
-
-    @discardableResult
-    private func restoreListSearchAfterHandoffIfNeeded() -> Bool {
-        guard let query = listToDetailSearchHandoffQuery else { return false }
-        clearDetailSearch()
-        setListSearchQuery(query, focus: false)
-        listToDetailSearchHandoffQuery = nil
-        requestSearchFocus(.list)
-        if usesSingleColumnNavigation {
-            viewModel.preferredCompactColumn = .sidebar
-        }
-        return true
+        guard !searchText.isEmpty else { return }
+        clearSearch()
     }
 
 }

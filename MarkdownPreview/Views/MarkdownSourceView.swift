@@ -8,10 +8,16 @@ struct MarkdownSourceView: View {
     let contents: String
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
+    var onSearchSelection: (String) -> Void = { _ in }
 
     var body: some View {
-        SelectableSourceTextView(text: contents, textSize: textSize, selections: $selections)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        SelectableSourceTextView(
+            text: contents,
+            textSize: textSize,
+            selections: $selections,
+            onSearchSelection: onSearchSelection
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 

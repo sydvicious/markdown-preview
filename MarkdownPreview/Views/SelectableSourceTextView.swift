@@ -40,13 +40,16 @@ struct SelectableSourceTextView: UIViewRepresentable {
     let text: String
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
+    var onSearchSelection: (String) -> Void = { _ in }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var selections: Binding<[MarkdownSelectionRange]>
+        var onSearchSelection: (String) -> Void
         var isApplyingSelection = false
 
-        init(selections: Binding<[MarkdownSelectionRange]>) {
+        init(selections: Binding<[MarkdownSelectionRange]>, onSearchSelection: @escaping (String) -> Void) {
             self.selections = selections
+            self.onSearchSelection = onSearchSelection
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
@@ -57,10 +60,32 @@ struct SelectableSourceTextView: UIViewRepresentable {
                 selections.wrappedValue = next
             }
         }
+
+        func textView(
+            _ textView: UITextView,
+            editMenuForTextIn range: NSRange,
+            suggestedActions: [UIMenuElement]
+        ) -> UIMenu? {
+            let nsText = (textView.text ?? "") as NSString
+            guard range.length > 0,
+                  range.location >= 0,
+                  range.location + range.length <= nsText.length else {
+                return nil
+            }
+            let selectedText = nsText.substring(with: range)
+            let onSearch = onSearchSelection
+            let searchAction = UIAction(
+                title: "Search",
+                image: UIImage(systemName: "magnifyingglass")
+            ) { _ in
+                onSearch(selectedText)
+            }
+            return UIMenu(children: suggestedActions + [searchAction])
+        }
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(selections: $selections)
+        Coordinator(selections: $selections, onSearchSelection: onSearchSelection)
     }
 
     func makeUIView(context: Context) -> UITextView {
@@ -84,6 +109,7 @@ struct SelectableSourceTextView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         context.coordinator.selections = $selections
+        context.coordinator.onSearchSelection = onSearchSelection
         if uiView.text != text {
             context.coordinator.isApplyingSelection = true
             uiView.text = text
@@ -178,13 +204,16 @@ struct SelectableSourceTextView: NSViewRepresentable {
     let text: String
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
+    var onSearchSelection: (String) -> Void = { _ in }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var selections: Binding<[MarkdownSelectionRange]>
+        var onSearchSelection: (String) -> Void
         var isApplyingSelection = false
 
-        init(selections: Binding<[MarkdownSelectionRange]>) {
+        init(selections: Binding<[MarkdownSelectionRange]>, onSearchSelection: @escaping (String) -> Void) {
             self.selections = selections
+            self.onSearchSelection = onSearchSelection
         }
 
         func textDidChange(_ notification: Notification) {}
@@ -200,10 +229,35 @@ struct SelectableSourceTextView: NSViewRepresentable {
                 selections.wrappedValue = next
             }
         }
+
+        func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+            let selectedRange = view.selectedRange()
+            let nsString = view.string as NSString
+            guard selectedRange.length > 0,
+                  selectedRange.location + selectedRange.length <= nsString.length else {
+                return menu
+            }
+            let selectedText = nsString.substring(with: selectedRange)
+            let item = NSMenuItem(
+                title: "Search",
+                action: #selector(searchSelectionMenuAction(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = selectedText
+            menu.addItem(.separator())
+            menu.addItem(item)
+            return menu
+        }
+
+        @objc private func searchSelectionMenuAction(_ sender: NSMenuItem) {
+            guard let selectedText = sender.representedObject as? String else { return }
+            onSearchSelection(selectedText)
+        }
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(selections: $selections)
+        Coordinator(selections: $selections, onSearchSelection: onSearchSelection)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -242,6 +296,7 @@ struct SelectableSourceTextView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.selections = $selections
+        context.coordinator.onSearchSelection = onSearchSelection
         guard let textView = nsView.documentView as? NSTextView else { return }
         if textView.string != text {
             context.coordinator.isApplyingSelection = true

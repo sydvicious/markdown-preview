@@ -4,6 +4,14 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-07-03
+
+- Bumped the app marketing version to `0.5` and build number to `5` (both in `Version.xcconfig`), adopting the convention of bumping the version on the first commit after a release.
+- Unified search into a single shared query string across all platforms: the file-list search box and the in-document search box now always show the same text, and that one string drives both file-list filtering and in-document find. This removes the separate list/detail search states and the list→detail handoff, so the search text no longer goes blank when moving between the file list and a document (notably on iPhone). The in-memory/system find buffer still seeds an empty field on focus (and from selection-for-find).
+- Made the macOS search two-way shared with the system find pasteboard: the shared search string is written to the find pasteboard as it changes, and when the app becomes active it adopts a find term set by another app (or a native find bar) if it changed since the app last saw it (guarded by the pasteboard change count so the app never re-adopts its own writes or undoes a manual clear).
+- Fixed in-document search so that once a query stops matching, the previously highlighted match is cleared and no selection is shown while there are no matches; the pre-search selection is still restored when the search is cleared.
+- Added a "Search" action to the text-selection menu so a selection can be sent straight to the shared search: on iOS/iPadOS it appears in the selection edit menu (callout) for both the source and preview, and on macOS it appears in the right-click context menu for both. Choosing it runs the in-document search for the selected text without stealing keyboard focus.
+
 ## 2026-06-30
 
 - Bumped the app marketing version to `0.4` and build number to `4` for this release, with both values now centralized in `Version.xcconfig`.

@@ -22,6 +22,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
     var selectionSynchronizer: PreviewSelectionSynchronizer?
     var onSelectedTextChange: (String?) -> Void = { _ in }
     var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
+    var onSearchSelection: (String) -> Void = { _ in }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String?
@@ -33,6 +34,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         fileprivate weak var webView: MarkdownCopyWebView?
         var onSelectedTextChange: (String?) -> Void = { _ in }
         var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
+        var onSearchSelection: (String) -> Void = { _ in }
 
         func webView(
             _ webView: WKWebView,
@@ -86,7 +88,11 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         context.coordinator.selectionSynchronizer = selectionSynchronizer
         context.coordinator.onSelectedTextChange = onSelectedTextChange
         context.coordinator.onSelectedRangesChange = onSelectedRangesChange
+        context.coordinator.onSearchSelection = onSearchSelection
         context.coordinator.updateFlushSelectionHandler()
+        webView.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
+            coordinator?.onSearchSelection(text)
+        }
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
@@ -102,7 +108,11 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         context.coordinator.selectionSynchronizer = selectionSynchronizer
         context.coordinator.onSelectedTextChange = onSelectedTextChange
         context.coordinator.onSelectedRangesChange = onSelectedRangesChange
+        context.coordinator.onSearchSelection = onSearchSelection
         context.coordinator.updateFlushSelectionHandler()
+        (webView as? MarkdownCopyWebView)?.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
+            coordinator?.onSearchSelection(text)
+        }
         let didReceivePreviewOriginatedSelection = context.coordinator.previewOriginatedSelectedRange == selectedRange
         if didReceivePreviewOriginatedSelection {
             context.coordinator.previewOriginatedSelectedRange = nil
@@ -132,6 +142,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     var selectionSynchronizer: PreviewSelectionSynchronizer?
     var onSelectedTextChange: (String?) -> Void = { _ in }
     var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
+    var onSearchSelection: (String) -> Void = { _ in }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String?
@@ -143,6 +154,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         fileprivate weak var webView: MarkdownCopyWebView?
         var onSelectedTextChange: (String?) -> Void = { _ in }
         var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
+        var onSearchSelection: (String) -> Void = { _ in }
 
         func webView(
             _ webView: WKWebView,
@@ -196,7 +208,11 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         context.coordinator.selectionSynchronizer = selectionSynchronizer
         context.coordinator.onSelectedTextChange = onSelectedTextChange
         context.coordinator.onSelectedRangesChange = onSelectedRangesChange
+        context.coordinator.onSearchSelection = onSearchSelection
         context.coordinator.updateFlushSelectionHandler()
+        webView.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
+            coordinator?.onSearchSelection(text)
+        }
         webView.setValue(false, forKey: "drawsBackground")
         webView.loadHTMLString(html, baseURL: baseURL)
         context.coordinator.lastHTML = html
@@ -209,7 +225,11 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         context.coordinator.selectionSynchronizer = selectionSynchronizer
         context.coordinator.onSelectedTextChange = onSelectedTextChange
         context.coordinator.onSelectedRangesChange = onSelectedRangesChange
+        context.coordinator.onSearchSelection = onSearchSelection
         context.coordinator.updateFlushSelectionHandler()
+        (webView as? MarkdownCopyWebView)?.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
+            coordinator?.onSearchSelection(text)
+        }
         let didReceivePreviewOriginatedSelection = context.coordinator.previewOriginatedSelectedRange == selectedRange
         if didReceivePreviewOriginatedSelection {
             context.coordinator.previewOriginatedSelectedRange = nil
@@ -623,6 +643,10 @@ enum PreviewSelectionBridge {
 #if os(iOS)
 private final class MarkdownCopyWebView: WKWebView {
     var markdownSource = ""
+    /// Latest non-empty selected text, tracked from selection-change messages so
+    /// the edit menu can offer "Search" without a synchronous JS round-trip.
+    var currentSelectionText: String?
+    var searchSelectionHandler: ((String) -> Void)?
 
     override func copy(_ sender: Any?) {
         copySelectionToPasteboard {
@@ -633,13 +657,51 @@ private final class MarkdownCopyWebView: WKWebView {
     private func performNativeCopy(_ sender: Any?) {
         super.copy(sender)
     }
+
+    override func buildMenu(with builder: UIMenuBuilder) {
+        super.buildMenu(with: builder)
+        guard let selectionText = currentSelectionText, !selectionText.isEmpty else { return }
+        let handler = searchSelectionHandler
+        let searchAction = UIAction(
+            title: "Search",
+            image: UIImage(systemName: "magnifyingglass")
+        ) { _ in
+            handler?(selectionText)
+        }
+        builder.insertChild(
+            UIMenu(title: "", options: .displayInline, children: [searchAction]),
+            atEndOfMenu: .standardEdit
+        )
+    }
 }
 #elseif os(macOS)
 private final class MarkdownCopyWebView: WKWebView {
     var markdownSource = ""
+    /// Latest non-empty selected text, tracked from selection-change messages so
+    /// the context menu can offer "Search" without a synchronous JS round-trip.
+    var currentSelectionText: String?
+    var searchSelectionHandler: ((String) -> Void)?
 
     @objc func copy(_ sender: Any?) {
         copySelectionToPasteboard {}
+    }
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        guard let selectionText = currentSelectionText, !selectionText.isEmpty else { return }
+        let item = NSMenuItem(
+            title: "Search",
+            action: #selector(searchSelectionMenuAction(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        menu.addItem(.separator())
+        menu.addItem(item)
+    }
+
+    @objc private func searchSelectionMenuAction(_ sender: Any?) {
+        guard let selectionText = currentSelectionText, !selectionText.isEmpty else { return }
+        searchSelectionHandler?(selectionText)
     }
 }
 #endif
@@ -741,6 +803,7 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
             webView?.writeBlockRangeToPasteboard(start: payload.start, end: payload.end)
         case previewSelectionChangedMessageHandlerName:
             let payload = PreviewSelectionChangedMessage(messageBody: message.body)
+            webView?.currentSelectionText = payload.selectedText
             let selectionRanges = webView.map {
                 PreviewSelectionBridge.sourceRanges(fromDisplayRangeResult: payload.displayRangeResult, source: $0.markdownSource)
             } ?? []

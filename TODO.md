@@ -2,12 +2,11 @@
 
 This document tracks planned work for MarkdownPreviewApp.
 ### Bug fixes
-- iPadOS/iOS search boxes need to share text
 - On Mac and iPad, search box should have a minimum width, but should fill the title bar otherwise. Mac, of course, has the filename, and it shoud be full. Priority is full file name, then expand Search Bar.
 ### Refactor
 - MarkdownAppCommandCenter should be in its own file.
 - MarkdownPreviewTextOffsetMapping and HTMLTextOffsetMapping should be in their own files.
-- 
+
 ### Investigate using Liquid Glass controls.
 
 ### Expand search and indexing
@@ -17,7 +16,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - Add backend indexing optimizations now that the GUI/search interaction is stable.
   - Maintain a disk-backed word index mapping terms to files and source offsets.
   - Update the index incrementally as files are added, removed, or changed.
-  - Use the index to accelerate file-list search and detail-search handoff across larger document sets.
+  - Use the index to accelerate file-list and in-document search across larger document sets.
 
 ### Generate a spotlight index for content
 

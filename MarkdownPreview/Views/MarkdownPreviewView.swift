@@ -29,6 +29,7 @@ struct MarkdownPreviewView: View {
     var selectionSynchronizer: PreviewSelectionSynchronizer?
     var onSelectedTextChange: (String?) -> Void = { _ in }
     var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
+    var onSearchSelection: (String) -> Void = { _ in }
 
     var body: some View {
         MarkdownPreviewWebView(
@@ -38,7 +39,8 @@ struct MarkdownPreviewView: View {
             selectedRange: selections.first,
             selectionSynchronizer: selectionSynchronizer,
             onSelectedTextChange: onSelectedTextChange,
-            onSelectedRangesChange: onSelectedRangesChange
+            onSelectedRangesChange: onSelectedRangesChange,
+            onSearchSelection: onSearchSelection
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
