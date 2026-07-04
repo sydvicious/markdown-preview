@@ -106,9 +106,12 @@ enum MarkdownHTMLBuilder {
               background: var(--copy-button-background-active);
             }
             h1, h2, h3, h4, h5, h6 {
-              margin: 0 0 0.6em 0;
+              margin: 1.4em 0 0.6em 0;
               line-height: 1.2;
               font-weight: 650;
+            }
+            .md-block:first-child > :first-child {
+              margin-top: 0;
             }
             h1 { font-size: 2em; }
             h2 { font-size: 1.65em; }

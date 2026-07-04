@@ -4,6 +4,7 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Bug fixes
 - On Mac and iPad, search box should have a minimum width, but should fill the title bar otherwise. Mac, of course, has the filename, and it should be full. Priority is full file name, then expand Search Bar.
+- On Mac, the File Open dialog presented if there is nothing in the list when the app is opened should allow multiple selection.
 
 ### Refactor
 - MarkdownAppCommandCenter should be in its own file.
