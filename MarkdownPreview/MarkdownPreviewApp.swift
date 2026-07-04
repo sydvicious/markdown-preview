@@ -3,11 +3,42 @@
 //
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 final class FileOpenState: ObservableObject {
-    @Published var openedURL: URL?
+    /// Shared instance so the macOS app delegate and the SwiftUI scene enqueue
+    /// into the same queue.
+    static let shared = FileOpenState()
+
+    /// Queue of URLs handed to the app by the system. A multi-file open delivers
+    /// every URL together (macOS `application(_:open:)`) or one at a time (iOS
+    /// `.onOpenURL`), so they are accumulated here and drained together rather
+    /// than overwriting a single slot (which dropped all but one file).
+    @Published var pendingURLs: [URL] = []
     @Published var didReceiveExternalOpenRequest = false
+
+    func enqueue(_ url: URL) {
+        didReceiveExternalOpenRequest = true
+        pendingURLs.append(url)
+    }
+
+    func enqueue(_ urls: [URL]) {
+        urls.forEach(enqueue)
+    }
 }
+
+#if os(macOS)
+/// macOS delivers a batch "Open" (for example several files selected in Finder)
+/// through `application(_:open:)` as a single array. SwiftUI's `.onOpenURL` only
+/// surfaces one of them, so the app delegate handles opens on macOS instead.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func application(_ application: NSApplication, open urls: [URL]) {
+        FileOpenState.shared.enqueue(urls)
+    }
+}
+#endif
 
 @MainActor
 final class MarkdownAppCommandCenter: ObservableObject {
@@ -18,6 +49,7 @@ final class MarkdownAppCommandCenter: ObservableObject {
     @Published private(set) var canFindPrevious = false
     @Published private(set) var canIncreaseTextSize = false
     @Published private(set) var canDecreaseTextSize = false
+    @Published private(set) var canRemoveFromList = false
 
     private var handleFind: (() -> Void)?
     private var handleProjectFind: (() -> Void)?
@@ -27,6 +59,7 @@ final class MarkdownAppCommandCenter: ObservableObject {
     private var handleIncreaseTextSize: (() -> Void)?
     private var handleDecreaseTextSize: (() -> Void)?
     private var handleCancelSearch: (() -> Void)?
+    private var handleRemoveFromList: (() -> Void)?
 
     func update(
         canFind: Bool,
@@ -43,7 +76,9 @@ final class MarkdownAppCommandCenter: ObservableObject {
         handleIncreaseTextSize: @escaping () -> Void,
         canDecreaseTextSize: Bool,
         handleDecreaseTextSize: @escaping () -> Void,
-        handleCancelSearch: @escaping () -> Void
+        handleCancelSearch: @escaping () -> Void,
+        canRemoveFromList: Bool,
+        handleRemoveFromList: @escaping () -> Void
     ) {
         self.canFind = canFind
         self.handleFind = handleFind
@@ -60,6 +95,8 @@ final class MarkdownAppCommandCenter: ObservableObject {
         self.canDecreaseTextSize = canDecreaseTextSize
         self.handleDecreaseTextSize = handleDecreaseTextSize
         self.handleCancelSearch = handleCancelSearch
+        self.canRemoveFromList = canRemoveFromList
+        self.handleRemoveFromList = handleRemoveFromList
     }
 
     func reset() {
@@ -70,6 +107,7 @@ final class MarkdownAppCommandCenter: ObservableObject {
         canFindPrevious = false
         canIncreaseTextSize = false
         canDecreaseTextSize = false
+        canRemoveFromList = false
         handleFind = nil
         handleProjectFind = nil
         handleUseSelectionForFind = nil
@@ -78,6 +116,7 @@ final class MarkdownAppCommandCenter: ObservableObject {
         handleIncreaseTextSize = nil
         handleDecreaseTextSize = nil
         handleCancelSearch = nil
+        handleRemoveFromList = nil
     }
 
     func performFind() {
@@ -111,12 +150,24 @@ final class MarkdownAppCommandCenter: ObservableObject {
     func performCancelSearch() {
         handleCancelSearch?()
     }
+
+    func performRemoveFromList() {
+        handleRemoveFromList?()
+    }
 }
 
 private struct MarkdownPreviewCommands: Commands {
     @ObservedObject var commandCenter: MarkdownAppCommandCenter
 
     var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("Remove from List") {
+                commandCenter.performRemoveFromList()
+            }
+            .keyboardShortcut(.delete, modifiers: [.command])
+            .disabled(!commandCenter.canRemoveFromList)
+        }
+
         CommandMenu("Find") {
             Button("Find") {
                 commandCenter.performFind()
@@ -176,7 +227,10 @@ private struct MarkdownPreviewCommands: Commands {
 
 @main
 struct MarkdownPreviewApp: App {
-    @StateObject private var fileOpenState = FileOpenState()
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #endif
+    @StateObject private var fileOpenState = FileOpenState.shared
     @StateObject private var commandCenter = MarkdownAppCommandCenter()
 
     var body: some Scene {
@@ -185,10 +239,6 @@ struct MarkdownPreviewApp: App {
             ContentView()
                 .environmentObject(commandCenter)
                 .environmentObject(fileOpenState)
-                .onOpenURL { url in
-                    fileOpenState.didReceiveExternalOpenRequest = true
-                    fileOpenState.openedURL = url
-                }
         }
         .commands {
             MarkdownPreviewCommands(commandCenter: commandCenter)
@@ -199,8 +249,7 @@ struct MarkdownPreviewApp: App {
                 .environmentObject(commandCenter)
                 .environmentObject(fileOpenState)
                 .onOpenURL { url in
-                    fileOpenState.didReceiveExternalOpenRequest = true
-                    fileOpenState.openedURL = url
+                    fileOpenState.enqueue(url)
                 }
         }
         .commands {

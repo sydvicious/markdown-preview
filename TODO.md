@@ -1,8 +1,10 @@
 # TODO
 
 This document tracks planned work for MarkdownPreviewApp.
+
 ### Bug fixes
-- On Mac and iPad, search box should have a minimum width, but should fill the title bar otherwise. Mac, of course, has the filename, and it shoud be full. Priority is full file name, then expand Search Bar.
+- On Mac and iPad, search box should have a minimum width, but should fill the title bar otherwise. Mac, of course, has the filename, and it should be full. Priority is full file name, then expand Search Bar.
+
 ### Refactor
 - MarkdownAppCommandCenter should be in its own file.
 - MarkdownPreviewTextOffsetMapping and HTMLTextOffsetMapping should be in their own files.
@@ -33,10 +35,13 @@ This document tracks planned work for MarkdownPreviewApp.
 ### New from clipboard.
   - File -> New (Cmd-N): if clipboard has text, create a new unsaved document with that content.
   - File -> Save (Cmd-S): prompt to save as `.md`.
+
 ### Open remote URLs without downloading.
   - If `.onOpenURL` receives an `http(s)` link to a markdown file, fetch into memory and open in a new window.
-  - Provide "Save as.".. to persist locally if desired.
+  - Provide "Save as..." to persist locally if desired.
+
 ### Refactor using YMMV
+
 ### Investigate iPad multi-window mode.
   - Evaluate scene/window behavior when opening multiple markdown files in Split View/Stage Manager.
   - Decide whether to keep single-window split navigation or support multiple app windows on iPadOS.
@@ -44,7 +49,9 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Support side-by-side Preview and Source on Mac and iPad.
   - Add a layout mode that shows rendered preview and source simultaneously.
   - Ensure the mode works in regular-width environments on macOS and iPadOS.
+
 ### Support image references.
+
 ### Improve project documentation and samples.
   - Make a good `SAMPLE.md` file displaying features.
   - Make a better, more consumer-based `README.md` with screenshots displaying features.
@@ -58,7 +65,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - Submit app to App Store.
   - Set up TestFlight.
   - Capture and prepare App Store screenshots for iPhone, iPad, and Mac.
-  - Set up a simple versioning process for `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` so release/build numbers are easy to bump consistently.
+  - Automate `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` bumps in CI/CD (currently a manual convention: both are centralized in `Version.xcconfig` and bumped in lock step on the first commit after a release).
 
 ### Rename and simplify `ContentView.swift`.
   - Consider renaming `ContentView.swift` to a clearer top-level container name.

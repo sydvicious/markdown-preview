@@ -75,7 +75,16 @@ struct ContentView: View {
                 sidebarPanel
                     .modifier(SidebarTitleOnIPhone(isActive: usesSingleColumnNavigation))
                     .toolbar {
-                        #if !os(macOS)
+                        #if os(macOS)
+                        // Give the file list its own remove control next to the
+                        // list, so removal is discoverable without hunting through
+                        // the detail toolbar or the row context menu. Always
+                        // present (disabled when nothing is selected) so it does
+                        // not pop in and out of the toolbar.
+                        ToolbarItem(placement: .automatic) {
+                            removeFromListButton
+                        }
+                        #else
                         ToolbarItem(placement: openButtonPlacement) {
                             Button {
                                 isImporterPresented = true
@@ -133,11 +142,6 @@ struct ContentView: View {
                                 .accessibilityLabel("Increase Text Size")
                                 .accessibilityIdentifier("IncreaseTextSize")
                             }
-                            #if os(macOS)
-                            if store.selectedDocumentID != nil {
-                                removeFromListButton
-                            }
-                            #endif
                         }
                     }
             }
@@ -258,11 +262,13 @@ struct ContentView: View {
             }
         }
         #endif
-        .onReceive(fileOpenState.$openedURL.compactMap { $0 }) { url in
+        .onReceive(fileOpenState.$pendingURLs.filter { !$0.isEmpty }) { urls in
             cancelPendingStartupImporter()
-            viewModel.load(url: url, isCompactWidth: usesSingleColumnNavigation)
+            for url in urls {
+                viewModel.load(url: url, isCompactWidth: usesSingleColumnNavigation)
+            }
             refreshDetailSearch()
-            fileOpenState.openedURL = nil
+            fileOpenState.pendingURLs = []
         }
         .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
             if !disableLiveFileMonitoring {
@@ -316,6 +322,13 @@ struct ContentView: View {
                         }
                     }
                     .onDeleteCommand(perform: removeSelectedDocumentFromList)
+                    .contextMenu(forSelectionType: DocumentSessionStore.OpenedDocument.ID.self) { ids in
+                        Button(role: .destructive) {
+                            ids.forEach { removeDocumentFromList(id: $0) }
+                        } label: {
+                            Label("Remove from List", systemImage: "trash")
+                        }
+                    }
                     #else
                     List {
                         ForEach(filteredSortedDocuments) { document in
@@ -350,6 +363,12 @@ struct ContentView: View {
                 }
             }
         ))
+        #if os(macOS)
+        // On macOS the row context menu is provided by the List via
+        // `.contextMenu(forSelectionType:)`, which is far more reliable than a
+        // per-row `.contextMenu` combined with `.tag()`-based selection.
+        .help(viewModel.tooltipPath(for: document.file.url))
+        #else
         .contextMenu {
             Button(role: .destructive) {
                 removeDocumentFromList(id: document.id)
@@ -357,7 +376,6 @@ struct ContentView: View {
                 Label("Remove from List", systemImage: "trash")
             }
         }
-        #if !os(macOS)
         .swipeActions {
             Button(role: .destructive) {
                 removeDocumentFromList(id: document.id)
@@ -365,9 +383,6 @@ struct ContentView: View {
                 Label("Remove", systemImage: "trash")
             }
         }
-        #endif
-        #if os(macOS)
-        .help(viewModel.tooltipPath(for: document.file.url))
         #endif
     }
 
@@ -548,6 +563,7 @@ struct ContentView: View {
         } label: {
             Image(systemName: "trash")
         }
+        .disabled(store.selectedDocumentID == nil)
         .accessibilityLabel("Remove from List")
         .accessibilityIdentifier("RemoveFromList")
     }
@@ -563,9 +579,12 @@ struct ContentView: View {
     @ViewBuilder
     private var macFirstResponderSinkBackground: some View {
         #if os(macOS)
-        MacFirstResponderSinkView(sink: macFirstResponderSink)
-            .frame(width: 0, height: 0)
-            .accessibilityHidden(true)
+        MacFirstResponderSinkView(
+            sink: macFirstResponderSink,
+            onDelete: removeSelectedDocumentFromList
+        )
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
         #endif
     }
 
@@ -606,7 +625,9 @@ struct ContentView: View {
                 guard let selectedDocumentID = store.selectedDocumentID else { return }
                 decreaseTextSize(for: selectedDocumentID)
             },
-            handleCancelSearch: cancelFocusedSearch
+            handleCancelSearch: cancelFocusedSearch,
+            canRemoveFromList: store.selectedDocumentID != nil,
+            handleRemoveFromList: removeSelectedDocumentFromList
         )
     }
 
@@ -1231,22 +1252,38 @@ private final class MacFirstResponderSink {
 
 private struct MacFirstResponderSinkView: NSViewRepresentable {
     let sink: MacFirstResponderSink
+    var onDelete: () -> Void = {}
 
     func makeNSView(context: Context) -> MacFirstResponderSinkNSView {
         let view = MacFirstResponderSinkNSView(frame: .zero)
         view.setAccessibilityElement(false)
+        view.onDelete = onDelete
         sink.view = view
         return view
     }
 
     func updateNSView(_ nsView: MacFirstResponderSinkNSView, context: Context) {
+        nsView.onDelete = onDelete
         sink.view = nsView
     }
 }
 
 private final class MacFirstResponderSinkNSView: NSView {
+    var onDelete: () -> Void = {}
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        // Focus is parked here after a file is selected, so handle Delete /
+        // Forward Delete to remove the selected document (Finder/Mail behavior)
+        // since the file list itself is no longer first responder.
+        let deleteKeyCodes: Set<UInt16> = [51, 117]
+        if deleteKeyCodes.contains(event.keyCode) {
+            onDelete()
+            return
+        }
+        super.keyDown(with: event)
+    }
 }
 #endif
 
