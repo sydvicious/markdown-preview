@@ -7,6 +7,7 @@ Format:
 ## 2026-07-03
 
 - Bumped the app marketing version to `0.5` and build number to `5` (both in `Version.xcconfig`), adopting the convention of bumping the version on the first commit after a release.
+- Let the macOS file-open dialog (the `+` button and the startup prompt when the list is empty) select multiple `.md` files at once; all selected files are opened instead of only the first.
 - Fixed macOS so opening multiple `.md` files at once (for example selecting several in Finder) opens all of them instead of only one: a batch Open is now handled by the AppKit app delegate's `application(_:open:)`, which receives every URL together, and incoming URLs are queued and drained rather than overwriting a single slot. (SwiftUI's `.onOpenURL` only surfaced one file from a multi-file open.)
 - Fixed macOS list removal, which had no working affordance: replaced the unreliable per-row context menu with the List's `.contextMenu(forSelectionType:)` (right-click → "Remove from List"), and added an always-present trash button to the file-list (sidebar) toolbar (disabled when nothing is selected) so removal is discoverable next to the list.
 - Added a "Remove from List" menu command (⌘⌦) that removes the selected file. As a menu command it works regardless of which pane holds focus, so removal no longer depends on the file list being first responder.

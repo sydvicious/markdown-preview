@@ -154,7 +154,7 @@ struct ContentView: View {
         .fileImporter(
             isPresented: $isImporterPresented,
             allowedContentTypes: MarkdownFile.supportedTypes,
-            allowsMultipleSelection: false
+            allowsMultipleSelection: true
         ) { result in
             viewModel.handleImport(result, isCompactWidth: usesSingleColumnNavigation)
         }

@@ -56,8 +56,10 @@ final class ContentViewModel: ObservableObject {
     func handleImport(_ result: Result<[URL], Error>, isCompactWidth: Bool) {
         switch result {
         case .success(let urls):
-            guard let url = urls.first else { return }
-            load(url: url, isCompactWidth: isCompactWidth)
+            guard !urls.isEmpty else { return }
+            for url in urls {
+                load(url: url, isCompactWidth: isCompactWidth)
+            }
         case .failure(let error):
             openErrorMessage = error.localizedDescription
         }

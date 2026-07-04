@@ -363,6 +363,27 @@ struct MarkdownPreviewTests {
     }
 
     @MainActor
+    @Test func handleImportOpensEverySelectedFile() async throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let urls = ["alpha", "beta", "gamma"].map { name -> URL in
+            let url = temporaryDirectory.appendingPathComponent("\(name).md")
+            try? name.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        }
+
+        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        viewModel.handleImport(.success(urls), isCompactWidth: false)
+
+        #expect(
+            Set(viewModel.store.openedDocuments.map(\.id)) == Set(urls.map(\.standardizedFileURL.path))
+        )
+    }
+
+    @MainActor
     @Test func fileOpenStateQueuesEveryURLFromABatchOpen() async throws {
         // Mirrors the macOS `application(_:open:)` path where a multi-file Open
         // delivers every URL at once.

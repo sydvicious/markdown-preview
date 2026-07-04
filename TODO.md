@@ -4,7 +4,7 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Bug fixes
 - On Mac and iPad, search box should have a minimum width, but should fill the title bar otherwise. Mac, of course, has the filename, and it should be full. Priority is full file name, then expand Search Bar.
-- On Mac, the File Open dialog presented if there is nothing in the list when the app is opened should allow multiple selection.
+- On Mac, the remove (trash) toolbar button lands in a weird place: it ends up at the far trailing edge after the toolbar overflow (`»`) chevron, detached from the file list, and renders with an odd blue highlight. Revisit placement/grouping (likely resolved by the document-based redesign).
 
 ### Refactor
 - MarkdownAppCommandCenter should be in its own file.
