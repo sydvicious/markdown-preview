@@ -17,6 +17,9 @@ Format:
 - Fixed in-document search so that once a query stops matching, the previously highlighted match is cleared and no selection is shown while there are no matches; the pre-search selection is still restored when the search is cleared.
 - Gave rendered headings more space above them so a heading following a paragraph reads as a new section instead of sitting as tightly as normal paragraph spacing (the first block's top margin is still zeroed so the title is not pushed down).
 - Added a "Search" action to the text-selection menu so a selection can be sent straight to the shared search: on iOS/iPadOS it appears in the selection edit menu (callout) for both the source and preview, and on macOS it appears in the right-click context menu for both. Choosing it runs the in-document search for the selected text without stealing keyboard focus.
+- Split several types into their own files and grouped the app's view models under a `View Models` folder: `MarkdownAppCommandCenter`, `MarkdownPreviewTextOffsetMapping`, and `HTMLTextOffsetMapping` each now live in their own file.
+- Began an MVVM restructuring: moved the search state and data logic (the shared query string, in-document match/selection handling, filtering, suggestions, and find-pasteboard sync) out of `ContentView` into a dedicated `SearchViewModel` owned by `ContentViewModel`, with keyboard focus left in the view. No behavior change.
+- Added unit tests for the models and view models and reorganized the test target so each test file mirrors its source file's folder (`View Models/`, `Utilities/`, `Views/`). Removed the auto-generated `MarkdownPreviewUITests` boilerplate (the empty target is kept for a future flow-test suite).
 
 ## 2026-06-30
 
