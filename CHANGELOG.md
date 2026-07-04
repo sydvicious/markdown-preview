@@ -19,7 +19,7 @@ Format:
 - Added a "Search" action to the text-selection menu so a selection can be sent straight to the shared search: on iOS/iPadOS it appears in the selection edit menu (callout) for both the source and preview, and on macOS it appears in the right-click context menu for both. Choosing it runs the in-document search for the selected text without stealing keyboard focus.
 - Split several types into their own files and grouped the app's view models under a `View Models` folder: `MarkdownAppCommandCenter`, `MarkdownPreviewTextOffsetMapping`, and `HTMLTextOffsetMapping` each now live in their own file.
 - Began an MVVM restructuring: moved the search state and data logic (the shared query string, in-document match/selection handling, filtering, suggestions, and find-pasteboard sync) out of `ContentView` into a dedicated `SearchViewModel` owned by `ContentViewModel`, with keyboard focus left in the view. No behavior change.
-- Added unit tests for the models and view models and reorganized the test target so each test file mirrors its source file's folder (`View Models/`, `Utilities/`, `Views/`). Removed the auto-generated `MarkdownPreviewUITests` boilerplate (the empty target is kept for a future flow-test suite).
+- Added unit tests for the models and view models and reorganized the test target so each test file mirrors its source file's folder (`View Models/`, `Utilities/`, `Views/`). Removed the auto-generated `MarkdownPreviewUITests` target entirely (its empty UI-test bundle failed to launch and broke `Cmd-U`); a fresh UI Testing Bundle target will be created when a real GUI-test suite is added.
 
 ## 2026-06-30
 

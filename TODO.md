@@ -82,7 +82,7 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Add a small XCUITest suite for key flows.
   - Cover a few high-value end-to-end flows using existing accessibility identifiers (open file → appears in list, list search filters the list, remove from list, Preview⇄Source switch). Keep it compact; AI to author and maintain. Skip brittle targets (WKWebView selection, find-pasteboard sync, native context menus).
   - Wait until BOTH: (1) the document-based macOS app redesign has landed (the UI is changing), and (2) iOS simulators work under Xcode 27 — on-device-only iteration is too slow for a GUI suite right now.
-  - The empty `MarkdownPreviewUITests` target is kept as the home for these (its auto-generated boilerplate was removed 2026-07-03).
+  - The `MarkdownPreviewUITests` target (auto-generated boilerplate) was removed entirely on 2026-07-03 because an empty UI-test target fails to launch and broke `Cmd-U`. Recreate a fresh UI Testing Bundle target (File → New → Target) when adding these.
 
 ### Async file loading off `@Main`.
   - Read source files in a separate task, not on `@Main`.
