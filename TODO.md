@@ -7,7 +7,6 @@ This document tracks planned work for MarkdownPreviewApp.
 - On Mac, the remove (trash) toolbar button lands in a weird place: it ends up at the far trailing edge after the toolbar overflow (`»`) chevron, detached from the file list, and renders with an odd blue highlight. Revisit placement/grouping (likely resolved by the document-based redesign).
 
 ### Refactor
-- MarkdownAppCommandCenter should be in its own file.
 - MarkdownPreviewTextOffsetMapping and HTMLTextOffsetMapping should be in their own files.
 
 ### Investigate using Liquid Glass controls.
