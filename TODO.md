@@ -7,7 +7,7 @@ This document tracks planned work for MarkdownPreviewApp.
 - On Mac, the remove (trash) toolbar button lands in a weird place: it ends up at the far trailing edge after the toolbar overflow (`»`) chevron, detached from the file list, and renders with an odd blue highlight. Revisit placement/grouping (likely resolved by the document-based redesign).
 
 ### Refactor
-- MarkdownPreviewTextOffsetMapping and HTMLTextOffsetMapping should be in their own files.
+- Refactor using YMMV
 
 ### Investigate using Liquid Glass controls.
 
@@ -39,8 +39,6 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Open remote URLs without downloading.
   - If `.onOpenURL` receives an `http(s)` link to a markdown file, fetch into memory and open in a new window.
   - Provide "Save as..." to persist locally if desired.
-
-### Refactor using YMMV
 
 ### Investigate iPad multi-window mode.
   - Evaluate scene/window behavior when opening multiple markdown files in Split View/Stage Manager.
