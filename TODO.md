@@ -19,6 +19,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - Maintain a disk-backed word index mapping terms to files and source offsets.
   - Update the index incrementally as files are added, removed, or changed.
   - Use the index to accelerate file-list and in-document search across larger document sets.
+  - Optimize search performance.
 
 ### Generate a spotlight index for content
 
@@ -97,11 +98,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Investigate a native visionOS (Vision Pro) app.
 
-### BUG: Investigate why macOS sometimes opens a second list window when a file is double-clicked.
-  - Verify whether this still reproduces after the startup/open-flow changes that now restore the previous session and append the Finder-opened file in the main window.
-
-### BUG: Investigate intermittent detail-view flashing/redraw on macOS.
-  - Reproduce cases where the currently displayed file flashes even when the file contents have not changed.
-  - Verify whether the flash is tied to WKWebView navigation/reload, selection updates, focus changes, or file-monitor polling.
+### 
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*
