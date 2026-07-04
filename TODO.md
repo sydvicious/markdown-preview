@@ -19,7 +19,12 @@ This document tracks planned work for MarkdownPreviewApp.
   - Maintain a disk-backed word index mapping terms to files and source offsets.
   - Update the index incrementally as files are added, removed, or changed.
   - Use the index to accelerate file-list and in-document search across larger document sets.
-  - Optimize search performance.
+  - Optimize search-field typing performance on macOS (still not perfectly smooth; more work needed).
+    - Current state (2026-07-03): both search fields bind to one shared `searchText` in `SearchViewModel`. On macOS the in-document search (which rebuilds the whole-document text-offset mapping and applies the match selection through a WKWebView JS round trip) and the system find-pasteboard write are both debounced ~200ms off the keystroke path. This helped but did not fully fix macOS typing lag; iOS is smooth.
+    - Idea (Syd; low confidence — "I doubt that will help, but still"): split the currently-unified shared `searchText` back out into a separate backing store per search field (list vs. detail), and reconcile them to the shared search string on the same debounce as the pasteboard. The hope is that a keystroke would update only the focused field's local state instead of driving the whole shared-state re-render.
+    - Idea: extract the search field(s) + results into a small subview so typing re-renders only that view, not the entire `ContentView`/`NavigationSplitView` (which currently re-runs the file-list filter and calls `updateNSView` on the preview WKWebView every keystroke).
+    - Idea: cache the `MarkdownTextOffsetMapping` per document instead of rebuilding it over the whole document on every search.
+    - Tune / make the 200ms debounce adaptive.
 
 ### Generate a spotlight index for content
 
@@ -68,6 +73,9 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Hardening for production use.
   - Improve handling/performance for very large markdown files.
+    - Profile and handle really large files end to end: parsing/rendering, the offset mappings (`MarkdownTextOffsetMapping`/`HTMLTextOffsetMapping` currently rebuild over the whole document), in-document search, and WKWebView load/selection. Expect this to be significant work.
+    - Consider incremental/virtualized rendering or chunking so opening, scrolling, and searching stay responsive; guard against pathological inputs (huge single lines/tables, deeply nested structures).
+    - Relates to the search-field performance work under "Expand search and indexing."
   - Add robustness for markdown edge cases and malformed input across parser/renderer paths.
   - Please write a test suite which generates .md snippets based on everything we support. Test the generated HTML page and make sure that the HTML is correct. Test the mapping from .md to source and source to HTML and back again.
 

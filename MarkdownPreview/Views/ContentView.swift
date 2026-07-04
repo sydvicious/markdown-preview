@@ -12,11 +12,6 @@ import AppKit
 import UIKit
 #endif
 
-private enum SearchField: Hashable {
-    case list
-    case detail
-}
-
 struct ContentView: View {
     private let disableLiveFileMonitoring: Bool
 
@@ -106,7 +101,7 @@ struct ContentView: View {
                             #endif
                             if let selectedDocumentID = store.selectedDocumentID {
                                 Button {
-                                    decreaseTextSize(for: selectedDocumentID)
+                                    viewModel.decreaseSelectedTextSize()
                                 } label: {
                                     Image(systemName: "textformat.size.smaller")
                                 }
@@ -115,7 +110,7 @@ struct ContentView: View {
                                 .accessibilityIdentifier("DecreaseTextSize")
 
                                 Button {
-                                    increaseTextSize(for: selectedDocumentID)
+                                    viewModel.increaseSelectedTextSize()
                                 } label: {
                                     Image(systemName: "textformat.size.larger")
                                 }
@@ -129,7 +124,7 @@ struct ContentView: View {
         }
         .background(macFirstResponderSinkBackground)
         #if os(macOS)
-        .onExitCommand(perform: cancelFocusedSearch)
+        .onExitCommand(perform: viewModel.cancelFocusedSearch)
         #endif
         #if os(macOS)
         .fileImporter(
@@ -212,7 +207,18 @@ struct ContentView: View {
         .onChange(of: focusedSearchField) { _, _ in
             syncCommandCenter()
         }
+        // Bridge the View's size class into the view model so its command/focus
+        // logic can read it without the SwiftUI environment.
+        .onChange(of: usesSingleColumnNavigation) { _, newValue in
+            viewModel.usesSingleColumnNavigation = newValue
+        }
+        // Apply focus moves requested by the view model to the View's @FocusState.
+        .onChange(of: viewModel.focusRequest) { _, request in
+            guard let request else { return }
+            applyFocus(request.field)
+        }
         .onAppear {
+            viewModel.usesSingleColumnNavigation = usesSingleColumnNavigation
             viewModel.restorePersistedDocumentsIfNeeded(isCompactWidth: usesSingleColumnNavigation)
             refreshDetailSearch()
             presentInitialOpenPromptIfNeeded()
@@ -300,10 +306,10 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .onDeleteCommand(perform: removeSelectedDocumentFromList)
+                    .onDeleteCommand(perform: viewModel.removeSelectedDocumentFromList)
                     .contextMenu(forSelectionType: DocumentSessionStore.OpenedDocument.ID.self) { ids in
                         Button(role: .destructive) {
-                            ids.forEach { removeDocumentFromList(id: $0) }
+                            ids.forEach { viewModel.removeDocumentFromList(id: $0) }
                         } label: {
                             Label("Remove from List", systemImage: "trash")
                         }
@@ -350,14 +356,14 @@ struct ContentView: View {
         #else
         .contextMenu {
             Button(role: .destructive) {
-                removeDocumentFromList(id: document.id)
+                viewModel.removeDocumentFromList(id: document.id)
             } label: {
                 Label("Remove from List", systemImage: "trash")
             }
         }
         .swipeActions {
             Button(role: .destructive) {
-                removeDocumentFromList(id: document.id)
+                viewModel.removeDocumentFromList(id: document.id)
             } label: {
                 Label("Remove", systemImage: "trash")
             }
@@ -538,7 +544,7 @@ struct ContentView: View {
 
     private var removeFromListButton: some View {
         Button(role: .destructive) {
-            removeSelectedDocumentFromList()
+            viewModel.removeSelectedDocumentFromList()
         } label: {
             Image(systemName: "trash")
         }
@@ -560,53 +566,32 @@ struct ContentView: View {
         #if os(macOS)
         MacFirstResponderSinkView(
             sink: macFirstResponderSink,
-            onDelete: removeSelectedDocumentFromList
+            onDelete: viewModel.removeSelectedDocumentFromList
         )
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
         #endif
     }
 
-    private func removeSelectedDocumentFromList() {
-        guard let selectedDocumentID = store.selectedDocumentID else { return }
-        removeDocumentFromList(id: selectedDocumentID)
-    }
-
-    private func increaseTextSize(for documentID: String) {
-        store.increaseTextSize(for: documentID)
-    }
-
-    private func decreaseTextSize(for documentID: String) {
-        store.decreaseTextSize(for: documentID)
-    }
-
     private func syncCommandCenter() {
-        let canIncreaseTextSize = store.selectedDocumentID.map(store.canIncreaseTextSize(for:)) ?? false
-        let canDecreaseTextSize = store.selectedDocumentID.map(store.canDecreaseTextSize(for:)) ?? false
         commandCenter.update(
-            canFind: canHandleFindCommand,
-            handleFind: handleFindCommand,
-            canProjectFind: !store.openedDocuments.isEmpty,
-            handleProjectFind: focusListSearch,
-            canUseSelectionForFind: currentSelectionSearchText != nil,
-            handleUseSelectionForFind: useCurrentSelectionForFind,
-            canFindNext: detailSearch.resultCount > 0,
-            handleFindNext: { navigateDetailSearch(.forward) },
-            canFindPrevious: detailSearch.resultCount > 0,
-            handleFindPrevious: { navigateDetailSearch(.backward) },
-            canIncreaseTextSize: canIncreaseTextSize,
-            handleIncreaseTextSize: {
-                guard let selectedDocumentID = store.selectedDocumentID else { return }
-                increaseTextSize(for: selectedDocumentID)
-            },
-            canDecreaseTextSize: canDecreaseTextSize,
-            handleDecreaseTextSize: {
-                guard let selectedDocumentID = store.selectedDocumentID else { return }
-                decreaseTextSize(for: selectedDocumentID)
-            },
-            handleCancelSearch: cancelFocusedSearch,
-            canRemoveFromList: store.selectedDocumentID != nil,
-            handleRemoveFromList: removeSelectedDocumentFromList
+            canFind: viewModel.canFind,
+            handleFind: viewModel.handleFindCommand,
+            canProjectFind: viewModel.canProjectFind,
+            handleProjectFind: viewModel.focusListSearch,
+            canUseSelectionForFind: viewModel.canUseSelectionForFind,
+            handleUseSelectionForFind: viewModel.useCurrentSelectionForFind,
+            canFindNext: viewModel.canFindNext,
+            handleFindNext: { viewModel.navigateDetailSearch(.forward) },
+            canFindPrevious: viewModel.canFindPrevious,
+            handleFindPrevious: { viewModel.navigateDetailSearch(.backward) },
+            canIncreaseTextSize: viewModel.canIncreaseTextSize,
+            handleIncreaseTextSize: viewModel.increaseSelectedTextSize,
+            canDecreaseTextSize: viewModel.canDecreaseTextSize,
+            handleDecreaseTextSize: viewModel.decreaseSelectedTextSize,
+            handleCancelSearch: viewModel.cancelFocusedSearch,
+            canRemoveFromList: viewModel.canRemoveFromList,
+            handleRemoveFromList: viewModel.removeSelectedDocumentFromList
         )
     }
 
@@ -622,7 +607,7 @@ struct ContentView: View {
                     .accessibilityIdentifier("ListSearchField")
 
                 Button {
-                    clearSearch()
+                    viewModel.clearSearch()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -682,12 +667,12 @@ struct ContentView: View {
                 .searchFieldTextInputBehavior()
                 .focused($focusedSearchField, equals: .detail)
                 .onSubmit {
-                    navigateDetailSearch(.forward)
+                    viewModel.navigateDetailSearch(.forward)
                 }
                 .accessibilityIdentifier("DetailSearchField")
 
             Button {
-                clearSearch()
+                viewModel.clearSearch()
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.secondary)
@@ -716,7 +701,7 @@ struct ContentView: View {
     private var detailSearchNavigationButtons: some View {
         HStack(spacing: 6) {
             Button {
-                navigateDetailSearch(.backward)
+                viewModel.navigateDetailSearch(.backward)
             } label: {
                 Image(systemName: "chevron.up")
             }
@@ -724,7 +709,7 @@ struct ContentView: View {
             .accessibilityLabel("Previous Result")
 
             Button {
-                navigateDetailSearch(.forward)
+                viewModel.navigateDetailSearch(.forward)
             } label: {
                 Image(systemName: "chevron.down")
             }
@@ -753,15 +738,6 @@ struct ContentView: View {
         }
     }
 
-    private func removeDocumentFromList(id: String) {
-        let shouldShowSidebar = store.removeDocument(id: id, isCompactWidth: usesSingleColumnNavigation)
-        if shouldShowSidebar {
-            viewModel.preferredCompactColumn = .sidebar
-        }
-        // Keep the shared search string intact (the file list stays filtered);
-        // just re-run the in-document search against whatever is now current.
-        refreshDetailSearch()
-    }
 
     private func presentInitialOpenPromptIfNeeded() {
         #if os(macOS)
@@ -870,38 +846,21 @@ struct ContentView: View {
         return store.detailSearchSuggestions(for: currentDocument.id, prefix: detailSearch.query)
     }
 
-    private var currentSelectionSearchText: String? {
-        search.selectionSearchText(detailMode: viewModel.detailMode)
-    }
-
-    private var canHandleFindCommand: Bool {
-        if usesSingleColumnNavigation {
-            if viewModel.preferredCompactColumn == .detail {
-                return store.currentDocument != nil
-            }
-            return !store.openedDocuments.isEmpty
-        }
-
-        if store.currentDocument != nil {
-            return true
-        }
-
-        return !store.openedDocuments.isEmpty
-    }
-
     private func matchesListSearch(_ document: DocumentSessionStore.OpenedDocument) -> Bool {
         search.documentMatchesSearch(document)
     }
 
     private func deleteFilteredDocuments(at offsets: IndexSet) {
         let idsToDelete = offsets.compactMap { filteredSortedDocuments[safe: $0]?.id }
-        idsToDelete.forEach { removeDocumentFromList(id: $0) }
+        idsToDelete.forEach { viewModel.removeDocumentFromList(id: $0) }
     }
 
+    /// Sets the shared search text (used by the search-field bindings and the
+    /// suggestion taps) and optionally moves keyboard focus.
     private func setSearchText(_ query: String, focus: SearchField? = nil) {
         search.setSearchText(query)
         if let focus {
-            focusedSearchField = focus
+            applyFocus(focus)
         }
     }
 
@@ -915,38 +874,15 @@ struct ContentView: View {
         search.refreshDetailSearch()
     }
 
-    private func clearSearch() {
-        pendingSearchFocusTask?.cancel()
-        setSearchText("")
-        focusedSearchField = nil
-    }
-
-    private func seedSearchFromPasteboardIfEmpty() {
-        search.seedFromPasteboardIfEmpty()
-    }
-
-    private func focusListSearch() {
-        if usesSingleColumnNavigation {
-            viewModel.preferredCompactColumn = .sidebar
-        }
-        seedSearchFromPasteboardIfEmpty()
-        requestSearchFocus(.list)
-    }
-
-    private func focusDetailSearch() {
-        guard store.currentDocument != nil else { return }
-        if usesSingleColumnNavigation {
-            viewModel.preferredCompactColumn = .detail
-        }
-        seedSearchFromPasteboardIfEmpty()
-        requestSearchFocus(.detail)
-    }
-
-    private func requestSearchFocus(_ field: SearchField) {
+    /// Applies a view-model focus request to the View's `@FocusState`. On macOS
+    /// the assignment is retried a few times because SwiftUI can drop a
+    /// programmatic focus change before the field is ready to receive it.
+    private func applyFocus(_ field: SearchField?) {
         pendingSearchFocusTask?.cancel()
         focusedSearchField = field
 
         #if os(macOS)
+        guard field != nil else { return }
         pendingSearchFocusTask = Task { @MainActor in
             let delays: [UInt64] = [0, 20_000_000, 80_000_000]
             for delay in delays {
@@ -962,44 +898,11 @@ struct ContentView: View {
         #endif
     }
 
-    private func handleFindCommand() {
-        if usesSingleColumnNavigation {
-            if viewModel.preferredCompactColumn == .detail, store.currentDocument != nil {
-                focusDetailSearch()
-            } else if !store.openedDocuments.isEmpty {
-                focusListSearch()
-            }
-            return
-        }
-
-        if store.currentDocument != nil {
-            focusDetailSearch()
-        } else if !store.openedDocuments.isEmpty {
-            focusListSearch()
-        }
-    }
-
-    private func navigateDetailSearch(_ direction: MarkdownSearchDirection) {
-        if !search.moveToAdjacentMatch(direction) {
-            focusDetailSearch()
-        }
-    }
-
-    private func useCurrentSelectionForFind() {
-        guard let currentSelectionSearchText else { return }
-        setSearchText(currentSelectionSearchText, focus: .detail)
-    }
-
     /// Runs the shared search for text chosen from a selection's "Search" edit-menu
     /// action. Does not steal keyboard focus, so the highlighted match stays visible
     /// instead of being covered by the on-screen keyboard.
     private func searchForSelection(_ rawText: String) {
         search.searchForSelection(rawText)
-    }
-
-    private func cancelFocusedSearch() {
-        guard !searchText.isEmpty else { return }
-        clearSearch()
     }
 
 }

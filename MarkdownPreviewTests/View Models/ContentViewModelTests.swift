@@ -82,6 +82,97 @@ struct ContentViewModelTests {
         #expect(viewModel.detailNavigationTitle().isEmpty)
     }
 
+    // MARK: - Command capabilities & focus/actions (Stage 2)
+
+    @Test func commandCapabilitiesAreFalseWithNoDocuments() {
+        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        #expect(!viewModel.canFind)
+        #expect(!viewModel.canProjectFind)
+        #expect(!viewModel.canRemoveFromList)
+        #expect(!viewModel.canFindNext)
+        #expect(!viewModel.canIncreaseTextSize)
+    }
+
+    @Test func findCapabilitiesReflectDocumentAndSearchState() {
+        let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/doc.md"), contents: "alpha beta alpha")
+        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true)
+
+        #expect(viewModel.canFind)
+        #expect(viewModel.canProjectFind)
+        #expect(viewModel.canRemoveFromList)
+        #expect(!viewModel.canFindNext)
+
+        viewModel.search.setSearchText("alpha")
+        viewModel.search.flushPendingSearch()
+        #expect(viewModel.canFindNext)
+        #expect(viewModel.canFindPrevious)
+    }
+
+    @Test func focusListSearchRequestsListFocus() {
+        let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/doc.md"), contents: "alpha")
+        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true)
+
+        viewModel.focusListSearch()
+        #expect(viewModel.focusRequest?.field == .list)
+    }
+
+    @Test func clearSearchClearsTheTextAndRequestsNoFocus() {
+        let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/doc.md"), contents: "alpha")
+        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true)
+
+        viewModel.search.setSearchText("alpha")
+        viewModel.clearSearch()
+
+        #expect(viewModel.search.searchText.isEmpty)
+        #expect(viewModel.focusRequest?.field == nil)
+    }
+
+    @Test func useCurrentSelectionForFindSeedsSearchFromSourceSelection() throws {
+        let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/doc.md"), contents: "alpha beta")
+        let viewModel = ContentViewModel(
+            previewFiles: [file],
+            showsSourceInPreview: true,
+            disablePersistenceRestore: true
+        )
+        let id = try #require(viewModel.store.selectedDocumentID)
+        viewModel.store.setSelections(
+            [MarkdownSelectionRange(location: 6, length: 4)], // "beta"
+            for: id,
+            text: "alpha beta"
+        )
+
+        viewModel.useCurrentSelectionForFind()
+
+        #expect(viewModel.search.searchText == "beta")
+        #expect(viewModel.focusRequest?.field == .detail)
+    }
+
+    @Test func removeSelectedDocumentFromListRemovesTheSelectedDocument() {
+        let alpha = MarkdownFile(url: URL(fileURLWithPath: "/tmp/alpha.md"), contents: "alpha")
+        let beta = MarkdownFile(url: URL(fileURLWithPath: "/tmp/beta.md"), contents: "beta")
+        let viewModel = ContentViewModel(
+            previewFiles: [alpha, beta],
+            selectedPreviewFileID: alpha.url.standardizedFileURL.path,
+            disablePersistenceRestore: true
+        )
+
+        viewModel.removeSelectedDocumentFromList()
+
+        #expect(viewModel.store.openedDocuments.map(\.id) == [beta.url.standardizedFileURL.path])
+    }
+
+    @Test func increaseSelectedTextSizeBumpsTheSelectedDocument() throws {
+        let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/\(UUID().uuidString).md"), contents: "alpha")
+        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true)
+        let id = try #require(viewModel.store.selectedDocumentID)
+        let before = viewModel.store.textSize(for: id)
+
+        viewModel.increaseSelectedTextSize()
+
+        #expect(viewModel.store.textSize(for: id) != before)
+        #expect(viewModel.canDecreaseTextSize)
+    }
+
     @Test func tooltipPathAbbreviatesTheHomeDirectory() {
         let viewModel = ContentViewModel(disablePersistenceRestore: true)
         let url = URL(fileURLWithPath: NSHomeDirectory() + "/Documents/note.md")

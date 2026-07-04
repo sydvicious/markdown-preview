@@ -22,8 +22,11 @@ final class SearchViewModel: ObservableObject {
     private let store: DocumentSessionStore
     private var didApplyDetailSearchSelection = false
     private var savedSelectionsBeforeDetailSearch: [String: [MarkdownSelectionRange]] = [:]
+    private var detailSearchTask: Task<Void, Never>?
+    private var pendingSearchQuery: String?
     #if os(macOS)
     private var lastFindPasteboardChangeCount: Int?
+    private var pasteboardWriteTask: Task<Void, Never>?
     #endif
 
     init(store: DocumentSessionStore) {
@@ -89,15 +92,60 @@ final class SearchViewModel: ObservableObject {
 
     func setSearchText(_ query: String) {
         searchText = query
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedQuery.isEmpty {
-            SystemFindPasteboard.setQuery(trimmedQuery)
-            #if os(macOS)
-            // Remember our own write so it is not re-adopted as an external change.
-            lastFindPasteboardChangeCount = SystemFindPasteboard.changeCount()
-            #endif
+        updateFindPasteboard(for: query)
+        scheduleDetailSearchUpdate(for: query)
+    }
+
+    /// The in-document search rebuilds a text-offset mapping over the whole
+    /// document and applies the match selection (which on macOS drives a
+    /// `WKWebView` JavaScript round trip). That is too expensive to run on every
+    /// keystroke, so debounce it — the search field and the file-list filter stay
+    /// live off `searchText`, while results and highlighting catch up shortly
+    /// after the user pauses.
+    private func scheduleDetailSearchUpdate(for query: String) {
+        pendingSearchQuery = query
+        detailSearchTask?.cancel()
+        detailSearchTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.detailSearchTask = nil
+            self.pendingSearchQuery = nil
+            self.updateDetailSearch(for: query)
         }
+    }
+
+    /// Runs a pending debounced in-document search immediately. Called before
+    /// anything that needs current results (find next/previous, a refresh) and by
+    /// tests that assert on settled search state.
+    func flushPendingSearch() {
+        guard let query = pendingSearchQuery else { return }
+        detailSearchTask?.cancel()
+        detailSearchTask = nil
+        pendingSearchQuery = nil
         updateDetailSearch(for: query)
+    }
+
+    private func updateFindPasteboard(for query: String) {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        #if os(macOS)
+        // Writing the macOS system find pasteboard is a synchronous XPC round trip
+        // (`clearContents` + `setString` + `changeCount`). Doing it on every
+        // keystroke made typing in the search field lag, so debounce it: only
+        // publish the term once the user pauses. Any pending write is cancelled
+        // when the query changes (including when it is cleared).
+        pasteboardWriteTask?.cancel()
+        guard !trimmedQuery.isEmpty else { return }
+        pasteboardWriteTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard let self, !Task.isCancelled else { return }
+            SystemFindPasteboard.setQuery(trimmedQuery)
+            // Remember our own write so it is not re-adopted as an external change.
+            self.lastFindPasteboardChangeCount = SystemFindPasteboard.changeCount()
+        }
+        #else
+        guard !trimmedQuery.isEmpty else { return }
+        SystemFindPasteboard.setQuery(trimmedQuery)
+        #endif
     }
 
     func clearSearch() {
@@ -141,6 +189,8 @@ final class SearchViewModel: ObservableObject {
     #endif
 
     func refreshDetailSearch() {
+        // Apply any typed-but-not-yet-run query first so the refresh reflects it.
+        flushPendingSearch()
         if !detailSearch.query.isEmpty, let currentDocument = store.currentDocument,
            savedSelectionsBeforeDetailSearch[currentDocument.id] == nil {
             savedSelectionsBeforeDetailSearch[currentDocument.id] = store.selections(for: currentDocument.id)
@@ -153,6 +203,7 @@ final class SearchViewModel: ObservableObject {
     /// query, so the caller can decide to focus the search field instead.
     @discardableResult
     func moveToAdjacentMatch(_ direction: MarkdownSearchDirection) -> Bool {
+        flushPendingSearch()
         guard !detailSearch.query.isEmpty else { return false }
         _ = detailSearch.move(direction)
         applyDetailSearchSelection()

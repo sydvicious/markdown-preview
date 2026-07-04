@@ -6,6 +6,21 @@ import Foundation
 import SwiftUI
 import Combine
 
+/// Which search field the keyboard focus targets. The actual `@FocusState` lives
+/// in the View, but the view model reasons about focus in these terms.
+enum SearchField: Hashable {
+    case list
+    case detail
+}
+
+/// A view-model request for the View to move keyboard focus. The `token` makes
+/// each request a distinct value so the View re-applies focus even when the same
+/// field is requested twice in a row.
+struct SearchFocusRequest: Equatable {
+    let field: SearchField?
+    let token: Int
+}
+
 @MainActor
 final class ContentViewModel: ObservableObject {
     enum DetailMode {
@@ -24,11 +39,17 @@ final class ContentViewModel: ObservableObject {
     @Published var openErrorMessage: String?
     @Published var isInitialOpenSheetPresented = false
     @Published var isImporterPresented = false
+    /// Whether the layout shows one column at a time (iPhone). Mirrored from the
+    /// View's size class so command/focus logic can read it without the View env.
+    @Published var usesSingleColumnNavigation = false
+    /// Latest request for the View to move keyboard focus (see `SearchFocusRequest`).
+    @Published private(set) var focusRequest: SearchFocusRequest?
 
     let store: DocumentSessionStore
     let search: SearchViewModel
 
     private var hasPresentedInitialOpenPrompt: Bool
+    private var focusRequestToken = 0
     private var cancellables = Set<AnyCancellable>()
     #if os(macOS)
     private static let startupImporterDelayNanoseconds: UInt64 = 300_000_000
@@ -51,17 +72,25 @@ final class ContentViewModel: ObservableObject {
         self.detailMode = showsSourceInPreview ? .source : .preview
         self.hasPresentedInitialOpenPrompt = disablePersistenceRestore
 
-        // Bridge nested store and search updates so SwiftUI redraws when document
-        // data or search state changes.
-        for publisher in [store.objectWillChange, search.objectWillChange] {
-            publisher
-                .sink { [weak self] _ in
-                    Task { @MainActor in
-                        self?.objectWillChange.send()
-                    }
+        // Search state changes on every keystroke and drives the search field,
+        // so forward it synchronously — deferring it to a later runloop tick made
+        // typing in the search field visibly lag.
+        search.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
+        // Store updates (document data, selections, file-monitor polling) are not
+        // per-keystroke and can originate outside a user event, so defer them to
+        // the next main-actor tick to stay clear of publishing during a view update.
+        store.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.objectWillChange.send()
                 }
-                .store(in: &cancellables)
-        }
+            }
+            .store(in: &cancellables)
     }
 
     func handleImport(_ result: Result<[URL], Error>, isCompactWidth: Bool) {
@@ -199,6 +228,120 @@ final class ContentViewModel: ObservableObject {
         if shouldShowSidebar {
             preferredCompactColumn = .sidebar
         }
+    }
+
+    // MARK: - Command capabilities
+
+    var canFind: Bool {
+        if usesSingleColumnNavigation {
+            if preferredCompactColumn == .detail {
+                return store.currentDocument != nil
+            }
+            return !store.openedDocuments.isEmpty
+        }
+        if store.currentDocument != nil {
+            return true
+        }
+        return !store.openedDocuments.isEmpty
+    }
+
+    var canProjectFind: Bool { !store.openedDocuments.isEmpty }
+    var canUseSelectionForFind: Bool { search.selectionSearchText(detailMode: detailMode) != nil }
+    var canFindNext: Bool { search.resultCount > 0 }
+    var canFindPrevious: Bool { search.resultCount > 0 }
+    var canIncreaseTextSize: Bool { store.selectedDocumentID.map(store.canIncreaseTextSize(for:)) ?? false }
+    var canDecreaseTextSize: Bool { store.selectedDocumentID.map(store.canDecreaseTextSize(for:)) ?? false }
+    var canRemoveFromList: Bool { store.selectedDocumentID != nil }
+
+    // MARK: - Find commands (drive focus via `focusRequest`)
+
+    func handleFindCommand() {
+        if usesSingleColumnNavigation {
+            if preferredCompactColumn == .detail, store.currentDocument != nil {
+                focusDetailSearch()
+            } else if !store.openedDocuments.isEmpty {
+                focusListSearch()
+            }
+            return
+        }
+        if store.currentDocument != nil {
+            focusDetailSearch()
+        } else if !store.openedDocuments.isEmpty {
+            focusListSearch()
+        }
+    }
+
+    func focusListSearch() {
+        if usesSingleColumnNavigation {
+            preferredCompactColumn = .sidebar
+        }
+        search.seedFromPasteboardIfEmpty()
+        requestFocus(.list)
+    }
+
+    func focusDetailSearch() {
+        guard store.currentDocument != nil else { return }
+        if usesSingleColumnNavigation {
+            preferredCompactColumn = .detail
+        }
+        search.seedFromPasteboardIfEmpty()
+        requestFocus(.detail)
+    }
+
+    func navigateDetailSearch(_ direction: MarkdownSearchDirection) {
+        if !search.moveToAdjacentMatch(direction) {
+            focusDetailSearch()
+        }
+    }
+
+    func useCurrentSelectionForFind() {
+        guard let text = search.selectionSearchText(detailMode: detailMode) else { return }
+        search.setSearchText(text)
+        requestFocus(.detail)
+    }
+
+    func cancelFocusedSearch() {
+        guard !search.searchText.isEmpty else { return }
+        clearSearch()
+    }
+
+    func clearSearch() {
+        search.clearSearch()
+        requestFocus(nil)
+    }
+
+    private func requestFocus(_ field: SearchField?) {
+        focusRequestToken += 1
+        focusRequest = SearchFocusRequest(field: field, token: focusRequestToken)
+    }
+
+    // MARK: - Text size
+
+    func increaseSelectedTextSize() {
+        guard let id = store.selectedDocumentID else { return }
+        store.increaseTextSize(for: id)
+    }
+
+    func decreaseSelectedTextSize() {
+        guard let id = store.selectedDocumentID else { return }
+        store.decreaseTextSize(for: id)
+    }
+
+    // MARK: - Removal
+
+    func removeSelectedDocumentFromList() {
+        guard let id = store.selectedDocumentID else { return }
+        removeDocumentFromList(id: id)
+    }
+
+    func removeDocumentFromList(id: String) {
+        let shouldShowSidebar = store.removeDocument(id: id, isCompactWidth: usesSingleColumnNavigation)
+        if shouldShowSidebar {
+            preferredCompactColumn = .sidebar
+        }
+        // Keep the shared search string intact (the file list stays filtered);
+        // just re-run the in-document search against whatever is now current.
+        search.refreshDetailSearch()
     }
 
     func detailNavigationTitle() -> String {

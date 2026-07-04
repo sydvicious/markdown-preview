@@ -22,6 +22,7 @@ struct SearchViewModelTests {
         let viewModel = SearchViewModel(store: store)
 
         viewModel.setSearchText("alpha")
+        viewModel.flushPendingSearch()
 
         #expect(viewModel.resultCount == 2)
         #expect(store.selections(for: id) == [MarkdownSelectionRange(location: 0, length: 5)])
@@ -34,9 +35,11 @@ struct SearchViewModelTests {
         let viewModel = SearchViewModel(store: store)
 
         viewModel.setSearchText("alpha")
+        viewModel.flushPendingSearch()
         #expect(!store.selections(for: id).isEmpty)
 
         viewModel.setSearchText("zzz")
+        viewModel.flushPendingSearch()
         #expect(viewModel.resultCount == 0)
         #expect(store.selections(for: id).isEmpty)
         #expect(viewModel.detailSearchStatusText == "0 results")
@@ -51,9 +54,11 @@ struct SearchViewModelTests {
         store.setSelections(preSearchSelection, for: id, text: "alpha beta alpha")
 
         viewModel.setSearchText("alpha")
+        viewModel.flushPendingSearch()
         #expect(store.selections(for: id) == [MarkdownSelectionRange(location: 0, length: 5)])
 
         viewModel.clearSearch()
+        viewModel.flushPendingSearch()
         #expect(store.selections(for: id) == preSearchSelection)
     }
 
@@ -63,6 +68,7 @@ struct SearchViewModelTests {
         let viewModel = SearchViewModel(store: store)
 
         viewModel.setSearchText("alpha")
+        viewModel.flushPendingSearch()
         #expect(store.selections(for: id) == [MarkdownSelectionRange(location: 0, length: 5)])
 
         #expect(viewModel.moveToAdjacentMatch(.forward) == true)
@@ -143,6 +149,7 @@ struct SearchViewModelTests {
         let viewModel = SearchViewModel(store: store)
 
         viewModel.setSearchText("alpha")
+        viewModel.flushPendingSearch()
         #expect(viewModel.resultCount == 1)
 
         store.selectedDocumentID = try #require(store.openedDocuments.first { $0.file.fileName == "b.md" }).id
