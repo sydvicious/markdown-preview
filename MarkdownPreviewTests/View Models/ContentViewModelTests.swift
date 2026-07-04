@@ -34,6 +34,24 @@ struct ContentViewModelTests {
         )
     }
 
+    @Test func openPendingURLsOpensEveryQueuedFile() throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let urls = ["alpha", "beta", "gamma"].map { name -> URL in
+            let url = temporaryDirectory.appendingPathComponent("\(name).md")
+            try? name.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        }
+
+        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        viewModel.openPendingURLs(urls, isCompactWidth: false)
+
+        #expect(
+            Set(viewModel.store.openedDocuments.map(\.id)) == Set(urls.map(\.standardizedFileURL.path))
+        )
+    }
+
     @Test func loadOpensAndSelectsTheDocument() throws {
         let temporaryDirectory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }

@@ -19,16 +19,11 @@ private enum SearchField: Hashable {
 
 struct ContentView: View {
     private let disableLiveFileMonitoring: Bool
-    #if os(macOS)
-    private static let startupImporterDelayNanoseconds: UInt64 = 300_000_000
-    #endif
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var commandCenter: MarkdownAppCommandCenter
     @EnvironmentObject private var fileOpenState: FileOpenState
-    @State private var isImporterPresented = false
-    @State private var pendingStartupImporterTask: Task<Void, Never>?
     @State private var pendingSearchFocusTask: Task<Void, Never>?
     @StateObject private var viewModel: ContentViewModel
     @StateObject private var previewSelectionSynchronizer = PreviewSelectionSynchronizer()
@@ -73,7 +68,7 @@ struct ContentView: View {
                         #else
                         ToolbarItem(placement: openButtonPlacement) {
                             Button {
-                                isImporterPresented = true
+                                viewModel.isImporterPresented = true
                             } label: {
                                 Image(systemName: "plus")
                             }
@@ -102,7 +97,7 @@ struct ContentView: View {
                         ToolbarItemGroup(placement: viewButtonPlacement) {
                             #if os(macOS)
                             Button {
-                                isImporterPresented = true
+                                viewModel.isImporterPresented = true
                             } label: {
                                 Image(systemName: "plus")
                             }
@@ -138,19 +133,19 @@ struct ContentView: View {
         #endif
         #if os(macOS)
         .fileImporter(
-            isPresented: $isImporterPresented,
+            isPresented: $viewModel.isImporterPresented,
             allowedContentTypes: MarkdownFile.supportedTypes,
             allowsMultipleSelection: true
         ) { result in
             viewModel.handleImport(result, isCompactWidth: usesSingleColumnNavigation)
         }
         #else
-        .sheet(isPresented: $isImporterPresented) {
+        .sheet(isPresented: $viewModel.isImporterPresented) {
             MarkdownDocumentPicker { url in
                 viewModel.load(url: url, isCompactWidth: usesSingleColumnNavigation)
-                isImporterPresented = false
+                viewModel.isImporterPresented = false
             } onCancel: {
-                isImporterPresented = false
+                viewModel.isImporterPresented = false
             }
         }
         #endif
@@ -160,7 +155,9 @@ struct ContentView: View {
         }
         #endif
         #if os(macOS)
-        .onDrop(of: [.fileURL], isTargeted: nil, perform: handleDrop)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            viewModel.loadDroppedProviders(providers, isCompactWidth: usesSingleColumnNavigation)
+        }
         #endif
         .alert("Unable to Open File", isPresented: .constant(viewModel.openErrorMessage != nil)) {
             Button("OK") { viewModel.openErrorMessage = nil }
@@ -249,11 +246,7 @@ struct ContentView: View {
         }
         #endif
         .onReceive(fileOpenState.$pendingURLs.filter { !$0.isEmpty }) { urls in
-            cancelPendingStartupImporter()
-            for url in urls {
-                viewModel.load(url: url, isCompactWidth: usesSingleColumnNavigation)
-            }
-            refreshDetailSearch()
+            viewModel.openPendingURLs(urls, isCompactWidth: usesSingleColumnNavigation)
             fileOpenState.pendingURLs = []
         }
         .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
@@ -415,7 +408,7 @@ struct ContentView: View {
             } actions: {
                 Button("Open Markdown File") {
                     viewModel.isInitialOpenSheetPresented = false
-                    isImporterPresented = true
+                    viewModel.isImporterPresented = true
                 }
                 Button("Not now", role: .cancel) {
                     viewModel.isInitialOpenSheetPresented = false
@@ -772,43 +765,15 @@ struct ContentView: View {
 
     private func presentInitialOpenPromptIfNeeded() {
         #if os(macOS)
-        scheduleStartupImporterIfNeeded()
+        viewModel.scheduleStartupImporterIfNeeded()
         #else
         _ = viewModel.presentInitialOpenPromptIfNeeded()
         #endif
     }
 
     #if os(macOS)
-    private func scheduleStartupImporterIfNeeded() {
-        cancelPendingStartupImporter()
-
-        let presentation = viewModel.initialOpenPresentationIfNeeded(
-            allowsFileImporter: !fileOpenState.didReceiveExternalOpenRequest
-        )
-        guard presentation == .fileImporter else { return }
-
-        pendingStartupImporterTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: Self.startupImporterDelayNanoseconds)
-            guard !Task.isCancelled else { return }
-            guard viewModel.initialOpenPresentationIfNeeded(
-                allowsFileImporter: !fileOpenState.didReceiveExternalOpenRequest
-            ) == .fileImporter else {
-                return
-            }
-            if viewModel.presentInitialOpenPromptIfNeeded() == .fileImporter {
-                isImporterPresented = true
-            }
-            pendingStartupImporterTask = nil
-        }
-    }
-
-    private func cancelPendingStartupImporter() {
-        pendingStartupImporterTask?.cancel()
-        pendingStartupImporterTask = nil
-    }
-
     private func clearMacDefaultSearchFocusIfNeeded() {
-        guard focusedSearchField == nil, !isImporterPresented else { return }
+        guard focusedSearchField == nil, !viewModel.isImporterPresented else { return }
 
         Task { @MainActor in
             let delays: [UInt64] = [0, 50_000_000, 150_000_000]
@@ -818,30 +783,14 @@ struct ContentView: View {
                 } else {
                     try? await Task.sleep(nanoseconds: delay)
                 }
-                guard focusedSearchField == nil, !isImporterPresented else { return }
+                guard focusedSearchField == nil, !viewModel.isImporterPresented else { return }
                 focusedSearchField = nil
                 macFirstResponderSink.focus()
             }
         }
     }
     #else
-    private func cancelPendingStartupImporter() {}
     private func clearMacDefaultSearchFocusIfNeeded() {}
-    #endif
-
-    #if os(macOS)
-    private func handleDrop(providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSURL.self) }) else {
-            return false
-        }
-        provider.loadObject(ofClass: NSURL.self) { item, _ in
-            guard let url = item as? NSURL else { return }
-            Task { @MainActor in
-                viewModel.load(url: url as URL, isCompactWidth: usesSingleColumnNavigation)
-            }
-        }
-        return true
-    }
     #endif
 
     private var store: DocumentSessionStore { viewModel.store }

@@ -23,12 +23,17 @@ final class ContentViewModel: ObservableObject {
     @Published var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
     @Published var openErrorMessage: String?
     @Published var isInitialOpenSheetPresented = false
+    @Published var isImporterPresented = false
 
     let store: DocumentSessionStore
     let search: SearchViewModel
 
     private var hasPresentedInitialOpenPrompt: Bool
     private var cancellables = Set<AnyCancellable>()
+    #if os(macOS)
+    private static let startupImporterDelayNanoseconds: UInt64 = 300_000_000
+    private var pendingStartupImporterTask: Task<Void, Never>?
+    #endif
 
     init(
         previewFiles: [MarkdownFile] = [],
@@ -81,6 +86,61 @@ final class ContentViewModel: ObservableObject {
             openErrorMessage = detailedOpenErrorMessage(for: error, url: url)
         }
     }
+
+    /// Opens every URL the system queued (a batch Finder Open, or a sequence of
+    /// `.onOpenURL` deliveries) and refreshes the in-document search.
+    func openPendingURLs(_ urls: [URL], isCompactWidth: Bool) {
+        cancelPendingStartupImporter()
+        for url in urls {
+            load(url: url, isCompactWidth: isCompactWidth)
+        }
+        search.refreshDetailSearch()
+    }
+
+    func cancelPendingStartupImporter() {
+        #if os(macOS)
+        pendingStartupImporterTask?.cancel()
+        pendingStartupImporterTask = nil
+        #endif
+    }
+
+    #if os(macOS)
+    /// Loads the first file URL from a drag-and-drop onto the window.
+    func loadDroppedProviders(_ providers: [NSItemProvider], isCompactWidth: Bool) -> Bool {
+        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSURL.self) }) else {
+            return false
+        }
+        provider.loadObject(ofClass: NSURL.self) { [weak self] item, _ in
+            guard let url = item as? NSURL else { return }
+            Task { @MainActor in
+                self?.load(url: url as URL, isCompactWidth: isCompactWidth)
+            }
+        }
+        return true
+    }
+
+    /// After a short delay, presents the macOS file importer if the app launched
+    /// with an empty list and no file was opened externally.
+    func scheduleStartupImporterIfNeeded() {
+        cancelPendingStartupImporter()
+
+        guard initialOpenPresentationIfNeeded(
+            allowsFileImporter: !FileOpenState.shared.didReceiveExternalOpenRequest
+        ) == .fileImporter else { return }
+
+        pendingStartupImporterTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.startupImporterDelayNanoseconds)
+            guard let self, !Task.isCancelled else { return }
+            guard self.initialOpenPresentationIfNeeded(
+                allowsFileImporter: !FileOpenState.shared.didReceiveExternalOpenRequest
+            ) == .fileImporter else { return }
+            if self.presentInitialOpenPromptIfNeeded() == .fileImporter {
+                self.isImporterPresented = true
+            }
+            self.pendingStartupImporterTask = nil
+        }
+    }
+    #endif
 
     func onDocumentsChanged() {
         store.persistDocuments()
