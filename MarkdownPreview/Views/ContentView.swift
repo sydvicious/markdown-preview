@@ -28,20 +28,6 @@ struct ContentView: View {
     @EnvironmentObject private var commandCenter: MarkdownAppCommandCenter
     @EnvironmentObject private var fileOpenState: FileOpenState
     @State private var isImporterPresented = false
-    // The single search string shared by the file-list and in-document search
-    // boxes. Both fields display it and both searches (file-list filtering and
-    // in-document find) run off it.
-    @State private var searchText = ""
-    @State private var detailSearch = MarkdownSearchSession()
-    @State private var didApplyDetailSearchSelection = false
-    @State private var previewSelectedText: String?
-    @State private var savedSelectionsBeforeDetailSearch: [String: [MarkdownSelectionRange]] = [:]
-    #if os(macOS)
-    // Last-seen system find-pasteboard change count, used to adopt find-term
-    // changes made by other apps (or a native find bar) without re-adopting our
-    // own writes.
-    @State private var lastFindPasteboardChangeCount: Int?
-    #endif
     @State private var pendingStartupImporterTask: Task<Void, Never>?
     @State private var pendingSearchFocusTask: Task<Void, Never>?
     @StateObject private var viewModel: ContentViewModel
@@ -859,6 +845,17 @@ struct ContentView: View {
     #endif
 
     private var store: DocumentSessionStore { viewModel.store }
+    private var search: SearchViewModel { viewModel.search }
+
+    // The search state and data logic live in `SearchViewModel`; the View reads
+    // them through these accessors and keeps only keyboard-focus handling.
+    private var searchText: String { search.searchText }
+    private var detailSearch: MarkdownSearchSession { search.detailSearch }
+    private var previewSelectedText: String? {
+        get { search.previewSelectedText }
+        nonmutating set { search.previewSelectedText = newValue }
+    }
+
     private var searchBinding: Binding<String> {
         Binding(
             get: { searchText },
@@ -867,11 +864,11 @@ struct ContentView: View {
     }
 
     private var trimmedSearchText: String {
-        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        search.trimmedSearchText
     }
 
     private var hasSearchText: Bool {
-        !trimmedSearchText.isEmpty
+        search.hasSearchText
     }
 
     private var isListSearchFiltering: Bool {
@@ -925,24 +922,7 @@ struct ContentView: View {
     }
 
     private var currentSelectionSearchText: String? {
-        if viewModel.detailMode == .preview {
-            let normalizedPreviewSelection = previewSelectedText?
-                .replacingOccurrences(of: "\n", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if normalizedPreviewSelection?.isEmpty == false {
-                return normalizedPreviewSelection
-            }
-        }
-
-        guard let currentDocument = store.currentDocument else { return nil }
-        let selected = MarkdownSelectionClipboard.selectedMarkdown(
-            in: currentDocument.file.contents,
-            ranges: store.selections(for: currentDocument.id)
-        )
-        let normalized = selected?
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return normalized?.isEmpty == false ? normalized : nil
+        search.selectionSearchText(detailMode: viewModel.detailMode)
     }
 
     private var canHandleFindCommand: Bool {
@@ -961,7 +941,7 @@ struct ContentView: View {
     }
 
     private func matchesListSearch(_ document: DocumentSessionStore.OpenedDocument) -> Bool {
-        store.documentMatchesListSearch(document.id, query: trimmedSearchText)
+        search.documentMatchesSearch(document)
     }
 
     private func deleteFilteredDocuments(at offsets: IndexSet) {
@@ -970,16 +950,7 @@ struct ContentView: View {
     }
 
     private func setSearchText(_ query: String, focus: SearchField? = nil) {
-        searchText = query
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedQuery.isEmpty {
-            SystemFindPasteboard.setQuery(trimmedQuery)
-            #if os(macOS)
-            // Remember our own write so it is not re-adopted as an external change.
-            lastFindPasteboardChangeCount = SystemFindPasteboard.changeCount()
-            #endif
-        }
-        updateDetailSearch(for: query)
+        search.setSearchText(query)
         if let focus {
             focusedSearchField = focus
         }
@@ -987,69 +958,12 @@ struct ContentView: View {
 
     #if os(macOS)
     private func adoptSystemFindQueryIfChanged() {
-        let changeCount = SystemFindPasteboard.changeCount()
-        guard let lastChangeCount = lastFindPasteboardChangeCount else {
-            // First observation only establishes a baseline; don't inherit a
-            // stale find term from before the app started running.
-            lastFindPasteboardChangeCount = changeCount
-            return
-        }
-        guard changeCount != lastChangeCount else { return }
-        lastFindPasteboardChangeCount = changeCount
-
-        guard let query = SystemFindPasteboard.currentQuery(),
-              !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              query != searchText else { return }
-        setSearchText(query)
+        search.adoptSystemFindQueryIfChanged()
     }
     #endif
 
-    private func updateDetailSearch(for query: String) {
-        let wasEmpty = detailSearch.query.isEmpty
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if wasEmpty, !trimmedQuery.isEmpty, let currentDocument = store.currentDocument {
-            savedSelectionsBeforeDetailSearch[currentDocument.id] = store.selections(for: currentDocument.id)
-        }
-
-        detailSearch.updateQuery(query, in: store.currentDocument?.file.contents ?? "")
-        applyDetailSearchSelection()
-    }
-
     private func refreshDetailSearch() {
-        if !detailSearch.query.isEmpty, let currentDocument = store.currentDocument,
-           savedSelectionsBeforeDetailSearch[currentDocument.id] == nil {
-            savedSelectionsBeforeDetailSearch[currentDocument.id] = store.selections(for: currentDocument.id)
-        }
-        detailSearch.refresh(in: store.currentDocument?.file.contents ?? "")
-        applyDetailSearchSelection()
-    }
-
-    private func applyDetailSearchSelection() {
-        guard let currentDocument = store.currentDocument else {
-            didApplyDetailSearchSelection = false
-            return
-        }
-
-        if !detailSearch.query.isEmpty {
-            // While a search is active it owns the detail selection: highlight the
-            // current match, or show no selection at all when nothing matches.
-            let searchSelection = detailSearch.currentMatch.map { [$0] } ?? []
-            if store.selections(for: currentDocument.id) != searchSelection {
-                store.setSelections(searchSelection, for: currentDocument.id, text: currentDocument.file.contents)
-            }
-            didApplyDetailSearchSelection = true
-            return
-        }
-
-        // The query is empty. Restore whatever selection existed before the
-        // search took over the detail selection, if any.
-        if didApplyDetailSearchSelection {
-            let previousSelection = savedSelectionsBeforeDetailSearch.removeValue(forKey: currentDocument.id) ?? []
-            store.setSelections(previousSelection, for: currentDocument.id, text: currentDocument.file.contents)
-            didApplyDetailSearchSelection = false
-        } else {
-            savedSelectionsBeforeDetailSearch.removeValue(forKey: currentDocument.id)
-        }
+        search.refreshDetailSearch()
     }
 
     private func clearSearch() {
@@ -1059,10 +973,7 @@ struct ContentView: View {
     }
 
     private func seedSearchFromPasteboardIfEmpty() {
-        guard trimmedSearchText.isEmpty,
-              let existingQuery = SystemFindPasteboard.currentQuery(),
-              !existingQuery.isEmpty else { return }
-        setSearchText(existingQuery)
+        search.seedFromPasteboardIfEmpty()
     }
 
     private func focusListSearch() {
@@ -1120,12 +1031,9 @@ struct ContentView: View {
     }
 
     private func navigateDetailSearch(_ direction: MarkdownSearchDirection) {
-        guard !detailSearch.query.isEmpty else {
+        if !search.moveToAdjacentMatch(direction) {
             focusDetailSearch()
-            return
         }
-        _ = detailSearch.move(direction)
-        applyDetailSearchSelection()
     }
 
     private func useCurrentSelectionForFind() {
@@ -1137,11 +1045,7 @@ struct ContentView: View {
     /// action. Does not steal keyboard focus, so the highlighted match stays visible
     /// instead of being covered by the on-screen keyboard.
     private func searchForSelection(_ rawText: String) {
-        let normalized = rawText
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return }
-        setSearchText(normalized)
+        search.searchForSelection(rawText)
     }
 
     private func cancelFocusedSearch() {

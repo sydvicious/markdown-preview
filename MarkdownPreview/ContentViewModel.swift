@@ -25,6 +25,7 @@ final class ContentViewModel: ObservableObject {
     @Published var isInitialOpenSheetPresented = false
 
     let store: DocumentSessionStore
+    let search: SearchViewModel
 
     private var hasPresentedInitialOpenPrompt: Bool
     private var cancellables = Set<AnyCancellable>()
@@ -35,22 +36,27 @@ final class ContentViewModel: ObservableObject {
         showsSourceInPreview: Bool = false,
         disablePersistenceRestore: Bool = false
     ) {
-        self.store = DocumentSessionStore(
+        let store = DocumentSessionStore(
             previewFiles: previewFiles,
             selectedPreviewFileID: selectedPreviewFileID,
             disablePersistenceRestore: disablePersistenceRestore
         )
+        self.store = store
+        self.search = SearchViewModel(store: store)
         self.detailMode = showsSourceInPreview ? .source : .preview
         self.hasPresentedInitialOpenPrompt = disablePersistenceRestore
 
-        // Bridge nested store updates so SwiftUI redraws when document data changes.
-        store.objectWillChange
-            .sink { [weak self] _ in
-                Task { @MainActor in
-                    self?.objectWillChange.send()
+        // Bridge nested store and search updates so SwiftUI redraws when document
+        // data or search state changes.
+        for publisher in [store.objectWillChange, search.objectWillChange] {
+            publisher
+                .sink { [weak self] _ in
+                    Task { @MainActor in
+                        self?.objectWillChange.send()
+                    }
                 }
-            }
-            .store(in: &cancellables)
+                .store(in: &cancellables)
+        }
     }
 
     func handleImport(_ result: Result<[URL], Error>, isCompactWidth: Bool) {

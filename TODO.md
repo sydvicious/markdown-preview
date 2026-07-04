@@ -40,10 +40,6 @@ This document tracks planned work for MarkdownPreviewApp.
   - If `.onOpenURL` receives an `http(s)` link to a markdown file, fetch into memory and open in a new window.
   - Provide "Save as..." to persist locally if desired.
 
-### Investigate iPad multi-window mode.
-  - Evaluate scene/window behavior when opening multiple markdown files in Split View/Stage Manager.
-  - Decide whether to keep single-window split navigation or support multiple app windows on iPadOS.
-
 ### Support side-by-side Preview and Source on Mac and iPad.
   - Add a layout mode that shows rendered preview and source simultaneously.
   - Ensure the mode works in regular-width environments on macOS and iPadOS.
@@ -87,6 +83,13 @@ This document tracks planned work for MarkdownPreviewApp.
   - If loading takes longer than 0.5 seconds, show a spinner with "Loading...".
   - Investigate checking file existence and polling in a separate `Task` as well.
   - Schedule this work after the YMMV-related refactor work.
+
+### Adopt Swift 6 "MainActor by default" concurrency.
+  - Move the targets to the Swift 6 language mode and enable Default Actor Isolation = MainActor (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`). Currently on Swift 5 mode with no default actor isolation.
+  - Resolve the concurrency diagnostics this surfaces (Combine `objectWillChange` bridges in `ContentViewModel`, the file-monitor/focus `Task`s, `DispatchQueue.main.async` paths, and the AppKit `AppDelegate`).
+  - Remove now-redundant explicit `@MainActor` annotations once the default covers them.
+  - Note: audited 2026-07-03 — all `@Published` mutations already run on the main thread, so nothing currently *requires* `@MainActor` beyond what is annotated (`FileOpenState` is the only non-`@MainActor` observable and is only mutated from the main-thread open paths).
+  - Do this as its own pass, not bundled with a release build.
 
 ### Add list toolbar menu.
   - Add a hamburger menu next to the `+` button.
