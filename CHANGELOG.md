@@ -4,6 +4,10 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-07-05
+
+- Lowered the deployment targets across all build configurations to widen device support ahead of TestFlight: `IPHONEOS_DEPLOYMENT_TARGET` from `27.0` to `18.0` and `MACOSX_DEPLOYMENT_TARGET` from `26.0` to `15.0`. The project builds cleanly against the lowered targets on macOS with no API availability gaps to resolve.
+
 ## 2026-07-03
 
 - Bumped the app marketing version to `0.5` and build number to `5` (both in `Version.xcconfig`), adopting the convention of bumping the version on the first commit after a release.
@@ -18,7 +22,7 @@ Format:
 - Gave rendered headings more space above them so a heading following a paragraph reads as a new section instead of sitting as tightly as normal paragraph spacing (the first block's top margin is still zeroed so the title is not pushed down).
 - Added a "Search" action to the text-selection menu so a selection can be sent straight to the shared search: on iOS/iPadOS it appears in the selection edit menu (callout) for both the source and preview, and on macOS it appears in the right-click context menu for both. Choosing it runs the in-document search for the selected text without stealing keyboard focus.
 - Split several types into their own files (`MarkdownAppCommandCenter`, `MarkdownPreviewTextOffsetMapping`, `HTMLTextOffsetMapping`) and grouped the view models (`ContentViewModel`, `SearchViewModel`) under a `View Models` folder.
-- Restructured `ContentView` toward MVVM (no user-facing behavior change beyond the typing-performance fix below): moved the search state and data logic into a dedicated `SearchViewModel`, and moved the command capabilities, the find / text-size / remove commands, and the file-open/drop/startup-importer orchestration into `ContentViewModel`. Keyboard focus (`@FocusState`) stays in the view but is driven by the view model via a focus request, and the size class is mirrored into the view model. `ContentView` shrank from ~1,350 to ~1,100 lines.
+- Restructured `ContentView` toward MVVM (no user-facing behavior change beyond the typing-performance fix below): moved the search state and data logic into a dedicated `SearchViewModel`, and moved the command capabilities, the find / text-size / remove commands, the file-open/drop/startup-importer orchestration, and the file-list search filtering into `ContentViewModel`. Keyboard focus (`@FocusState`) stays in the view but is driven by the view model via a focus request; the size class and app-foreground state are mirrored into the view model. `ContentView` shrank from ~1,350 to ~1,065 lines, and `ContentView`/`ContentViewModel`/`SearchViewModel` logic is now covered by view-model unit tests.
 - Reduced search-field typing latency (most noticeable on macOS) by moving per-keystroke work off the keystroke path: the in-document search (which rebuilds a whole-document text-offset mapping and applies the match selection through a `WKWebView` round trip) and the macOS system find-pasteboard write are now debounced (~200ms), while the search field and the file-list filter stay live. In-document match count and highlighting settle a beat after you stop typing.
 - Added unit tests for the models and view models and reorganized the test target so each test file mirrors its source file's folder (`View Models/`, `Utilities/`, `Views/`). Removed the auto-generated `MarkdownPreviewUITests` target entirely (its empty UI-test bundle failed to launch and broke `Cmd-U`); a fresh UI Testing Bundle target will be created when a real GUI-test suite is added.
 

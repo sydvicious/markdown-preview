@@ -217,8 +217,14 @@ struct ContentView: View {
             guard let request else { return }
             applyFocus(request.field)
         }
+        // Keep the view model's foreground flag in sync so list filtering only
+        // hides files while the app is active.
+        .onChange(of: scenePhase) { _, _ in
+            viewModel.isSearchHostAppActive = isSearchHostAppActive
+        }
         .onAppear {
             viewModel.usesSingleColumnNavigation = usesSingleColumnNavigation
+            viewModel.isSearchHostAppActive = isSearchHostAppActive
             viewModel.restorePersistedDocumentsIfNeeded(isCompactWidth: usesSingleColumnNavigation)
             refreshDetailSearch()
             presentInitialOpenPromptIfNeeded()
@@ -283,7 +289,7 @@ struct ContentView: View {
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                } else if isListSearchFiltering, filteredDocumentsCount == 0 {
+                } else if viewModel.isListSearchFiltering, viewModel.filteredDocumentsCount == 0 {
                     Text("No matching files")
                         .font(.body)
                         .foregroundStyle(.secondary)
@@ -294,7 +300,7 @@ struct ContentView: View {
                         get: { store.selectedDocumentID },
                         set: { store.selectedDocumentID = $0 }
                     )) {
-                        ForEach(filteredGroupedDocumentsByParentDirectory) { section in
+                        ForEach(viewModel.filteredGroupedDocumentsByParentDirectory) { section in
                             Section {
                                 ForEach(section.documents) { document in
                                     sidebarDocumentRow(document)
@@ -316,7 +322,7 @@ struct ContentView: View {
                     }
                     #else
                     List {
-                        ForEach(filteredSortedDocuments) { document in
+                        ForEach(viewModel.filteredSortedDocuments) { document in
                             sidebarDocumentRow(document)
                         }
                         .onDelete { offsets in
@@ -622,8 +628,8 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .background(searchFieldBackground)
 
-            if focusedSearchField == .list, !listSearchSuggestions.isEmpty {
-                searchSuggestionsRow(listSearchSuggestions) { suggestion in
+            if focusedSearchField == .list, !search.listSearchSuggestions.isEmpty {
+                searchSuggestionsRow(search.listSearchSuggestions) { suggestion in
                     setSearchText(suggestion)
                 }
             }
@@ -638,8 +644,8 @@ struct ContentView: View {
                 detailSearchNavigationButtons
             }
 
-            if focusedSearchField == .detail, !detailSearchSuggestions.isEmpty {
-                searchSuggestionsRow(detailSearchSuggestions) { suggestion in
+            if focusedSearchField == .detail, !search.detailSearchSuggestions.isEmpty {
+                searchSuggestionsRow(search.detailSearchSuggestions) { suggestion in
                     setSearchText(suggestion, focus: .detail)
                 }
             }
@@ -692,7 +698,7 @@ struct ContentView: View {
     }
 
     private var detailSearchStatusLabel: some View {
-        Text(detailSearchStatusText ?? "0 results")
+        Text(search.detailSearchStatusText ?? "0 results")
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
             .frame(minWidth: 56, alignment: .trailing)
@@ -792,14 +798,8 @@ struct ContentView: View {
         search.trimmedSearchText
     }
 
-    private var hasSearchText: Bool {
-        search.hasSearchText
-    }
-
-    private var isListSearchFiltering: Bool {
-        hasSearchText && isSearchHostAppActive
-    }
-
+    // Computed here (it reads the SwiftUI scene phase / `NSApp`) and pushed into
+    // the view model, which owns the list-filtering derived from it.
     private var isSearchHostAppActive: Bool {
         guard scenePhase == .active else { return false }
         #if os(macOS)
@@ -809,49 +809,8 @@ struct ContentView: View {
         #endif
     }
 
-    private var filteredSortedDocuments: [DocumentSessionStore.OpenedDocument] {
-        guard isListSearchFiltering else { return store.sortedDocuments }
-        return store.sortedDocuments.filter(matchesListSearch)
-    }
-
-    private var filteredGroupedDocumentsByParentDirectory: [DocumentSessionStore.DocumentSection] {
-        guard isListSearchFiltering else { return store.groupedDocumentsByParentDirectory }
-
-        return store.groupedDocumentsByParentDirectory.compactMap { section in
-            let documents = section.documents.filter(matchesListSearch)
-            guard !documents.isEmpty else { return nil }
-            return DocumentSessionStore.DocumentSection(
-                directoryPath: section.directoryPath,
-                label: section.label,
-                documents: documents
-            )
-        }
-    }
-
-    private var filteredDocumentsCount: Int {
-        filteredSortedDocuments.count
-    }
-
-    private var detailSearchStatusText: String? {
-        guard !detailSearch.query.isEmpty else { return nil }
-        return detailSearch.resultPositionText ?? "0 results"
-    }
-
-    private var listSearchSuggestions: [String] {
-        store.listSearchSuggestions(prefix: searchText)
-    }
-
-    private var detailSearchSuggestions: [String] {
-        guard let currentDocument = store.currentDocument else { return [] }
-        return store.detailSearchSuggestions(for: currentDocument.id, prefix: detailSearch.query)
-    }
-
-    private func matchesListSearch(_ document: DocumentSessionStore.OpenedDocument) -> Bool {
-        search.documentMatchesSearch(document)
-    }
-
     private func deleteFilteredDocuments(at offsets: IndexSet) {
-        let idsToDelete = offsets.compactMap { filteredSortedDocuments[safe: $0]?.id }
+        let idsToDelete = offsets.compactMap { viewModel.filteredSortedDocuments[safe: $0]?.id }
         idsToDelete.forEach { viewModel.removeDocumentFromList(id: $0) }
     }
 

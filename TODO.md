@@ -6,9 +6,6 @@ This document tracks planned work for MarkdownPreviewApp.
 - On Mac and iPad, search box should have a minimum width, but should fill the title bar otherwise. Mac, of course, has the filename, and it should be full. Priority is full file name, then expand Search Bar.
 - On Mac, the remove (trash) toolbar button lands in a weird place: it ends up at the far trailing edge after the toolbar overflow (`»`) chevron, detached from the file list, and renders with an odd blue highlight. Revisit placement/grouping (likely resolved by the document-based redesign).
 
-### Refactor
-- Refactor using YMMV
-
 ### Investigate using Liquid Glass controls.
 
 ### Expand search and indexing
@@ -110,7 +107,15 @@ This document tracks planned work for MarkdownPreviewApp.
   - Include a menu entry that says `©2026 Syd Polk`.
 
 ### Investigate a native visionOS (Vision Pro) app.
+  - Only pursue if visionOS / Vision Pro is still a relevant, shipping platform by the time there is something to ship on it.
 
-### 
+### Cross-platform widgets (instead of a first-class Apple Watch app).
+  - Ship a single WidgetKit widget bundle that renders on macOS, iOS/iPadOS, and watchOS (accessory / complication families) — chosen over a bespoke watchOS companion app because one shared codebase covers the watch essentially for free.
+  - Decide what the widgets surface: recent/pinned documents (tap to open), quick actions (open, new from clipboard), and maybe a small rendered snippet or title of a pinned document.
+  - Expose recent/pinned documents to the widget extension via an App Group / shared container. The app currently persists documents in its own `UserDefaults` + security-scoped bookmarks, so the extension needs a shared read path (bookmark access from an extension needs care).
+  - Deep-link from a widget into the app to open the tapped document (`widgetURL` → `.onOpenURL`; reuse or extend the existing file-open handling).
+  - Provide the standard widget families per platform (systemSmall/Medium on iOS/macOS; accessory/rectangular/circular for watchOS and the Lock Screen).
+  - Sequencing: this pairs naturally with the document-based macOS redesign (both treat recent documents as first-class), so the App Group / shared-container data layer overlaps — build them together or share the layer.
+  - Prototype the shared-container / bookmark data path first; that is the genuinely fiddly part, while the widget UI itself is straightforward.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*

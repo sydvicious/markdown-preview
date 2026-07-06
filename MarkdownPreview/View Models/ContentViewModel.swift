@@ -42,6 +42,10 @@ final class ContentViewModel: ObservableObject {
     /// Whether the layout shows one column at a time (iPhone). Mirrored from the
     /// View's size class so command/focus logic can read it without the View env.
     @Published var usesSingleColumnNavigation = false
+    /// Whether the app is foregrounded. Mirrored from the View's scene phase so
+    /// file-list filtering only hides files while the app is active (a background
+    /// system search should not unexpectedly filter the list).
+    @Published var isSearchHostAppActive = true
     /// Latest request for the View to move keyboard focus (see `SearchFocusRequest`).
     @Published private(set) var focusRequest: SearchFocusRequest?
 
@@ -228,6 +232,35 @@ final class ContentViewModel: ObservableObject {
         if shouldShowSidebar {
             preferredCompactColumn = .sidebar
         }
+    }
+
+    // MARK: - File-list filtering
+
+    var isListSearchFiltering: Bool {
+        search.hasSearchText && isSearchHostAppActive
+    }
+
+    var filteredSortedDocuments: [DocumentSessionStore.OpenedDocument] {
+        guard isListSearchFiltering else { return store.sortedDocuments }
+        return store.sortedDocuments.filter(search.documentMatchesSearch)
+    }
+
+    var filteredGroupedDocumentsByParentDirectory: [DocumentSessionStore.DocumentSection] {
+        guard isListSearchFiltering else { return store.groupedDocumentsByParentDirectory }
+
+        return store.groupedDocumentsByParentDirectory.compactMap { section in
+            let documents = section.documents.filter(search.documentMatchesSearch)
+            guard !documents.isEmpty else { return nil }
+            return DocumentSessionStore.DocumentSection(
+                directoryPath: section.directoryPath,
+                label: section.label,
+                documents: documents
+            )
+        }
+    }
+
+    var filteredDocumentsCount: Int {
+        filteredSortedDocuments.count
     }
 
     // MARK: - Command capabilities

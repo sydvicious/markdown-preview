@@ -93,6 +93,26 @@ struct ContentViewModelTests {
         #expect(!viewModel.canIncreaseTextSize)
     }
 
+    @Test func listFilteringReflectsSearchTextAndForegroundState() {
+        let alpha = MarkdownFile(url: URL(fileURLWithPath: "/tmp/alpha.md"), contents: "content about alpha")
+        let beta = MarkdownFile(url: URL(fileURLWithPath: "/tmp/beta.md"), contents: "content about beta")
+        let viewModel = ContentViewModel(previewFiles: [alpha, beta], disablePersistenceRestore: true)
+
+        // No search text → not filtering; every document shows.
+        #expect(!viewModel.isListSearchFiltering)
+        #expect(viewModel.filteredSortedDocuments.count == 2)
+
+        viewModel.search.setSearchText("alpha")
+        #expect(viewModel.isListSearchFiltering)
+        #expect(viewModel.filteredSortedDocuments.map(\.file.fileName) == ["alpha.md"])
+        #expect(viewModel.filteredDocumentsCount == 1)
+
+        // Backgrounded → filtering suspended so a system search cannot hide files.
+        viewModel.isSearchHostAppActive = false
+        #expect(!viewModel.isListSearchFiltering)
+        #expect(viewModel.filteredSortedDocuments.count == 2)
+    }
+
     @Test func findCapabilitiesReflectDocumentAndSearchState() {
         let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/doc.md"), contents: "alpha beta alpha")
         let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true)
