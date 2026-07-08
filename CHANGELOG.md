@@ -6,6 +6,7 @@ Format:
 
 ## 2026-07-08
 
+- Bumped the app marketing version to `0.6` and build number to `6` (both in `Version.xcconfig`), adopting the convention of bumping the version on the first commit after a release.
 - Released version `0.5` (build `5`).
 
 ## 2026-07-05
