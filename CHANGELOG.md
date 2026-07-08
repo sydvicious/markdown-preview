@@ -4,6 +4,10 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-07-08
+
+- Released version `0.5` (build `5`).
+
 ## 2026-07-05
 
 - Lowered the deployment targets across all build configurations to widen device support ahead of TestFlight: `IPHONEOS_DEPLOYMENT_TARGET` from `27.0` to `18.0` and `MACOSX_DEPLOYMENT_TARGET` from `26.0` to `15.0`. The project builds cleanly against the lowered targets on macOS with no API availability gaps to resolve.
