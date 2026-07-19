@@ -26,12 +26,12 @@ public struct MarkdownBlock: Identifiable {
     public enum Kind {
         case heading(level: Int, text: String)
         case paragraph(String)
-        case list([MarkdownListItem])
-        case orderedList([MarkdownListItem])
+        case list([MarkdownListItem], isLoose: Bool)
+        case orderedList([MarkdownListItem], isLoose: Bool)
         case table(MarkdownTable)
-        case blockquote(String)
+        case blockquote([MarkdownBlock])
         case rule
-        case code(String)
+        case code(String, language: String?)
     }
 
     public let id = UUID()
@@ -78,18 +78,25 @@ public struct MarkdownBlockParser {
         // resolve each item's depth relative to its parent rather than from an
         // absolute indent width.
         var openLevels: [(markerColumn: Int, contentColumn: Int)] = []
+        var listIsLoose = false
         var quoteLines: [String] = []
         var quoteStartLine: Int?
         var code: [String] = []
         var codeContentStartLine: Int?
         var codeFenceStartLine: Int?
         var inCodeFence = false
+        var fenceMarker: Character?
+        var fenceLength = 0
+        var fenceLanguage: String?
 
         func flushParagraph(currentLine: Int) {
             guard !paragraph.isEmpty, let start = paragraphStartLine else { return }
             blocks.append(
                 .init(
-                    kind: .paragraph(paragraph.joined(separator: " ")),
+                    kind: .paragraph(
+                        paragraph.joined(separator: "\n")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                    ),
                     lineRange: start..<currentLine
                 )
             )
@@ -102,12 +109,13 @@ public struct MarkdownBlockParser {
             // A list block takes its type from its first item; nested items of
             // the other type are rendered as their own sub-list.
             let kind: MarkdownBlock.Kind = listItems[0].isOrdered
-                ? .orderedList(listItems)
-                : .list(listItems)
+                ? .orderedList(listItems, isLoose: listIsLoose)
+                : .list(listItems, isLoose: listIsLoose)
             blocks.append(.init(kind: kind, lineRange: start..<currentLine))
             listItems.removeAll()
             listStartLine = nil
             openLevels.removeAll()
+            listIsLoose = false
         }
 
         /// Resolves `parsed` against the open nesting levels and appends it,
@@ -157,7 +165,9 @@ public struct MarkdownBlockParser {
             guard !quoteLines.isEmpty, let start = quoteStartLine else { return }
             blocks.append(
                 .init(
-                    kind: .blockquote(quoteLines.joined(separator: "\n")),
+                    // Parsed recursively: the stripped content is itself a
+                    // document, which is how quotes nest and hold other blocks.
+                    kind: .blockquote(parse(quoteLines.joined(separator: "\n"))),
                     lineRange: start..<currentLine
                 )
             )
@@ -175,48 +185,75 @@ public struct MarkdownBlockParser {
         while index < lines.count {
             let line = lines[index]
 
-            if line.hasPrefix("```") {
-                flushAll(currentLine: index)
-                if inCodeFence {
+            if inCodeFence {
+                // Only a fence of the same character, at least as long as the
+                // opener and carrying no info string, closes the block.
+                if let fence = parseCodeFence(line),
+                   fence.marker == fenceMarker,
+                   fence.length >= fenceLength,
+                   fence.info.isEmpty {
                     blocks.append(
                         .init(
-                            kind: .code(code.joined(separator: "\n")),
+                            kind: .code(code.joined(separator: "\n"), language: fenceLanguage),
                             lineRange: (codeFenceStartLine ?? index)..<(index + 1)
                         )
                     )
                     code.removeAll()
                     codeContentStartLine = nil
                     codeFenceStartLine = nil
+                    fenceMarker = nil
+                    fenceLanguage = nil
+                    inCodeFence = false
                 } else {
-                    codeFenceStartLine = index
-                    codeContentStartLine = index + 1
+                    code.append(line)
                 }
-                inCodeFence.toggle()
                 index += 1
                 continue
             }
 
-            if inCodeFence {
-                code.append(line)
+            if let fence = parseCodeFence(line) {
+                flushAll(currentLine: index)
+                inCodeFence = true
+                fenceMarker = fence.marker
+                fenceLength = fence.length
+                // Only the first word of the info string names the language.
+                fenceLanguage = fence.info.split(separator: " ").first.map(String.init)
+                codeFenceStartLine = index
+                codeContentStartLine = index + 1
                 index += 1
                 continue
             }
 
             if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                // A blank line inside a list does not end it if another item
+                // follows; it makes the list loose, and every item's content is
+                // then wrapped in a paragraph.
+                if !listItems.isEmpty, nextNonBlankLineContinuesList(lines, after: index) {
+                    listIsLoose = true
+                    index += 1
+                    continue
+                }
+
                 flushAll(currentLine: index)
                 index += 1
                 continue
             }
 
-            if let setextHeading = parseSetextHeading(from: lines, startIndex: index) {
-                flushAll(currentLine: index)
+            // A setext underline turns the paragraph above it into a heading, so
+            // the heading's content is however many lines that paragraph had.
+            if let level = setextUnderlineLevel(line),
+               !paragraph.isEmpty,
+               let start = paragraphStartLine {
+                let text = paragraph.joined(separator: "\n")
+                paragraph.removeAll()
+                paragraphStartLine = nil
                 blocks.append(
                     .init(
-                        kind: .heading(level: setextHeading.level, text: setextHeading.text),
-                        lineRange: index..<(index + 2)
+                        kind: .heading(level: level, text: text),
+                        lineRange: start..<(index + 1)
                     )
                 )
-                index += 2
+                index += 1
                 continue
             }
 
@@ -244,6 +281,16 @@ public struct MarkdownBlockParser {
                 continue
             }
 
+            // Checked before list items: "- - -" and "* * *" are thematic
+            // breaks, even though their first characters also look like list
+            // markers. The setext underline case above has already had its say.
+            if parseRule(line) {
+                flushAll(currentLine: index)
+                blocks.append(.init(kind: .rule, lineRange: index..<(index + 1)))
+                index += 1
+                continue
+            }
+
             if let item = parseListItem(line) ?? parseOrderedListItem(line) {
                 flushParagraph(currentLine: index)
                 flushQuote(currentLine: index)
@@ -263,19 +310,15 @@ public struct MarkdownBlockParser {
                 continue
             }
 
-            if parseRule(line) {
-                flushAll(currentLine: index)
-                blocks.append(.init(kind: .rule, lineRange: index..<(index + 1)))
-                index += 1
-                continue
-            }
-
             flushList(currentLine: index)
             flushQuote(currentLine: index)
             if paragraphStartLine == nil {
                 paragraphStartLine = index
             }
-            paragraph.append(line.trimmingCharacters(in: .whitespaces))
+            // Leading whitespace is dropped, but trailing whitespace is kept:
+            // two trailing spaces are a hard line break and the renderer needs
+            // to see them.
+            paragraph.append(String(line.drop { $0 == " " || $0 == "\t" }))
             index += 1
         }
 
@@ -283,7 +326,7 @@ public struct MarkdownBlockParser {
         if !code.isEmpty {
             blocks.append(
                 .init(
-                    kind: .code(code.joined(separator: "\n")),
+                    kind: .code(code.joined(separator: "\n"), language: fenceLanguage),
                     lineRange: (codeFenceStartLine ?? codeContentStartLine ?? lines.count)..<lines.count
                 )
             )
@@ -296,25 +339,74 @@ public struct MarkdownBlockParser {
         let hashes = trimmed.prefix { $0 == "#" }
         let level = hashes.count
         guard (1...6).contains(level) else { return nil }
-        let text = trimmed.dropFirst(level).trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return nil }
+
+        let remainder = trimmed.dropFirst(level)
+        // The opening run must be followed by a space or end the line, so that
+        // "#hashtag" stays text rather than becoming a heading.
+        guard remainder.isEmpty || remainder.first == " " || remainder.first == "\t" else {
+            return nil
+        }
+
+        var text = remainder.trimmingCharacters(in: .whitespaces)
+
+        // An optional closing run of hashes is decoration and is dropped, but
+        // only when it is preceded by a space: "foo#" keeps its hash.
+        let withoutClosing = text.reversed().drop { $0 == "#" }
+        if withoutClosing.count < text.count {
+            let candidate = String(withoutClosing.reversed())
+            if candidate.isEmpty || candidate.last == " " || candidate.last == "\t" {
+                text = candidate.trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        // An empty heading is valid: "#" alone is <h1></h1>.
         return (level, text)
     }
 
-    private static func parseSetextHeading(from lines: [String], startIndex: Int) -> (level: Int, text: String)? {
-        guard startIndex + 1 < lines.count else { return nil }
-        let textLine = lines[startIndex].trimmingCharacters(in: .whitespaces)
-        guard !textLine.isEmpty else { return nil }
-
-        let underlineLine = lines[startIndex + 1].trimmingCharacters(in: .whitespaces)
-        guard !underlineLine.isEmpty else { return nil }
-        guard underlineLine.count >= 3 else { return nil }
-
-        if underlineLine.allSatisfy({ $0 == "=" }) {
-            return (1, textLine)
+    /// Whether the next non-blank line after `index` is another list item,
+    /// which is what distinguishes a blank line inside a loose list from one
+    /// that ends the list.
+    private static func nextNonBlankLineContinuesList(_ lines: [String], after index: Int) -> Bool {
+        var probe = index + 1
+        while probe < lines.count, lines[probe].trimmingCharacters(in: .whitespaces).isEmpty {
+            probe += 1
         }
-        if underlineLine.allSatisfy({ $0 == "-" }) {
-            return (2, textLine)
+        guard probe < lines.count else { return false }
+        return parseListItem(lines[probe]) != nil || parseOrderedListItem(lines[probe]) != nil
+    }
+
+    /// Recognises a code fence: a run of at least three backticks or tildes,
+    /// indented no more than three spaces, optionally followed by an info
+    /// string naming the language.
+    private static func parseCodeFence(_ line: String) -> (marker: Character, length: Int, info: String)? {
+        guard indentColumns(in: line) <= 3 else { return nil }
+
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let marker = trimmed.first, marker == "`" || marker == "~" else { return nil }
+
+        let run = trimmed.prefix { $0 == marker }
+        guard run.count >= 3 else { return nil }
+
+        let info = trimmed.dropFirst(run.count).trimmingCharacters(in: .whitespaces)
+        // A backtick fence's info string may not itself contain a backtick,
+        // which is what keeps inline code from being read as a fence.
+        if marker == "`", info.contains("`") { return nil }
+
+        return (marker, run.count, info)
+    }
+
+    /// The heading level a line denotes when used as a setext underline, or nil
+    /// if it is not one. The spec puts no minimum on the run's length, so a
+    /// single character counts.
+    private static func setextUnderlineLevel(_ line: String) -> Int? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        if trimmed.allSatisfy({ $0 == "=" }) {
+            return 1
+        }
+        if trimmed.allSatisfy({ $0 == "-" }) {
+            return 2
         }
         return nil
     }
@@ -341,10 +433,13 @@ public struct MarkdownBlockParser {
     private static func parseOrderedListItem(_ line: String) -> ParsedListItem? {
         let markerColumn = indentColumns(in: line)
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard let dotIndex = trimmed.firstIndex(of: ".") else { return nil }
-        let number = trimmed[..<dotIndex]
+        // Either "1." or "1)" starts a numbered item.
+        guard let delimiterIndex = trimmed.firstIndex(where: { $0 == "." || $0 == ")" }) else {
+            return nil
+        }
+        let number = trimmed[..<delimiterIndex]
         guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
-        let afterDot = trimmed[trimmed.index(after: dotIndex)...]
+        let afterDot = trimmed[trimmed.index(after: delimiterIndex)...]
         guard afterDot.first == " " else { return nil }
         let rawText = String(afterDot.dropFirst()).trimmingCharacters(in: .whitespaces)
         let (text, checkbox) = parseCheckbox(rawText)
@@ -359,21 +454,29 @@ public struct MarkdownBlockParser {
         )
     }
 
+    /// Strips one level of block quote marker from a line.
+    ///
+    /// Only the marker and a single following space are removed. Whatever is
+    /// left keeps its own indentation and trailing spaces, so a nested quote,
+    /// an indented list, or a hard line break inside the quote all survive to
+    /// the recursive parse.
     private static func parseBlockquote(_ line: String) -> String? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.first == ">" else { return nil }
-        let remaining = trimmed.dropFirst()
+        let withoutIndent = line.drop { $0 == " " || $0 == "\t" }
+        guard withoutIndent.first == ">" else { return nil }
+
+        let remaining = withoutIndent.dropFirst()
         return String(remaining.first == " " ? remaining.dropFirst() : remaining)
-            .trimmingCharacters(in: .whitespaces)
     }
 
     private static func parseRule(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return false }
-        let chars = Array(trimmed)
-        guard chars.count >= 3 else { return false }
-        let allowed = chars.filter { $0 == "-" || $0 == "*" || $0 == "_" }
-        return allowed.count == chars.count && Set(chars).count == 1
+
+        // Spaces and tabs may separate the characters, so "* * *" is a rule.
+        let marks = trimmed.filter { $0 != " " && $0 != "\t" }
+        guard marks.count >= 3 else { return false }
+        guard marks.allSatisfy({ $0 == "-" || $0 == "*" || $0 == "_" }) else { return false }
+        return Set(marks).count == 1
     }
 
     /// Width of a line's leading whitespace in columns, expanding tabs to the
@@ -407,7 +510,6 @@ public struct MarkdownBlockParser {
         guard let headers = parseTableRow(lines[startIndex]) else { return nil }
         guard let alignments = parseDelimiterRow(lines[startIndex + 1]) else { return nil }
         guard headers.count == alignments.count else { return nil }
-        guard headers.count >= 2 else { return nil }
 
         var rows: [[String]] = []
         var index = startIndex + 2
@@ -417,8 +519,13 @@ public struct MarkdownBlockParser {
             if line.trimmingCharacters(in: .whitespaces).isEmpty {
                 break
             }
-            guard let row = parseTableRow(line), row.count == headers.count else {
-                break
+            guard var row = parseTableRow(line) else { break }
+            // A row may be short or long; pad or truncate it to the header width
+            // rather than abandoning the table.
+            if row.count < headers.count {
+                row.append(contentsOf: Array(repeating: "", count: headers.count - row.count))
+            } else if row.count > headers.count {
+                row = Array(row.prefix(headers.count))
             }
             rows.append(row)
             index += 1
@@ -481,7 +588,7 @@ public struct MarkdownBlockParser {
             let core = trimmed
                 .trimmingCharacters(in: CharacterSet(charactersIn: ":"))
                 .trimmingCharacters(in: .whitespaces)
-            guard core.count >= 3, core.allSatisfy({ $0 == "-" }) else { return nil }
+            guard !core.isEmpty, core.allSatisfy({ $0 == "-" }) else { return nil }
 
             if startsWithColon && endsWithColon {
                 alignments.append(.center)

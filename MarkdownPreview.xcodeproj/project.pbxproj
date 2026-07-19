@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		62A96A70300D61CC00BA1DE1 /* MarkdownCore in Frameworks */ = {isa = PBXBuildFile; productRef = 62A96A6C300D61CC00BA1DE1 /* MarkdownCore */; };
+		62A96B24300D649800BA1DE1 /* MarkdownCore in Frameworks */ = {isa = PBXBuildFile; productRef = 62F31E7A300D4540005D7305 /* MarkdownCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -51,7 +51,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				62A96A70300D61CC00BA1DE1 /* MarkdownCore in Frameworks */,
+				62A96B24300D649800BA1DE1 /* MarkdownCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

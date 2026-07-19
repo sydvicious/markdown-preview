@@ -16,19 +16,20 @@ struct MarkdownBlockParserTests {
         """
 
         let blocks = MarkdownBlockParser.parse(source)
-        guard case let .code(code)? = blocks.first?.kind else {
+        guard case let .code(code, language)? = blocks.first?.kind else {
             Issue.record("Expected first block to be a code block")
             return
         }
 
         #expect(code == "let value = 42")
+        #expect(language == "swift")
         #expect(blocks.first?.lineRange == 0..<3)
     }
 
     private func listItems(_ source: String) -> [MarkdownListItem] {
         for block in MarkdownBlockParser.parse(source) {
             switch block.kind {
-            case let .list(items), let .orderedList(items):
+            case let .list(items, _), let .orderedList(items, _):
                 return items
             default:
                 continue
@@ -91,7 +92,7 @@ struct MarkdownBlockParserTests {
         let blocks = MarkdownBlockParser.parse(source)
         // The mixed nesting stays one block so it can render as one nested list.
         #expect(blocks.count == 1)
-        guard case let .list(items)? = blocks.first?.kind else {
+        guard case let .list(items, _)? = blocks.first?.kind else {
             Issue.record("Expected a bulleted list block")
             return
         }

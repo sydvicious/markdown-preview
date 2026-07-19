@@ -111,7 +111,11 @@ final class MarkdownDisplayBuilder {
     }
 
     private func appendParagraph(_ block: MarkdownBlock) {
-        appendTrimmedInlineLines(in: block.lineRange, separator: " ")
+        // A line ending inside a paragraph is a soft break, which the preview
+        // renders as a newline. This mirror has to use the same character or a
+        // search spanning a line break matches here and not in the rendered
+        // document.
+        appendTrimmedInlineLines(in: block.lineRange, separator: "\n")
     }
 
     private func appendList(_ block: MarkdownBlock) {

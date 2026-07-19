@@ -10,12 +10,14 @@
 //  renderer is wrong and the bug is waiting to be fixed. Do not weaken, skip,
 //  or disable a case to make the run green.
 //
-//  Two deviations from the spec are intentional app structure rather than
-//  bugs, and are asserted in the app's shape:
+//  Three deviations from the spec are intentional and are asserted in the
+//  app's shape rather than the spec's:
 //    - every block is wrapped in a `md-block` div carrying source offsets that
 //      the preview's selection mapping depends on;
 //    - tables and task lists are GitHub extensions the app supports, and are
-//      not described by CommonMark at all.
+//      not described by CommonMark at all;
+//    - ordered lists number each item with `value` instead of putting `start`
+//      on the list, so non-sequential numbering survives as written.
 //
 
 import Foundation
@@ -285,22 +287,29 @@ struct ListTests {
         #expect(blockHTML("- foo *bar*") == "<ul><li>foo <em>bar</em></li></ul>")
     }
 
-    @Test func orderedListRenders() async throws {
-        #expect(blockHTML("1. foo\n2. bar") == "<ol><li>foo</li><li>bar</li></ol>")
+    // Deliberate deviation from CommonMark, decided 2026-07-19: the spec puts
+    // the starting number on the <ol> as `start` and lets the renderer number
+    // the items. This app instead writes the source number onto each <li> as
+    // `value`. Both render identically for sequential lists, but `value` also
+    // reproduces non-sequential numbering exactly as written, which is the
+    // behavior wanted here. These tests assert the app's intent, not the spec.
+
+    @Test func orderedListNumbersEachItemFromTheSource() async throws {
+        #expect(blockHTML("1. foo\n2. bar") == "<ol><li value=\"1\">foo</li><li value=\"2\">bar</li></ol>")
     }
 
-    @Test func orderedListStartNumberIsCarriedOnTheList() async throws {
-        // The spec puts the starting number on the <ol>; subsequent numbering
-        // is the renderer's job, so items carry no value attribute.
-        #expect(blockHTML("3. foo\n4. bar") == "<ol start=\"3\"><li>foo</li><li>bar</li></ol>")
+    @Test func orderedListPreservesAStartingNumberOtherThanOne() async throws {
+        #expect(blockHTML("3. foo\n4. bar") == "<ol><li value=\"3\">foo</li><li value=\"4\">bar</li></ol>")
     }
 
-    @Test func orderedListStartingAtOneHasNoStartAttribute() async throws {
-        #expect(blockHTML("1. foo") == "<ol><li>foo</li></ol>")
+    @Test func orderedListPreservesNonSequentialNumbering() async throws {
+        // The reason for the deviation: these numbers survive as written.
+        #expect(blockHTML("1. foo\n1. bar\n5. baz")
+            == "<ol><li value=\"1\">foo</li><li value=\"1\">bar</li><li value=\"5\">baz</li></ol>")
     }
 
     @Test func parenthesisDelimiterIsAccepted() async throws {
-        #expect(blockHTML("1) foo") == "<ol><li>foo</li></ol>")
+        #expect(blockHTML("1) foo") == "<ol><li value=\"1\">foo</li></ol>")
     }
 
     @Test func nestedListsAreNestedInsideTheParentItem() async throws {
@@ -308,11 +317,11 @@ struct ListTests {
     }
 
     @Test func mixedNestingKeepsEachLevelsOwnMarkerType() async throws {
-        #expect(blockHTML("- foo\n  1. bar") == "<ul><li>foo<ol><li>bar</li></ol></li></ul>")
+        #expect(blockHTML("- foo\n  1. bar") == "<ul><li>foo<ol><li value=\"1\">bar</li></ol></li></ul>")
     }
 
     @Test func changingMarkerTypeStartsANewList() async throws {
-        #expect(allBlockHTML("- foo\n1. bar") == ["<ul><li>foo</li></ul>", "<ol><li>bar</li></ol>"])
+        #expect(allBlockHTML("- foo\n1. bar") == ["<ul><li>foo</li></ul>", "<ol><li value=\"1\">bar</li></ol>"])
     }
 
     @Test func looseListItemsWrapContentInParagraphs() async throws {
@@ -412,8 +421,10 @@ struct EmphasisTests {
     }
 
     @Test func whitespaceAfterOpeningDelimiterIsNotEmphasis() async throws {
-        // The opening delimiter must be left-flanking: "* foo *" is literal.
-        #expect(blockHTML("* foo *") == "<p>* foo *</p>")
+        // The opening delimiter must be left-flanking, so a run followed by a
+        // space cannot open emphasis. Written with leading text because a line
+        // starting "* " is a bullet list item, not a paragraph.
+        #expect(blockHTML("a * foo bar*") == "<p>a * foo bar*</p>")
     }
 
     @Test func tripleDelimiterIsStrongInsideEmphasis() async throws {

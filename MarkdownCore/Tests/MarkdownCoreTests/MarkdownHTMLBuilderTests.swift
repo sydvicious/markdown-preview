@@ -32,7 +32,9 @@ struct MarkdownHTMLBuilderTests {
         #expect(html.contains("<strong>bold</strong>"))
         #expect(html.contains("<code>code</code>"))
         #expect(html.contains("<a href=\"https://example.com\">a link</a>"))
-        #expect(html.contains("<blockquote><p>Quoted line<br>still quoted</p></blockquote>"))
+        // Two quoted lines are one paragraph joined by a soft break, which is a
+        // newline rather than a <br>.
+        #expect(html.contains("<blockquote><p>Quoted line\nstill quoted</p></blockquote>"))
         #expect(html.contains("<table>"))
         #expect(html.contains("class=\"a-right\">12</td>"))
         #expect(html.contains("<pre><code>let value = 42</code></pre>"))
@@ -80,9 +82,11 @@ struct MarkdownHTMLBuilderTests {
 
         let html = MarkdownHTMLBuilder.document(for: source)
 
+        // The line ending between the two lines is a soft break, so it survives
+        // as a newline; what must not appear is the second line's indentation.
         #expect(
             html.contains(
-                "<div class=\"md-block\" data-source-start=\"0\" data-source-end=\"49\"><p>Copyright (c) 2026, Syd Polk All rights reserved.</p></div>"
+                "<div class=\"md-block\" data-source-start=\"0\" data-source-end=\"49\"><p>Copyright (c) 2026, Syd Polk\nAll rights reserved.</p></div>"
             )
         )
     }

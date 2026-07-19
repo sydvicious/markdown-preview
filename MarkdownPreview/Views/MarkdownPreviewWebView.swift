@@ -64,6 +64,12 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        // Local images are served from the app process; the web content process
+        // cannot read files itself. Must be set before the web view is created.
+        configuration.setURLSchemeHandler(
+            MarkdownImageSchemeHandler(),
+            forURLScheme: MarkdownImageURL.scheme
+        )
         configuration.userContentController.addUserScript(
             WKUserScript(
                 source: previewCopyButtonScript,
@@ -184,6 +190,12 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        // Local images are served from the app process; the web content process
+        // cannot read files itself. Must be set before the web view is created.
+        configuration.setURLSchemeHandler(
+            MarkdownImageSchemeHandler(),
+            forURLScheme: MarkdownImageURL.scheme
+        )
         configuration.userContentController.addUserScript(
             WKUserScript(
                 source: previewCopyButtonScript,

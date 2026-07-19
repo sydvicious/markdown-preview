@@ -33,6 +33,14 @@
         "identifier" : "MarkdownCoreTests",
         "name" : "MarkdownCoreTests"
       }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:MarkdownCore",
+        "identifier" : "MarkdownCoreConformanceTests",
+        "name" : "MarkdownCoreConformanceTests"
+      }
     }
   ],
   "version" : 1

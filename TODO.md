@@ -5,26 +5,6 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Bug fixes
 - On Mac and iPad, search box should have a minimum width, but should fill the title bar otherwise. Mac, of course, has the filename, and it should be full. Priority is full file name, then expand Search Bar.
 - On Mac, the remove-from-list toolbar button lands in a weird place: it ends up at the far trailing edge after the toolbar overflow (`»`) chevron, detached from the file list, and renders with an odd blue highlight. Revisit placement/grouping (likely resolved by the document-based redesign).
-- Markdown rendering gaps found by the CommonMark conformance suite (`Tests/MarkdownCoreTests`, added 2026-07-19). Each bullet names the failing test; run `swift test` to see them. 44 of 92 cases fail today.
-  - Inline text
-    - Backslash escapes are not implemented at all, so `\*`, `\_`, `` \` ``, and `\[` render literally with the backslash and do not suppress the construct they escape (`escapedAsteriskIsNotEmphasis`, `escapedUnderscoreIsLiteral`, `escapedBacktickIsLiteral`, `escapedBracketIsNotALink`).
-    - HTML entities in the source are double-escaped: `&amp;` renders as `&amp;amp;` (`namedEntityIsDecoded`).
-    - Emphasis has no flanking rules, so `* foo *` emphasizes where the spec leaves it literal (`whitespaceAfterOpeningDelimiterIsNotEmphasis`); see also the intraword-underscore entry below.
-    - `***foo***` does not produce strong inside emphasis, and emphasis does not nest (`tripleDelimiterIsStrongInsideEmphasis`, `emphasisNests`).
-    - Code spans do not support double-backtick fencing, and do not strip one leading/trailing space (`doubleBackticksCanContainASingleBacktick`, `oneLeadingAndTrailingSpaceIsStripped`).
-    - Link and image titles (`[a](/u "t")`) are not parsed and end up inside the URL; angle-bracket destinations are not unwrapped (`linkTitleBecomesATitleAttribute`, `imageTitleBecomesATitleAttribute`, `angleBracketDestinationIsUnwrapped`).
-    - Image alt text keeps its markup instead of reducing to plain text (`altTextIsPlainTextNotMarkup`).
-  - Blocks
-    - `#foo` with no space is treated as a heading; ATX closing sequences (`## foo ##`) are not stripped; a bare `#` is not an empty heading (`hashWithoutFollowingSpaceIsNotAHeading`, `closingSequenceIsStripped`, `closingSequenceNeedNotMatchOpeningLength`, `emptyHeadingIsAllowed`).
-    - Setext underlines shorter than three characters are rejected, and setext content cannot span multiple lines (`underlineOfAnyLengthIsAccepted`, `multiLineContentIsJoined`).
-    - Soft line breaks inside a paragraph collapse to a space instead of a newline, and neither hard-break form is supported (`softLineBreakIsANewlineNotABreakTag`, `twoTrailingSpacesMakeAHardBreak`, `trailingBackslashMakesAHardBreak`).
-    - Thematic breaks reject spaces between the characters, so `* * *` is not a rule (`spacesBetweenCharactersAreAllowed`).
-    - Fenced code ignores the info string (no `language-` class), rejects `~~~` fences, and requires the fence at column 0 (`infoStringBecomesALanguageClass`, `tildeFenceRendersPreCode`, `fenceMayBeIndentedUpToThreeSpaces`).
-    - Block quotes flatten to a single paragraph joined with `<br>`, cannot nest, and cannot contain other blocks (`continuationLinesJoinAsSoftBreaks`, `quotesNest`, `quotesContainOtherBlocks`).
-    - Ordered lists put the number on each `<li value="N">` rather than `<ol start="N">`, do not accept the `)` delimiter, and have no loose/tight distinction (`orderedListRenders`, `orderedListStartingAtOneHasNoStartAttribute`, `orderedListStartNumberIsCarriedOnTheList`, `changingMarkerTypeStartsANewList`, `mixedNestingKeepsEachLevelsOwnMarkerType`, `parenthesisDelimiterIsAccepted`, `looseListItemsWrapContentInParagraphs`). Decide deliberately whether to move to `start=`; the current `value=` output renders correctly and may be worth keeping, in which case fix the tests instead.
-    - Tables reject single-column tables, `:-:` centering, and single-dash delimiter cells, and do not pad short rows (`cellContentIsInlineRendered`, `alignmentMarkersSetCellClasses`, `shortAlignmentMarkersAreAccepted`, `rowsShorterThanTheHeaderArePadded`).
-  - Cosmetic: unchecked task items emit `<input type="checkbox" disabled  />` with a doubled space (`uncheckedItem`).
-- Render snake_case correctly: intraword underscores (e.g. `foo_bar_blamph`) should stay literal, not italicize the middle segment. CommonMark/GitLab forbid intraword `_` emphasis (to protect identifiers); the app currently emphasizes it like older Markdown.pl. Check the parser's intraword-underscore / `no_intra_emphasis` flag, and check for more differences in parsing between what is currently in the app and CommonMark.
 
 ### Investigate using Liquid Glass controls.
 
@@ -79,6 +59,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - File -> Export… : write the current document as HTML or RTF.
   - Share the conversion with the command-line converter (see "Command-line converter for markdown to HTML and RTF") rather than writing it twice. HTML comes straight from `MarkdownCore`; RTF goes through `NSAttributedString` and is currently buried in `MarkdownSelectionClipboard.renderedRTF(for:)`, which wants extracting either way.
   - Decide whether HTML export emits the full styled document that the preview uses or a bare fragment, and whether the stylesheet is inlined.
+  - Images need embedding as `data:` URIs for both formats. The preview's `mdimage://` scheme only works inside the app's own web view, so an exported file or an RTF built through `NSAttributedString` would show broken images without it. A `MarkdownImageInliner` doing exactly this was written and then removed on 2026-07-19 for having no caller — reinstate it here rather than designing it again. It can reuse `MarkdownImageURL.resolveFile`, `.rewritingImageSources`, and `.mimeType`, which are still in `MarkdownCore` for the preview path.
 
 ### Open remote URLs without downloading.
   - If `.onOpenURL` receives an `http(s)` link to a markdown file, fetch into memory and open in a new window.
@@ -88,7 +69,26 @@ This document tracks planned work for MarkdownPreviewApp.
   - Add a layout mode that shows rendered preview and source simultaneously.
   - Ensure the mode works in regular-width environments on macOS and iPadOS.
 
-### Support image references.
+### Support image references. (done 2026-07-19)
+  - Working and verified on macOS, a physical iPhone, the iPhone simulator, and the iPad simulator, for both local files and remote `https` URLs. `![alt](path "title")` renders the picture, with relative paths resolved against the document's directory, including documents on iCloud Drive.
+  - How it works, because the obvious approach does not: `WKWebView.loadHTMLString(_:baseURL:)` gives the web content process no read access to the file system, so a relative `<img src>` never loads however correct the base URL is. `MarkdownImageURL` rewrites those references to `mdimage://` URLs and `MarkdownImageSchemeHandler` reads the file in the app process and hands WebKit the bytes. Do not "simplify" this back to a plain relative path. Firefox for iOS serves its own internal pages the same way.
+  - Guards on what can be served, all deliberate:
+    - The path extension must name a known image type — governs what may be requested.
+    - The file's leading bytes must identify an image — governs what is served, so a file merely named `.png` is refused.
+    - Every `mdimage://` URL carries a nonce minted at launch, and the handler refuses URLs without it. Raw HTML is currently escaped, so a document cannot forge such a URL anyway; the nonce keeps that guarantee if raw HTML is ever supported.
+  - On a sandboxed system the app is granted the document, not its neighbours. When an image fails to resolve the preview offers a folder picker, and `DirectoryAccessStore` persists the grant. This applies on iOS now and will apply on macOS once it is sandboxed for the App Store.
+  - Hard-won details, each of which cost real time and is easy to reintroduce:
+    - Resolving an image checks the file is readable, which is itself a privileged read, so it must run inside the granted scope or the reference is never rewritten and the handler is never asked.
+    - A directory does not contain itself. `DirectoryContainment.directory(covering:from:)` counts the directory itself; `directory(containing:from:)` does not. The grant is usually the document's own folder.
+    - Existence is not readability. A sandboxed app can see a path through a file provider while being refused its contents, so the check reads a byte rather than calling `fileExists`.
+    - A file in iCloud that is not yet downloaded is unreadable but still servable — the handler materialises it. Treating that as a permission problem raises a prompt that granting cannot fix.
+    - On iOS, `withSecurityScope` is unavailable for both bookmark creation and resolution (`API_UNAVAILABLE(ios)` in the SDK), and resolving a bookmark *starts accessing* its implicit ephemeral scope unless `.withoutImplicitStartAccessing` is passed. Omitting it leaked one open scope per restore until the system refused further access. Do not remove it.
+    - That implicit scope is documented as "valid until reboot at the latest", so an iOS folder grant cannot survive a device restart. Accepted as an iOS limitation, not a bug to solve.
+    - Grants carry a format version so bookmarks written by an older build are discarded at launch. Before that, a bad build's leftovers wedged the store and only deleting the app recovered it.
+  - **iOS filesystems are case-sensitive; macOS's default APFS is not.** A document written on a Mac that refers to `photo.jpg` while the file is `Photo.JPG` renders on macOS and fails on iOS. Considered adding a case-insensitive fallback and decided against it — the only observed instance came from exporting an image through Photos, not from ordinary use. Revisit if it comes up for real.
+  - Unresolved images are reported by cause: a file that is present but unopenable, or a folder that cannot be listed, offers the folder picker; a file simply absent from a readable folder says so instead, because offering permission would promise a fix that granting cannot deliver. The directory listing is the deciding evidence, since a sandboxed app refused a folder sees its files as absent.
+  - Remote `http(s)` images are passed through untouched for the web view to fetch. `Samples/SAMPLE.md` shows the same photograph both locally and over https, so the two paths can be compared at a glance.
+  - Images are still missing from copied rich text — see "Images are lost when copying rich text."
 
 ### Ship a welcome document in the app bundle.
   - Include a `Welcome.md` in the app bundle and add it to the file list on the very first launch, so a new user is met with a rendered document instead of an empty window.
@@ -165,15 +165,16 @@ This document tracks planned work for MarkdownPreviewApp.
   - Verify any test plan change by its executed-test count, never by its exit status. A plan referencing an unresolvable target reports `** TEST SUCCEEDED **` while running nothing, and a plan file the scheme cannot read fails the same quiet way.
 
 ### Audit the test suites and cover every markdown feature.
-  - Started 2026-07-19: `Tests/MarkdownCoreTests/CommonMarkConformanceTests.swift` covers the block and inline features against CommonMark 0.31.2 and runs headlessly via `swift test`. Still to do: the offset-mapping round trips below, and the audit of the remaining Xcode-hosted suites.
+  - Done 2026-07-19 for the renderer: `MarkdownCore/Tests/MarkdownCoreConformanceTests` covers the block and inline features against CommonMark 0.31.2, runs headlessly via `swift test`, and passes. It exposed 44 failing cases when it landed; all are now fixed. Still to do: the offset-mapping round trips below, and the audit of the remaining Xcode-hosted suites.
   - Audit what the existing suites actually cover. The gaps found so far were large: before the nested-list work there were no tests at all for list parsing or list HTML, despite lists being a core feature. Assume other features are in the same state until checked, and write down what is covered and what is not.
   - Add a unit test per individual markdown feature: generate a small `.md` fragment exercising exactly that feature, render it, and assert the generated HTML is correct.
     - Cover at least: headings (ATX and setext), paragraphs, bulleted lists, numbered lists, nested and mixed lists, checklists, blockquotes, fenced code, inline code, emphasis and strong, links, images, horizontal rules, and tables (including alignment, inline code in cells, and explicit line breaks).
-    - Include the inline/intraword cases that are known or suspected to be wrong, such as the intraword-underscore `snake_case` bug under "Bug fixes".
+    - Include the inline/intraword cases that are easy to get wrong — the intraword-underscore `snake_case` case is covered and passing, and is worth keeping as a regression guard.
     - Assert on exact HTML where it is stable. The preview builds display offsets by walking text nodes, so incidental whitespace between tags is a real bug, not a formatting detail — keep asserting that lists emit no whitespace between tags, and extend that check to other block types.
   - Test the offset mappings alongside the HTML: `.md` source to display text, display text back to source, and source to rendered HTML, round-tripping in both directions.
-  - Land the suite complete and runnable even where it exposes bugs. Do not gate landing the tests on fixing what they find, and do not delete or weaken a test to make the suite green.
-    - Let the known-failing cases fail the test run (`Cmd-U` / `xcodebuild test`). A failing run is the honest signal that the app does not yet render these correctly; do not skip, disable, or wrap them in `withKnownIssue` to get a clean run. The suite goes green when the bugs are fixed, not before. There is no CI yet — if one is added later (see "Get ready for TestFlight"), the same rule applies to it.
+  - Land any future suite complete and runnable even where it exposes bugs. Do not gate landing the tests on fixing what they find, and do not delete or weaken a test to make the suite green.
+    - Let the known-failing cases fail the test run (`Cmd-U` / `swift test`). A failing run is the honest signal that the app does not yet behave correctly; do not skip, disable, or wrap them in `withKnownIssue` to get a clean run. The suite goes green when the bugs are fixed, not before. There is no CI yet — if one is added later (see "Get ready for TestFlight"), the same rule applies to it.
+    - Updating a test because the intended behavior changed is a different thing and is expected — four expectations were corrected this way while fixing the conformance failures. What is not allowed is softening an assertion to hide a defect.
     - File each exposed bug as its own entry under "Bug fixes" so the failing test and the bug are linked.
 
 ### Command-line converter for markdown to HTML and RTF.
