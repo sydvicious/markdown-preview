@@ -177,10 +177,12 @@ enum MarkdownHTMLBuilder {
             li {
               margin: 0.35rem 0;
             }
-            li.depth-1 { margin-left: 1.1rem; }
-            li.depth-2 { margin-left: 2.2rem; }
-            li.depth-3 { margin-left: 3.3rem; }
-            li.depth-4 { margin-left: 4.4rem; }
+            /* Nested lists indent structurally; suppress the block margin they
+               would otherwise inherit so sub-items stay tight to their parent. */
+            li > ul, li > ol {
+              margin: 0.35rem 0 0 0;
+              padding-left: 1.35rem;
+            }
             li.task {
               list-style: none;
               margin-left: 0;
@@ -285,22 +287,55 @@ enum MarkdownHTMLBuilder {
     }
 
     private static func renderList(_ items: [MarkdownListItem], ordered: Bool) -> String {
+        var index = 0
+        return renderListLevel(items, index: &index, depth: 0, ordered: ordered)
+    }
+
+    /// Emits one nesting level, recursing into deeper items so they land inside
+    /// the `<li>` they belong to.
+    ///
+    /// The markup is deliberately emitted without any whitespace between tags:
+    /// the preview's text walker accumulates display offsets over text nodes, so
+    /// pretty-printing here would introduce whitespace nodes and shift every
+    /// offset after the list.
+    private static func renderListLevel(
+        _ items: [MarkdownListItem],
+        index: inout Int,
+        depth: Int,
+        ordered: Bool
+    ) -> String {
         let tag = ordered ? "ol" : "ul"
-        let rows = items.map { item -> String in
-            let depthClass = "depth-\(min(item.indent, 4))"
+        var rows = ""
+
+        while index < items.count, items[index].indent >= depth {
+            let item = items[index]
+            index += 1
+
+            // Anything deeper that follows belongs inside this item.
+            var nested = ""
+            if index < items.count, items[index].indent > depth {
+                nested = renderListLevel(
+                    items,
+                    index: &index,
+                    depth: items[index].indent,
+                    ordered: items[index].isOrdered
+                )
+            }
+
             if let checked = item.checkbox {
-                return "<li class=\"task \(depthClass)\"><label><input type=\"checkbox\" disabled \(checked ? "checked" : "") /><span>\(renderInlineMarkdownHTML(item.text))</span></label></li>"
+                rows += "<li class=\"task\"><label><input type=\"checkbox\" disabled \(checked ? "checked" : "") /><span>\(renderInlineMarkdownHTML(item.text))</span></label>\(nested)</li>"
+                continue
             }
 
             let valueAttribute: String
-            if ordered, let order = item.order {
+            if item.isOrdered, let order = item.order {
                 valueAttribute = " value=\"\(order)\""
             } else {
                 valueAttribute = ""
             }
 
-            return "<li class=\"\(depthClass)\"\(valueAttribute)>\(renderInlineMarkdownHTML(item.text))</li>"
-        }.joined()
+            rows += "<li\(valueAttribute)>\(renderInlineMarkdownHTML(item.text))\(nested)</li>"
+        }
 
         return "<\(tag)>\(rows)</\(tag)>"
     }

@@ -86,4 +86,70 @@ struct MarkdownHTMLBuilderTests {
             )
         )
     }
+
+    @Test func htmlBuilderNestsSubListsInsideTheirParentItem() async throws {
+        let html = MarkdownHTMLBuilder.document(for: "- parent\n  - child\n- sibling")
+
+        #expect(html.contains("<ul><li>parent<ul><li>child</li></ul></li><li>sibling</li></ul>"))
+    }
+
+    @Test func htmlBuilderNestsNumberedSubListsInsideBulletedItems() async throws {
+        let html = MarkdownHTMLBuilder.document(for: "- parent\n  1. first\n  2. second")
+
+        #expect(
+            html.contains(
+                "<ul><li>parent<ol><li value=\"1\">first</li><li value=\"2\">second</li></ol></li></ul>"
+            )
+        )
+    }
+
+    @Test func htmlBuilderEmitsNoWhitespaceBetweenListTags() async throws {
+        // The preview walks text nodes to build display offsets, so whitespace
+        // between list tags would become a text node and shift every offset
+        // after the list.
+        let html = MarkdownHTMLBuilder.document(for: "- parent\n  - child\n- sibling")
+
+        guard let start = html.range(of: "<ul>"),
+              let end = html.range(of: "</ul>", options: .backwards) else {
+            Issue.record("Expected the document to contain a list")
+            return
+        }
+
+        let listMarkup = String(html[start.lowerBound..<end.upperBound])
+        for separator in ["> <", ">\n<", ">\t<"] {
+            #expect(
+                !listMarkup.contains(separator),
+                "found a whitespace text node at \(separator.debugDescription) in \(listMarkup)"
+            )
+        }
+    }
+
+    @Test func htmlBuilderNestsBulletedSubListsInsideNumberedItems() async throws {
+        let html = MarkdownHTMLBuilder.document(for: "1. parent\n   - child\n2. second")
+
+        #expect(
+            html.contains(
+                "<ol><li value=\"1\">parent<ul><li>child</li></ul></li><li value=\"2\">second</li></ol>"
+            )
+        )
+    }
+
+    @Test func htmlBuilderNestsTabIndentedItems() async throws {
+        let html = MarkdownHTMLBuilder.document(for: "- parent\n\t- child")
+
+        #expect(html.contains("<ul><li>parent<ul><li>child</li></ul></li></ul>"))
+    }
+
+    @Test func htmlBuilderNestsChecklistItems() async throws {
+        let html = MarkdownHTMLBuilder.document(for: "- [ ] parent\n  - [x] child")
+
+        #expect(html.contains("<ul><li class=\"task\">"))
+        #expect(html.contains("</label><ul><li class=\"task\">"))
+    }
+
+    @Test func htmlBuilderNestsDeeplyIndentedItemsOneLevelPerStep() async throws {
+        let html = MarkdownHTMLBuilder.document(for: "- one\n  - two\n    - three")
+
+        #expect(html.contains("<ul><li>one<ul><li>two<ul><li>three</li></ul></li></ul></li></ul>"))
+    }
 }

@@ -6,6 +6,9 @@ Format:
 
 ## 2026-07-19
 
+- Fixed nested list rendering to follow CommonMark. Nesting depth is now measured relative to the parent item's content column instead of by dividing the absolute indent width, so two spaces, four spaces, or a tab each nest exactly one level and a list can no longer jump two levels at once. Previously a four-space indent was read as depth two and a tab as depth two, neither of which matches the standard.
+  - Numbered lists nest on the same rules, and the two marker types can now nest inside each other (a numbered list under a bulleted item, or the reverse). Previously hitting the other marker type ended the list and started a separate block, so mixed nesting was impossible. Switching marker type at the top level still starts a new list, as CommonMark specifies.
+  - Lists now render as structurally nested `<ul>`/`<ol>` elements rather than one flat list whose items were pushed right with `depth-N` CSS margins. As a side effect, nested checklist items are now indented — the old `li.task` rule zeroed their margin, so they had been rendering flat regardless of depth.
 - Changed the "Remove from List" affordances from a trash can to an X-in-a-circle (`xmark.circle`) so they no longer imply the file will be deleted from disk — removal only takes the file out of the app's list. Covers the macOS list context menu and sidebar toolbar button, and the iOS/iPadOS row context menu and swipe action.
   - Made those same remove affordances visually neutral by dropping their destructive button role, so they no longer render in red; the iOS swipe action is explicitly tinted gray (without a role it would otherwise pick up the accent color).
 

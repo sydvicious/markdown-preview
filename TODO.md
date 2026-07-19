@@ -75,7 +75,7 @@ This document tracks planned work for MarkdownPreviewApp.
     - Consider incremental/virtualized rendering or chunking so opening, scrolling, and searching stay responsive; guard against pathological inputs (huge single lines/tables, deeply nested structures).
     - Relates to the search-field performance work under "Expand search and indexing."
   - Add robustness for markdown edge cases and malformed input across parser/renderer paths.
-  - Please write a test suite which generates .md snippets based on everything we support. Test the generated HTML page and make sure that the HTML is correct. Test the mapping from .md to source and source to HTML and back again.
+  - See "Audit the test suites and cover every markdown feature" for the parser/renderer test work this depends on.
 
 ### Internationalization (i18n) and localization (l10n).
   - Localize all user-facing strings across iOS, iPadOS, and macOS.
@@ -84,6 +84,17 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Accessibility testing.
   - Run VoiceOver, Dynamic Type, contrast, and keyboard navigation checks on all platforms.
   - Fix accessibility labels/traits/focus order issues and add regression checks.
+
+### Audit the test suites and cover every markdown feature.
+  - Audit what the existing suites actually cover. The gaps found so far were large: before the nested-list work there were no tests at all for list parsing or list HTML, despite lists being a core feature. Assume other features are in the same state until checked, and write down what is covered and what is not.
+  - Add a unit test per individual markdown feature: generate a small `.md` fragment exercising exactly that feature, render it, and assert the generated HTML is correct.
+    - Cover at least: headings (ATX and setext), paragraphs, bulleted lists, numbered lists, nested and mixed lists, checklists, blockquotes, fenced code, inline code, emphasis and strong, links, images, horizontal rules, and tables (including alignment, inline code in cells, and explicit line breaks).
+    - Include the inline/intraword cases that are known or suspected to be wrong, such as the intraword-underscore `snake_case` bug under "Bug fixes".
+    - Assert on exact HTML where it is stable. The preview builds display offsets by walking text nodes, so incidental whitespace between tags is a real bug, not a formatting detail — keep asserting that lists emit no whitespace between tags, and extend that check to other block types.
+  - Test the offset mappings alongside the HTML: `.md` source to display text, display text back to source, and source to rendered HTML, round-tripping in both directions.
+  - Land the suite complete and runnable even where it exposes bugs. Do not gate landing the tests on fixing what they find, and do not delete or weaken a test to make the suite green.
+    - Let the known-failing cases fail the test run (`Cmd-U` / `xcodebuild test`). A failing run is the honest signal that the app does not yet render these correctly; do not skip, disable, or wrap them in `withKnownIssue` to get a clean run. The suite goes green when the bugs are fixed, not before. There is no CI yet — if one is added later (see "Get ready for TestFlight"), the same rule applies to it.
+    - File each exposed bug as its own entry under "Bug fixes" so the failing test and the bug are linked.
 
 ### Add a small XCUITest suite for key flows.
   - Cover a few high-value end-to-end flows using existing accessibility identifiers (open file → appears in list, list search filters the list, remove from list, Preview⇄Source switch). Keep it compact; AI to author and maintain. Skip brittle targets (WKWebView selection, find-pasteboard sync, native context menus).

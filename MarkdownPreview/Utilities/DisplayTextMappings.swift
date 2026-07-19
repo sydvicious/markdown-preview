@@ -56,10 +56,8 @@ final class MarkdownDisplayBuilder {
                 appendHeading(block)
             case .paragraph:
                 appendParagraph(block)
-            case .list:
-                appendList(block, ordered: false)
-            case .orderedList:
-                appendList(block, ordered: true)
+            case .list, .orderedList:
+                appendList(block)
             case .table:
                 appendTable(block)
             case .blockquote:
@@ -115,11 +113,11 @@ final class MarkdownDisplayBuilder {
         appendTrimmedInlineLines(in: block.lineRange, separator: " ")
     }
 
-    private func appendList(_ block: MarkdownBlock, ordered: Bool) {
+    private func appendList(_ block: MarkdownBlock) {
         var previousContentEnd: Int?
         for lineNumber in block.lineRange {
             guard let lineRange = lineTable.range(forLine: lineNumber),
-                  let contentRange = listItemContentRange(in: lineRange, ordered: ordered) else {
+                  let contentRange = listItemContentRange(in: lineRange) else {
                 continue
             }
 
@@ -301,7 +299,10 @@ final class MarkdownDisplayBuilder {
         return MarkdownSelectionRange(location: parentRange.location + prefixLength, length: substring.utf16.count)
     }
 
-    private func listItemContentRange(in lineRange: MarkdownSelectionRange, ordered: Bool) -> MarkdownSelectionRange? {
+    /// Locates an item's text on a list line, accepting either marker type: a
+    /// list block may mix them when a numbered list is nested under a bulleted
+    /// one (or the reverse).
+    private func listItemContentRange(in lineRange: MarkdownSelectionRange) -> MarkdownSelectionRange? {
         let line = substring(lineRange)
         let utf16 = Array(line.utf16)
         var index = 0
@@ -310,14 +311,14 @@ final class MarkdownDisplayBuilder {
             index += 1
         }
 
-        if ordered {
+        if index < utf16.count, [45, 42, 43].contains(utf16[index]) {
+            index += 1
+        } else {
+            let digitsStart = index
             while index < utf16.count, let scalar = UnicodeScalar(utf16[index]), CharacterSet.decimalDigits.contains(scalar) {
                 index += 1
             }
-            guard index < utf16.count, utf16[index] == 46 else { return nil }
-            index += 1
-        } else {
-            guard index < utf16.count, [45, 42, 43].contains(utf16[index]) else { return nil }
+            guard index > digitsStart, index < utf16.count, utf16[index] == 46 else { return nil }
             index += 1
         }
 
