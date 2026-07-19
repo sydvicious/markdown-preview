@@ -314,10 +314,10 @@ struct ContentView: View {
                     }
                     .onDeleteCommand(perform: viewModel.removeSelectedDocumentFromList)
                     .contextMenu(forSelectionType: DocumentSessionStore.OpenedDocument.ID.self) { ids in
-                        Button(role: .destructive) {
+                        Button {
                             ids.forEach { viewModel.removeDocumentFromList(id: $0) }
                         } label: {
-                            Label("Remove from List", systemImage: "trash")
+                            Label("Remove from List", systemImage: "xmark.circle")
                         }
                     }
                     #else
@@ -361,18 +361,19 @@ struct ContentView: View {
         .help(viewModel.tooltipPath(for: document.file.url))
         #else
         .contextMenu {
-            Button(role: .destructive) {
+            Button {
                 viewModel.removeDocumentFromList(id: document.id)
             } label: {
-                Label("Remove from List", systemImage: "trash")
+                Label("Remove from List", systemImage: "xmark.circle")
             }
         }
         .swipeActions {
-            Button(role: .destructive) {
+            Button {
                 viewModel.removeDocumentFromList(id: document.id)
             } label: {
-                Label("Remove", systemImage: "trash")
+                Label("Remove", systemImage: "xmark.circle")
             }
+            .tint(.gray)
         }
         #endif
     }
@@ -549,10 +550,10 @@ struct ContentView: View {
     }
 
     private var removeFromListButton: some View {
-        Button(role: .destructive) {
+        Button {
             viewModel.removeSelectedDocumentFromList()
         } label: {
-            Image(systemName: "trash")
+            Image(systemName: "xmark.circle")
         }
         .disabled(store.selectedDocumentID == nil)
         .accessibilityLabel("Remove from List")

@@ -4,6 +4,11 @@ Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-07-19
+
+- Changed the "Remove from List" affordances from a trash can to an X-in-a-circle (`xmark.circle`) so they no longer imply the file will be deleted from disk — removal only takes the file out of the app's list. Covers the macOS list context menu and sidebar toolbar button, and the iOS/iPadOS row context menu and swipe action.
+  - Made those same remove affordances visually neutral by dropping their destructive button role, so they no longer render in red; the iOS swipe action is explicitly tinted gray (without a role it would otherwise pick up the accent color).
+
 ## 2026-07-08
 
 - Bumped the app marketing version to `0.6` and build number to `6` (both in `Version.xcconfig`), adopting the convention of bumping the version on the first commit after a release.
