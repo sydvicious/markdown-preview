@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import MarkdownCore
 
 enum MarkdownPreviewFixtures {
     private static let previewURL = URL(fileURLWithPath: "/tmp/MarkdownPreview.sample.md")

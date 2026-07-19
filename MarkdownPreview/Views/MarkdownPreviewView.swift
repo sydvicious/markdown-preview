@@ -3,6 +3,7 @@
 //
 
 import SwiftUI
+import MarkdownCore
 
 final class PreviewSelectionSynchronizer: ObservableObject {
     private var flushSelectionHandler: ((@escaping () -> Void) -> Void)?
@@ -34,7 +35,7 @@ struct MarkdownPreviewView: View {
     var body: some View {
         MarkdownPreviewWebView(
             source: source,
-            html: MarkdownHTMLBuilder.document(for: source, textSize: textSize),
+            html: MarkdownHTMLBuilder.document(for: source, contentScale: textSize.scaleFactor),
             baseURL: baseURL,
             selectedRange: selections.first,
             selectionSynchronizer: selectionSynchronizer,

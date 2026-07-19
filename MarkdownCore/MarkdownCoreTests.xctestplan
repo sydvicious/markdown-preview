@@ -1,0 +1,25 @@
+{
+  "configurations" : [
+    {
+      "id" : "77D65909-49A8-4955-88A3-B116614F2290",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "testInteropMode" : "complete"
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:MarkdownCore",
+        "identifier" : "MarkdownCoreTests",
+        "name" : "MarkdownCoreTests"
+      }
+    }
+  ],
+  "version" : 1
+}

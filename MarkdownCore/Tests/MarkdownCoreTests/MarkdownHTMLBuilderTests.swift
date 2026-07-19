@@ -4,7 +4,7 @@
 
 import Foundation
 import Testing
-@testable import MarkdownPreview
+@testable import MarkdownCore
 
 struct MarkdownHTMLBuilderTests {
 

@@ -4,11 +4,11 @@
 
 import Foundation
 
-struct MarkdownSourceLineTable {
-    let lineStartOffsets: [Int]
-    let sourceUTF16Length: Int
+public struct MarkdownSourceLineTable {
+    public let lineStartOffsets: [Int]
+    public let sourceUTF16Length: Int
 
-    init(source: String) {
+    public init(source: String) {
         let utf16 = Array(source.utf16)
         sourceUTF16Length = utf16.count
 
@@ -20,7 +20,7 @@ struct MarkdownSourceLineTable {
         lineStartOffsets = starts
     }
 
-    func range(for lineRange: Range<Int>) -> MarkdownSelectionRange? {
+    public func range(for lineRange: Range<Int>) -> MarkdownSelectionRange? {
         guard !lineRange.isEmpty else { return nil }
         guard lineRange.lowerBound >= 0, lineRange.upperBound <= lineStartOffsets.count else { return nil }
 
@@ -36,7 +36,7 @@ struct MarkdownSourceLineTable {
         return MarkdownSelectionRange(location: start, length: end - start)
     }
 
-    func range(forLine line: Int) -> MarkdownSelectionRange? {
+    public func range(forLine line: Int) -> MarkdownSelectionRange? {
         range(for: line..<(line + 1))
     }
 }

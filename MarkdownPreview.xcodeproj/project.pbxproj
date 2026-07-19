@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		62A96A70300D61CC00BA1DE1 /* MarkdownCore in Frameworks */ = {isa = PBXBuildFile; productRef = 62A96A6C300D61CC00BA1DE1 /* MarkdownCore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		62584B022D45FB5000831420 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -25,6 +29,7 @@
 		6242B0012FF2A00100C0D001 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		62584AF12D45FB4E00831420 /* MarkdownPreview.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MarkdownPreview.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		62584B012D45FB5000831420 /* MarkdownPreviewTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MarkdownPreviewTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		62A96A69300D608400BA1DE1 /* MarkdownCore */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = MarkdownCore; sourceTree = "<group>"; };
 		62E0151A2FF1D23200E5ABB9 /* CHANGELOG.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CHANGELOG.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -39,11 +44,6 @@
 			path = MarkdownPreviewTests;
 			sourceTree = "<group>";
 		};
-		62584B0E2D45FB5000831420 /* MarkdownPreviewUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = MarkdownPreviewUITests;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -51,6 +51,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				62A96A70300D61CC00BA1DE1 /* MarkdownCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -69,7 +70,6 @@
 			children = (
 				62584AF32D45FB4E00831420 /* MarkdownPreview */,
 				62584B042D45FB5000831420 /* MarkdownPreviewTests */,
-				62584B0E2D45FB5000831420 /* MarkdownPreviewUITests */,
 				6200A0013B7A000100000001 /* AGENTS.md */,
 				62E0151A2FF1D23200E5ABB9 /* CHANGELOG.md */,
 				6231AE202F40F583007D442C /* LICENSE.md */,
@@ -77,6 +77,8 @@
 				621B2E752F40F94600DD1CCB /* TODO.md */,
 				6242B0012FF2A00100C0D001 /* Version.xcconfig */,
 				621B2E762F40F94700DD1CCB /* Info-macOS.plist */,
+				62A96A69300D608400BA1DE1 /* MarkdownCore */,
+				62A96A6A300D60BB00BA1DE1 /* Frameworks */,
 				62584AF22D45FB4E00831420 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,6 +90,13 @@
 				62584B012D45FB5000831420 /* MarkdownPreviewTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		62A96A6A300D60BB00BA1DE1 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -104,12 +113,14 @@
 			buildRules = (
 			);
 			dependencies = (
+				62A96A6D300D61CC00BA1DE1 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				62584AF32D45FB4E00831420 /* MarkdownPreview */,
 			);
 			name = MarkdownPreview;
 			packageProductDependencies = (
+				62F31E7A300D4540005D7305 /* MarkdownCore */,
 			);
 			productName = MarkdownPreview;
 			productReference = 62584AF12D45FB4E00831420 /* MarkdownPreview.app */;
@@ -166,6 +177,8 @@
 			);
 			mainGroup = 62584AE82D45FB4E00831420;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 62584AF22D45FB4E00831420 /* Products */;
 			projectDirPath = "";
@@ -216,6 +229,10 @@
 			isa = PBXTargetDependency;
 			target = 62584AF02D45FB4E00831420 /* MarkdownPreview */;
 			targetProxy = 62584B022D45FB5000831420 /* PBXContainerItemProxy */;
+		};
+		62A96A6D300D61CC00BA1DE1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			productRef = 62A96A6C300D61CC00BA1DE1 /* MarkdownCore */;
 		};
 /* End PBXTargetDependency section */
 
@@ -274,9 +291,9 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -335,9 +352,9 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -376,12 +393,12 @@
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeDescription = "Markdown Document";
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeIdentifier = net.daringfireball.markdown;
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeTagSpecification_public_filename_extension_0 = md;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sydpolk.MarkdownPreview;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -420,12 +437,12 @@
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeDescription = "Markdown Document";
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeIdentifier = net.daringfireball.markdown;
 				INFOPLIST_KEY_UTImportedTypeDeclarations_0_UTTypeTagSpecification_public_filename_extension_0 = md;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sydpolk.MarkdownPreview;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -443,8 +460,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sydpolk.MarkdownPreviewTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -462,8 +479,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sydpolk.MarkdownPreviewTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -504,6 +521,17 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		62A96A6C300D61CC00BA1DE1 /* MarkdownCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MarkdownCore;
+		};
+		62F31E7A300D4540005D7305 /* MarkdownCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MarkdownCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 62584AE92D45FB4E00831420 /* Project object */;
 }

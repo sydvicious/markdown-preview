@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import MarkdownCore
 
 enum MarkdownSearchDirection {
     case forward

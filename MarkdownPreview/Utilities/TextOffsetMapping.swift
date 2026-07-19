@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import MarkdownCore
 
 struct TextOffsetRun: Equatable {
     let sourceRange: MarkdownSelectionRange

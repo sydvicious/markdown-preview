@@ -4,20 +4,26 @@
 
 import Foundation
 
-struct MarkdownTable: Equatable {
-    let headers: [String]
-    let alignments: [MarkdownTableAlignment]
-    let rows: [[String]]
+public struct MarkdownTable: Equatable {
+    public let headers: [String]
+    public let alignments: [MarkdownTableAlignment]
+    public let rows: [[String]]
+
+    public init(headers: [String], alignments: [MarkdownTableAlignment], rows: [[String]]) {
+        self.headers = headers
+        self.alignments = alignments
+        self.rows = rows
+    }
 }
 
-enum MarkdownTableAlignment: Equatable {
+public enum MarkdownTableAlignment: Equatable {
     case leading
     case center
     case trailing
 }
 
-struct MarkdownBlock: Identifiable {
-    enum Kind {
+public struct MarkdownBlock: Identifiable {
+    public enum Kind {
         case heading(level: Int, text: String)
         case paragraph(String)
         case list([MarkdownListItem])
@@ -28,21 +34,21 @@ struct MarkdownBlock: Identifiable {
         case code(String)
     }
 
-    let id = UUID()
-    let kind: Kind
-    let lineRange: Range<Int>
+    public let id = UUID()
+    public let kind: Kind
+    public let lineRange: Range<Int>
 }
 
-struct MarkdownListItem: Identifiable {
-    let id = UUID()
-    let text: String
+public struct MarkdownListItem: Identifiable {
+    public let id = UUID()
+    public let text: String
     /// Nesting depth, 0 for a top-level item. Derived from how far the item is
     /// indented relative to its parent's content column, not from an absolute
     /// space count, so two spaces, four spaces, or a tab all nest one level.
-    let indent: Int
-    let checkbox: Bool?
-    let order: Int?
-    let isOrdered: Bool
+    public let indent: Int
+    public let checkbox: Bool?
+    public let order: Int?
+    public let isOrdered: Bool
 }
 
 /// A list item as it appears on one source line, before its nesting depth is
@@ -60,8 +66,8 @@ private struct ParsedListItem {
     let contentColumn: Int
 }
 
-struct MarkdownBlockParser {
-    static func parse(_ source: String) -> [MarkdownBlock] {
+public struct MarkdownBlockParser {
+    public static func parse(_ source: String) -> [MarkdownBlock] {
         let lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []

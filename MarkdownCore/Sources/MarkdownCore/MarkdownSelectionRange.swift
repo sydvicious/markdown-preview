@@ -4,28 +4,28 @@
 
 import Foundation
 
-struct MarkdownSelectionRange: Equatable, Hashable, Codable {
-    var location: Int
-    var length: Int
+public struct MarkdownSelectionRange: Equatable, Hashable, Codable {
+    public var location: Int
+    public var length: Int
 
-    init(location: Int, length: Int) {
+    public init(location: Int, length: Int) {
         self.location = max(0, location)
         self.length = max(0, length)
     }
 
-    init(_ range: NSRange) {
+    public init(_ range: NSRange) {
         self.init(location: range.location, length: range.length)
     }
 
-    var nsRange: NSRange {
+    public var nsRange: NSRange {
         NSRange(location: location, length: length)
     }
 
-    func range(in text: String) -> Range<String.Index>? {
+    public func range(in text: String) -> Range<String.Index>? {
         Range(nsRange, in: text)
     }
 
-    func clamped(toUTF16Length utf16Length: Int) -> MarkdownSelectionRange? {
+    public func clamped(toUTF16Length utf16Length: Int) -> MarkdownSelectionRange? {
         guard utf16Length >= 0 else { return nil }
         guard location <= utf16Length else { return nil }
         let maxLength = max(0, utf16Length - location)

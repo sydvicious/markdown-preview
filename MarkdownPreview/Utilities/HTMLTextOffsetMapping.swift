@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import MarkdownCore
 
 final class HTMLTextOffsetMapping: TextOffsetMapping {
     let sourceText: String

@@ -3,6 +3,7 @@
 //
 
 import SwiftUI
+import MarkdownCore
 
 /// The selection update the iOS source text view should apply for a given model
 /// selection. Factored out of `applySelection` so the empty-vs-non-empty

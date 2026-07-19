@@ -3,6 +3,7 @@
 //
 
 import Foundation
+import MarkdownCore
 
 struct PreviewReflectedSelection: Equatable {
     let blockStart: Int

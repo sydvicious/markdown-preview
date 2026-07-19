@@ -65,8 +65,20 @@ This app is designed to feel like a lightweight Preview-style reader for `.md` f
 ## Project Structure
 
 - `MarkdownPreview/MarkdownPreviewApp.swift`: app entry, scene setup, `onOpenURL`
-- `MarkdownPreview/ContentView.swift`: navigation, file list, persistence, preview/source UI
-- `MarkdownPreview/MarkdownFile.swift`: file loading and supported content types
+- `MarkdownPreview/Views/`: SwiftUI views — `ContentView.swift` (navigation and file list), `MarkdownPreviewView.swift` and `MarkdownPreviewWebView.swift` (rendered preview), `MarkdownSourceView.swift` (raw source)
+- `MarkdownPreview/View Models/`: `ContentViewModel.swift` and `SearchViewModel.swift`
+- `MarkdownPreview/Utilities/`: app-level supporting types
+  - `DisplayTextMappings.swift`, `MarkdownPreviewTextOffsetMapping.swift`: map between source text, displayed text, and rendered HTML
+  - `MarkdownFile.swift`: file loading and supported content types
+  - `DocumentSessionStore.swift`: the opened-file list, selection, and persistence
+- `MarkdownCore/`: the markdown engine, as a local Swift package the app depends on. It is
+  deliberately free of SwiftUI, UIKit, and AppKit so it can be built and tested from the command
+  line without an app host.
+  - `Sources/MarkdownCore/MarkdownBlockParser.swift`: parses markdown source into blocks
+  - `Sources/MarkdownCore/MarkdownHTMLBuilder.swift`: renders those blocks as an HTML document
+  - `Sources/MarkdownCore/MarkdownSourceLineTable.swift`, `MarkdownSelectionRange.swift`: source
+    offset bookkeeping the preview's selection mapping depends on
+  - `Tests/MarkdownCoreTests/`: the engine's tests
 
 ## Build and Run
 
@@ -107,15 +119,32 @@ After this, double-clicking `.md` files should open them in this app.
 ## Notes and Limitations
 
 - Rendering is intentionally lightweight and block-oriented.
-- It supports common Markdown structures (headings, paragraphs, lists, ordered lists, blockquotes, fenced code, rules, and tables).
-- Table rendering is now HTML/CSS-based via `WKWebView` for fidelity and scrolling behavior.
-- It still does not aim to be a full CommonMark/GitHub-Flavored Markdown engine.
+- It supports common Markdown structures (headings, paragraphs, lists, ordered lists, blockquotes, fenced code, rules, and tables), plus the GitHub task-list and table extensions.
+- Table rendering is HTML/CSS-based via `WKWebView` for fidelity and scrolling behavior.
+- It is not yet a complete CommonMark implementation. [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) is the reference the renderer is measured against, and the places it currently falls short — backslash escapes, hard line breaks, emphasis flanking rules, and nested block quotes among them — are covered by failing tests in `MarkdownCoreTests` and tracked under "Bug fixes" in `TODO.md`.
 
 ## Tests
 
-The repository includes unit/UI test targets:
-- `MarkdownPreviewTests`
-- `MarkdownPreviewUITests`
+There are two test suites:
+
+- `MarkdownCoreTests`: tests for the markdown engine, including per-feature conformance tests
+  written against [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/). These run from the
+  command line with no app host:
+
+```bash
+swift test --package-path MarkdownCore
+```
+
+  Expectations follow the specification rather than current behavior, so this suite documents
+  what the renderer *should* do. Cases fail where the renderer is not there yet; each failure is
+  tracked under "Bug fixes" in `TODO.md`. A failing run is expected until those are fixed.
+
+- `MarkdownPreviewTests`: unit tests for the app layer (view models, file state, selection
+  handling). These need the app target:
+
+```bash
+xcodebuild test -project MarkdownPreview.xcodeproj -scheme MarkdownPreview -destination 'platform=macOS'
+```
 
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*

@@ -3,6 +3,7 @@
 //
 
 import SwiftUI
+import MarkdownCore
 
 struct MarkdownSourceView: View {
     let contents: String

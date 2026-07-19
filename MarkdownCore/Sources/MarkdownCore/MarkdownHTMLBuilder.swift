@@ -3,10 +3,16 @@
 //
 
 import Foundation
-import SwiftUI
 
-enum MarkdownHTMLBuilder {
-    static func document(for source: String, textSize: DynamicTypeSize = .defaultValue) -> String {
+public enum MarkdownHTMLBuilder {
+    /// Renders `source` as a standalone HTML document.
+    ///
+    /// `contentScale` is the Dynamic Type scale factor to apply to the
+    /// document's text. It is taken as a plain number rather than a
+    /// `DynamicTypeSize` so that the markdown engine stays free of SwiftUI and
+    /// can be built and tested from the command line without an app host; call
+    /// sites pass `textSize.scaleFactor`.
+    public static func document(for source: String, contentScale: CGFloat = 1.0) -> String {
         let sourceLineTable = MarkdownSourceLineTable(source: source)
         let renderedBlocks = MarkdownBlockParser.parse(source)
             .map { renderBlock($0, sourceLineTable: sourceLineTable) }
@@ -34,7 +40,7 @@ enum MarkdownHTMLBuilder {
               --copy-button-background-active: rgba(120, 120, 128, 0.24);
               --search-active-background: rgba(255, 214, 10, 0.22);
               --search-active-outline: rgba(255, 159, 10, 0.65);
-              --content-scale: \(textSize.scaleFactor);
+              --content-scale: \(contentScale);
               --body-font-size: calc(17px * var(--content-scale));
             }
             @media (prefers-color-scheme: dark) {

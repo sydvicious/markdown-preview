@@ -4,6 +4,7 @@
 
 import Foundation
 import UniformTypeIdentifiers
+import MarkdownCore
 #if os(iOS)
 import UIKit
 #elseif os(macOS)

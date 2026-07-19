@@ -3,6 +3,7 @@
 //
 
 import SwiftUI
+import MarkdownCore
 
 /// Owns the shared search string and in-document search state plus all of the
 /// search *data* logic (filtering, suggestions, match navigation, and the

@@ -4,6 +4,7 @@
 
 import SwiftUI
 import WebKit
+import MarkdownCore
 #if os(iOS)
 import UIKit
 #elseif os(macOS)

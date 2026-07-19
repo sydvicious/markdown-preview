@@ -4,6 +4,7 @@
 
 import Foundation
 import SwiftUI
+import MarkdownCore
 #if canImport(UIKit)
 import UIKit
 #endif
