@@ -1,3 +1,10 @@
-// Keep marketing and build versions in lock step for releases.
-MARKETING_VERSION = 0.6
-CURRENT_PROJECT_VERSION = 6
+// MARKETING_VERSION is what people see, and is bumped on the first commit after
+// a release.
+//
+// CURRENT_PROJECT_VERSION is the build number, and is no longer kept in lock step
+// with it. App Store Connect requires a unique, increasing build number for every
+// upload within a marketing version, and a release takes more than one upload
+// whenever a build is rejected or replaced. Tying the two together meant burning a
+// marketing version on each retry. Bump this on every upload; it never resets.
+MARKETING_VERSION = 0.7
+CURRENT_PROJECT_VERSION = 1

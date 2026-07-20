@@ -90,6 +90,14 @@ This document tracks planned work for MarkdownPreviewApp.
   - Remote `http(s)` images are passed through untouched for the web view to fetch. `Samples/SAMPLE.md` shows the same photograph both locally and over https, so the two paths can be compared at a glance.
   - Images are still missing from copied rich text — see "Images are lost when copying rich text."
 
+### Make the image permission prompt harder to miss.
+  - The "Allow…" prompt is a `safeAreaInset` bar above the preview (`MarkdownPreview/Views/MarkdownPreviewView.swift`, `imageAccessPrompt`). It was missed entirely during the first sandboxed run on macOS: the document itself renders normally, so the eye goes to the content and the bar reads as chrome. The images looked simply broken, with no visible way to fix them.
+  - Convert it to a modal alert, so granting the folder is a decision the user is actually asked to make rather than an offer they can scroll past.
+  - Decide what "once" means before building it, because a modal that reappears is worse than a banner that is ignored. A grant covers a folder, so the natural unit is one prompt per folder per document opened — not per image, and not on every preview update, which `imageProblem` is currently evaluated on.
+  - Keep the distinction the banner already makes: only the unreadable case is worth a modal, because granting fixes it. A file that is simply absent must stay a passive notice — see the `.missing` case — since a modal offering a fix that cannot work is worse than saying nothing.
+  - Consider what happens when the user declines. There is currently no persisted "asked and refused" state, so a naive modal would ask again on the next open of the same document.
+  - This is macOS-specific in urgency: on iOS the same bar sits in a much smaller viewport and is correspondingly harder to overlook. Check whether the modal is wanted there too, or whether the banner should stay on iOS.
+
 ### Ship a welcome document in the app bundle.
   - Include a `Welcome.md` in the app bundle and add it to the file list on the very first launch, so a new user is met with a rendered document instead of an empty window.
   - Once the user removes it from the list, remember that and never add it back. From then on the app behaves exactly as it does today: `ContentViewModel.initialOpenPresentation` (`MarkdownPreview/View Models/ContentViewModel.swift:213`) presents the file picker on macOS when a restore finds no documents, and the empty list offers its placeholder open action.
@@ -123,7 +131,8 @@ This document tracks planned work for MarkdownPreviewApp.
   - Submit app to App Store.
   - Set up TestFlight.
   - Capture and prepare App Store screenshots for iPhone, iPad, and Mac.
-  - Automate `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` bumps in CI/CD (currently a manual convention: both are centralized in `Version.xcconfig` and bumped in lock step on the first commit after a release).
+  - Automate `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` bumps in CI/CD. Both are centralized in `Version.xcconfig`, but they are no longer bumped in lock step: `MARKETING_VERSION` moves on the first commit after a release, while `CURRENT_PROJECT_VERSION` is a build number bumped on every upload and never reset, because App Store Connect requires a unique increasing build number per upload within a marketing version. Any automation has to bump them on those two different triggers rather than together.
+  - Both platforms share the one build number, so uploading only iOS or only macOS still consumes a number for both. Deliberate — a shared counter is simpler than per-platform ones and only costs some gaps in the sequence.
 
 ### Rename and simplify `ContentView.swift`.
   - Consider renaming `ContentView.swift` to a clearer top-level container name.

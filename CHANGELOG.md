@@ -2,9 +2,29 @@
 
 Format:
 - One top-level entry per date in `YYYY-MM-DD` format.
+- Where a date spans a release, a `###` subheading names the version the bullets under it belong to.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
 ## 2026-07-19
+
+### 0.7
+
+- Bumped the app marketing version to `0.7` (in `Version.xcconfig`), following the convention of bumping the version on the first commit after a release.
+- Enabled App Sandbox on macOS, which the App Store requires and which the app had never run under before. The document you open, and any folder you grant, are now reached through security-scoped bookmarks on macOS exactly as they already were on iOS. The entitlements are App Sandbox, user-selected file access, app-scoped bookmarks, and outgoing network connections for `http(s)` images.
+  - **User-selected access has to be read-write, although the app never writes a document.** Read-only is enough to open and read a file the user picked, but not to create a security-scoped bookmark from it: `bookmarkData(.withSecurityScope)` fails with `NSCocoaErrorDomain` code 256 even with the scope held open. Without a bookmark nothing reopens after a relaunch, so narrowing this back to read-only makes every Open fail with a message claiming the file could not be opened. The reason is recorded in `MarkdownPreview.entitlements`; do not "tidy" it to read-only on the grounds that the app only reads.
+  - Folder grants written by earlier builds are discarded at launch, because a bookmark made before the app was sandboxed cannot be resolved by it afterwards. Granting the folder again is the recovery, and costs one trip through the picker.
+- Fixed the file-access defects that only appear once the app is sandboxed. Each of these was harmless on an unsandboxed system, where a privileged read tends to succeed anyway, and each fails silently rather than loudly once it is not.
+  - A failure to create a security-scoped bookmark is now reported instead of quietly falling back to a bookmark without a scope. The fallback resolved perfectly well and then produced a URL the sandbox refused, so a document opened normally and then vanished from the list on the next launch, far from the cause. Opening now fails at the point the permission cannot be captured, and the reason is written to the log.
+  - Reading a document's modification date now holds the file's security scope. Without it the read returns nothing under the sandbox, which defeated the "unchanged, so skip" check and silently re-read and re-indexed every open document on every polling tick — once a second for the active document.
+  - Deciding *why* an image failed now happens inside the granted folder scope, as the rewrite beside it already did. Outside it the directory listing fails even when the folder has been granted, so every unresolved image was classed as unreadable and the app offered to fix missing files by granting permission — a fix that cannot work, and the exact promise that distinction exists to avoid making.
+  - A file dropped on the window is bookmarked at the moment the drop hands it over, rather than two asynchronous hops later. The sandbox extension a drop carries belongs to the drag session, so by the time the URL reached the main actor there could be nothing left to record, and the dropped document would not survive a relaunch.
+  - Paths in the sidebar and tooltips abbreviate to `~` again. Under the sandbox `NSHomeDirectory()` returns the app's container rather than the user's home directory, so nothing matched and full absolute paths were displayed; the home directory is now read from the account record, which the sandbox does not rewrite.
+  - On iOS, resolving a stored bookmark no longer leaks a security scope each time. Resolution implicitly starts the scope unless told not to, and the system permits only so many open at once; this runs once per document at launch and again on every polling tick.
+- Added a privacy manifest declaring the two required-reason APIs the app uses: file timestamps, for reloading a document when it changes on disk, and user defaults, for the document list and folder grants. `MarkdownCore` has no third-party dependencies, so nothing else is inherited. Also declared that the app uses no non-exempt encryption, which otherwise stalls every upload on the export-compliance question.
+- Split the build number from the marketing version. `CURRENT_PROJECT_VERSION` restarts at `1` and is bumped on every upload without ever resetting, while `MARKETING_VERSION` continues to move on the first commit after a release. App Store Connect requires a unique increasing build number for each upload within a marketing version, and a release takes more than one upload whenever a build is rejected or replaced, so keeping the two in lock step burned a marketing version on every retry. Both platforms share the one counter.
+- Removed a reference to the deleted `MarkdownPreviewUITests` target from the shared scheme, where it had remained as a test target with no matching definition in the project. Harmless so far because the test plans name their targets explicitly, but the kind of dangling reference that surfaces during an archive.
+
+### 0.6
 
 - Released version `0.6` (build `6`).
 - Images in markdown documents now display on macOS, iOS, and iPadOS. `![alt](photo.jpg "title")` renders the picture, with relative paths resolved against the document's own directory, including documents stored on iCloud Drive.
