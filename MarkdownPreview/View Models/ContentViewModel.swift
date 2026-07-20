@@ -414,7 +414,7 @@ final class ContentViewModel: ObservableObject {
 
     func tooltipPath(for url: URL) -> String {
         let fullPath = url.path
-        let homePath = NSHomeDirectory()
+        let homePath = UserHomeDirectory.path
         guard fullPath == homePath || fullPath.hasPrefix(homePath + "/") else {
             return fullPath
         }

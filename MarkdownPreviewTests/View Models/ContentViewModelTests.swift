@@ -196,7 +196,7 @@ struct ContentViewModelTests {
 
     @Test func tooltipPathAbbreviatesTheHomeDirectory() {
         let viewModel = ContentViewModel(disablePersistenceRestore: true)
-        let url = URL(fileURLWithPath: NSHomeDirectory() + "/Documents/note.md")
+        let url = URL(fileURLWithPath: UserHomeDirectory.path + "/Documents/note.md")
         #expect(viewModel.tooltipPath(for: url) == "~/Documents/note.md")
     }
 

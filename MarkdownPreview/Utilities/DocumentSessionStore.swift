@@ -690,7 +690,7 @@ final class DocumentSessionStore: ObservableObject {
     }
 
     private static func displayDirectoryPath(_ path: String) -> String {
-        let homePath = NSHomeDirectory()
+        let homePath = UserHomeDirectory.path
         guard !homePath.isEmpty else { return path }
 
         if path == homePath {

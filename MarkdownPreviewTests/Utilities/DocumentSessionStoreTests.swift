@@ -100,7 +100,7 @@ struct DocumentSessionStoreTests {
 
     @MainActor
     @Test func groupsDocumentsByParentDirectoryWithSortedSections() async throws {
-        let home = NSHomeDirectory()
+        let home = UserHomeDirectory.path
         let files = [
             MarkdownFile(url: URL(fileURLWithPath: "/tmp/notes/zeta.md"), contents: ""),
             MarkdownFile(url: URL(fileURLWithPath: "\(home)/work/beta.md"), contents: ""),

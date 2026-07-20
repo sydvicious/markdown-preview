@@ -35,7 +35,12 @@ final class DirectoryAccessStore: ObservableObject {
     /// no longer holds — version 1 leaked an open security scope on every
     /// resolution, and the only way to recover was deleting the app. Discarding
     /// grants on a format change costs the user one re-grant instead.
-    private static let formatVersion = 2
+    ///
+    /// Version 2 could contain a grant that is not security-scoped at all: it was
+    /// written when a failure to make a scoped bookmark quietly fell back to a
+    /// plain one. Those resolve without complaint and then yield a URL the sandbox
+    /// refuses, so they must not be carried into a sandboxed build.
+    private static let formatVersion = 3
 
     private let userDefaults: UserDefaults
 
