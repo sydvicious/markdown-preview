@@ -560,14 +560,34 @@ final class DocumentSessionStore: ObservableObject {
 
         do {
             let file = try MarkdownFile.load(from: url)
-            let modificationDate = currentModificationDate(for: url)
+            let modificationDate = modificationDateWithinAccess(for: url)
             return (file, modificationDate)
         } catch {
             return nil
         }
     }
 
+    /// The document's modification date, taking the URL's security scope for the
+    /// read.
+    ///
+    /// Reading a resource value is itself privileged. `reloadDocumentIfNeeded`
+    /// polls this for every open document without holding a scope of its own, and
+    /// sandboxed that read returns nil — which does not fail loudly, it defeats
+    /// the "unchanged, so skip" check and silently re-reads every open document
+    /// on every tick.
     private func currentModificationDate(for url: URL) -> Date? {
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        return modificationDateWithinAccess(for: url)
+    }
+
+    /// The same read for callers that already hold the scope, so it is not taken
+    /// twice over.
+    private func modificationDateWithinAccess(for url: URL) -> Date? {
         let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
         return values?.contentModificationDate
     }
