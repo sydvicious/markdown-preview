@@ -6,6 +6,7 @@ Format:
 
 ## 2026-07-19
 
+- Released version `0.6` (build `6`).
 - Images in markdown documents now display on macOS, iOS, and iPadOS. `![alt](photo.jpg "title")` renders the picture, with relative paths resolved against the document's own directory, including documents stored on iCloud Drive.
   - This needed more than a correct path. A `WKWebView` loaded from an HTML string gives its web content process no read access to the file system, so a relative image reference never loaded however right the base URL was — which is why only alt text appeared. Image references are now rewritten to a private `mdimage://` URL scheme and served by a handler running in the app process, which can read the file. The alternative of embedding each image as a `data:` URI was rejected because the document is re-rendered on every preview update, and base64 would mean re-encoding every image each time, inflated by a third.
   - A sandboxed app is granted the document you opened, not the files beside it, so an image may be unreadable even when the path is right. When that happens the preview offers to open the enclosing folder, and the permission is remembered across launches. The locations tested on iOS so far did not require it, but the same mechanism covers macOS once the app is sandboxed for the App Store.
