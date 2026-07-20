@@ -68,7 +68,20 @@ struct MarkdownPreviewView: View {
     private var imageProblem: ImageProblem {
         guard let baseURL else { return .none }
 
-        let unresolved = MarkdownImageURL.unresolvedLocalImages(in: html, relativeTo: baseURL)
+        // Telling an unreadable file from an absent one means listing the
+        // directory, which is privileged in the same way the rewrite in `html`
+        // is. Outside the granted scope the listing fails, every unresolved
+        // image is classified `.unreadable`, and the folder prompt is offered
+        // for files that are simply not there — precisely the promise this
+        // distinction exists to avoid making.
+        //
+        // `html` is evaluated first and separately: it takes the same scope
+        // itself, and nesting the two would rely on the access count being
+        // balanced rather than making the scope plainly visible here.
+        let rendered = html
+        let unresolved = accessStore.withAccess(to: baseURL) {
+            MarkdownImageURL.unresolvedLocalImages(in: rendered, relativeTo: baseURL)
+        }
         guard !unresolved.isEmpty else { return .none }
 
         // Debug level: this renders on every preview update, so it should not
@@ -118,8 +131,9 @@ struct MarkdownPreviewView: View {
         .fileDialogDefaultDirectory(baseURL)
     }
 
-    /// Offered only when an image is present but unreadable, where granting the
-    /// folder is a real fix.
+    /// Shown when the image is simply absent from a readable folder. It carries
+    /// no action, because there is none to offer: the file is not there, and
+    /// granting a folder would not bring it back.
     private var imageMissingNotice: some View {
         HStack(spacing: 8) {
             Image(systemName: "photo.on.rectangle.angled")
@@ -134,6 +148,8 @@ struct MarkdownPreviewView: View {
         .background(.bar)
     }
 
+    /// Offered only when an image is present but unreadable, where granting the
+    /// folder is a real fix.
     private var imageAccessPrompt: some View {
         HStack(spacing: 8) {
             Image(systemName: "photo.on.rectangle.angled")
