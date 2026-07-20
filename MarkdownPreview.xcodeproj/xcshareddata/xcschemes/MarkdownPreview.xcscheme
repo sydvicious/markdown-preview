@@ -17,6 +17,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "62584AF02D45FB4E00831420"
                BuildableName = "MarkdownPreview.app"
+               BlueprintName = "MarkdownPreview"
                ReferencedContainer = "container:MarkdownPreview.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -47,6 +48,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "62584B002D45FB5000831420"
                BuildableName = "MarkdownPreviewTests.xctest"
+               BlueprintName = "MarkdownPreviewTests"
                ReferencedContainer = "container:MarkdownPreview.xcodeproj">
             </BuildableReference>
          </TestableReference>
@@ -79,6 +81,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "62584AF02D45FB4E00831420"
             BuildableName = "MarkdownPreview.app"
+            BlueprintName = "MarkdownPreview"
             ReferencedContainer = "container:MarkdownPreview.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -95,6 +98,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "62584AF02D45FB4E00831420"
             BuildableName = "MarkdownPreview.app"
+            BlueprintName = "MarkdownPreview"
             ReferencedContainer = "container:MarkdownPreview.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
