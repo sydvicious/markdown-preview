@@ -270,7 +270,14 @@ final class DocumentSessionStore: ObservableObject {
         setTextSize(next, for: documentID)
     }
 
-    func openDocument(at url: URL) throws {
+    /// Opens `url`, reusing a bookmark the caller already made if it has one.
+    ///
+    /// Drag-and-drop supplies `bookmarkData` because the sandbox extension a drop
+    /// vends belongs to the drag session: by the time the URL has crossed onto the
+    /// main actor there may be nothing left to bookmark. Callers that hold a
+    /// durable scope — the file importer, an open request from Finder, a restored
+    /// session — pass nothing and let this make its own.
+    func openDocument(at url: URL, bookmarkData: Data? = nil) throws {
         let hasAccess = url.startAccessingSecurityScopedResource()
         defer {
             if hasAccess {
@@ -278,7 +285,7 @@ final class DocumentSessionStore: ObservableObject {
             }
         }
 
-        let bookmarkData = try makeBookmarkData(for: url)
+        let bookmarkData = try bookmarkData ?? makeBookmarkData(for: url)
         guard let loaded = loadFromBookmarkData(bookmarkData) else {
             throw CocoaError(.fileNoSuchFile)
         }

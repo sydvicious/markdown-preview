@@ -109,9 +109,9 @@ final class ContentViewModel: ObservableObject {
         }
     }
 
-    func load(url: URL, isCompactWidth: Bool) {
+    func load(url: URL, bookmarkData: Data? = nil, isCompactWidth: Bool) {
         do {
-            try store.openDocument(at: url)
+            try store.openDocument(at: url, bookmarkData: bookmarkData)
             detailMode = .preview
             preferredCompactColumn = isCompactWidth ? .detail : .sidebar
             openErrorMessage = nil
@@ -144,12 +144,38 @@ final class ContentViewModel: ObservableObject {
             return false
         }
         provider.loadObject(ofClass: NSURL.self) { [weak self] item, _ in
-            guard let url = item as? NSURL else { return }
+            guard let url = item as? NSURL as URL? else { return }
+
+            // Bookmark here rather than after the hop below. The extension a drop
+            // vends is tied to the drag session, and this handler is the last
+            // point it is reliably live — two async boundaries later it may be
+            // reclaimed, and the bookmark that reopens this file on the next
+            // launch would fail to be made at all.
+            let bookmarkData = Self.securityScopedBookmark(for: url)
+
             Task { @MainActor in
-                self?.load(url: url as URL, isCompactWidth: isCompactWidth)
+                self?.load(url: url, bookmarkData: bookmarkData, isCompactWidth: isCompactWidth)
             }
         }
         return true
+    }
+
+    /// A security-scoped bookmark for a URL whose scope is live right now.
+    ///
+    /// Returns nil rather than throwing: a drop that cannot be bookmarked should
+    /// still open, and `openDocument(at:bookmarkData:)` will try again itself.
+    nonisolated private static func securityScopedBookmark(for url: URL) -> Data? {
+        let opened = url.startAccessingSecurityScopedResource()
+        defer {
+            if opened {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        return try? url.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
     }
 
     /// After a short delay, presents the macOS file importer if the app launched
