@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- read-write, although the app never writes a document.
+
+	     read-only is enough to open and read a user-selected file, but not to
+	     create a security-scoped bookmark from it: bookmarkData(.withSecurityScope)
+	     fails with NSCocoaErrorDomain 256 even with the scope held open. Without a
+	     bookmark nothing can be reopened after a relaunch, so the session, the
+	     folder grants, and the change polling all depend on this being read-write.
+	     Narrowing it back to read-only makes every Open fail. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.files.bookmarks.app-scope</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

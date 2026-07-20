@@ -4,6 +4,7 @@
 
 import Foundation
 import SwiftUI
+import os
 import MarkdownCore
 #if canImport(UIKit)
 import UIKit
@@ -170,6 +171,8 @@ final class DocumentSessionStore: ObservableObject {
     private let persistedSelectionKey = "selectedMarkdownDocumentID"
     private static let persistedTextSizesKey = "markdownDocumentTextSizes"
 
+    private static let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "Session")
+
     @Published var openedDocuments: [OpenedDocument]
     @Published var selectedDocumentID: OpenedDocument.ID?
     private var knownModificationDates: [String: Date] = [:]
@@ -277,7 +280,7 @@ final class DocumentSessionStore: ObservableObject {
     /// main actor there may be nothing left to bookmark. Callers that hold a
     /// durable scope — the file importer, an open request from Finder, a restored
     /// session — pass nothing and let this make its own.
-    func openDocument(at url: URL, bookmarkData: Data? = nil) throws {
+    func openDocument(at url: URL, bookmarkData suppliedBookmarkData: Data? = nil) throws {
         let hasAccess = url.startAccessingSecurityScopedResource()
         defer {
             if hasAccess {
@@ -285,7 +288,24 @@ final class DocumentSessionStore: ObservableObject {
             }
         }
 
-        let bookmarkData = try bookmarkData ?? makeBookmarkData(for: url)
+        let bookmarkData: Data
+        do {
+            bookmarkData = try suppliedBookmarkData ?? makeBookmarkData(for: url)
+        } catch {
+            // Bookmark failures surface as an opaque "couldn't be opened", which
+            // reads like the file is missing when the real problem is that no
+            // security scope was held to record. Log the two facts that tell
+            // those apart before letting it go up.
+            let nsError = error as NSError
+            Self.log.error("""
+                Could not bookmark \(url.lastPathComponent, privacy: .public): \
+                \(nsError.domain, privacy: .public) \(nsError.code) — \
+                \(error.localizedDescription, privacy: .public); \
+                scopeOpened=\(hasAccess), callerSuppliedBookmark=\(suppliedBookmarkData != nil)
+                """)
+            throw error
+        }
+
         guard let loaded = loadFromBookmarkData(bookmarkData) else {
             throw CocoaError(.fileNoSuchFile)
         }
