@@ -181,15 +181,17 @@ final class DirectoryAccessStore: ObservableObject {
 
     private func makeBookmarkData(for url: URL) throws -> Data {
         #if os(macOS)
-        do {
-            return try url.bookmarkData(
-                options: [.withSecurityScope],
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            )
-        } catch {
-            return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-        }
+        // A non-scoped bookmark is not a usable fallback here. It resolves
+        // perfectly well and then yields a URL the sandbox refuses, so the grant
+        // looks healthy for the rest of the launch and silently evaporates on the
+        // next one. Failing here instead means the caller learns at the point the
+        // grant is made — the entitlement is missing, or the scope this URL
+        // arrived with has already been reclaimed.
+        return try url.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
         #else
         return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
         #endif

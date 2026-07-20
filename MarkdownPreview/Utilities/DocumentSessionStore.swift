@@ -504,11 +504,13 @@ final class DocumentSessionStore: ObservableObject {
 
     private func makeBookmarkData(for url: URL) throws -> Data {
         #if os(macOS)
-        do {
-            return try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
-        } catch {
-            return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-        }
+        // Deliberately no fallback to a non-scoped bookmark. One resolves fine
+        // and then yields a URL the sandbox refuses, so the document reopens
+        // normally for the rest of the launch and is dropped by `restoreMigration`
+        // on the next one — a failure that surfaces far from its cause. Throwing
+        // sends it up through `openDocument(at:)` to the open error message
+        // instead, where the user sees it against the file they just opened.
+        return try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
         #else
         return try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
         #endif
@@ -527,7 +529,14 @@ final class DocumentSessionStore: ObservableObject {
             #if os(macOS)
             let options: URL.BookmarkResolutionOptions = [.withSecurityScope, .withoutUI]
             #else
-            let options: URL.BookmarkResolutionOptions = [.withoutUI]
+            // `.withoutImplicitStartAccessing` for the same reason
+            // `DirectoryAccessStore` passes it: on iOS resolving a bookmark
+            // *starts* the implicit scope it carries, and the system permits only
+            // a limited number of open scoped URLs. This resolves once per
+            // document at launch and again on every polling tick, so without it
+            // each one leaks a scope until access is refused. Access is taken
+            // explicitly in `loadDocument`.
+            let options: URL.BookmarkResolutionOptions = [.withoutUI, .withoutImplicitStartAccessing]
             #endif
             let url = try URL(
                 resolvingBookmarkData: bookmarkData,
