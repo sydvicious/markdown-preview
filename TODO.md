@@ -98,6 +98,10 @@ This document tracks planned work for MarkdownPreviewApp.
   - Consider what happens when the user declines. There is currently no persisted "asked and refused" state, so a naive modal would ask again on the next open of the same document.
   - This is macOS-specific in urgency: on iOS the same bar sits in a much smaller viewport and is correspondingly harder to overlook. Check whether the modal is wanted there too, or whether the banner should stay on iOS.
 
+### Open images and links in their natural app on click.
+  - Clicking a rendered image should hand the file (or link) off to the system to open in whatever app naturally handles it: an image file opens in the default app for that image type; a link opens in the browser.
+  - Route this through the system open handler (`NSWorkspace.open` on macOS, `UIApplication.open`/`openURL` on iOS) so the app is not choosing the target app itself.
+
 ### Ship a welcome document in the app bundle.
   - Include a `Welcome.md` in the app bundle and add it to the file list on the very first launch, so a new user is met with a rendered document instead of an empty window.
   - Once the user removes it from the list, remember that and never add it back. From then on the app behaves exactly as it does today: `ContentViewModel.initialOpenPresentation` (`MarkdownPreview/View Models/ContentViewModel.swift:213`) presents the file picker on macOS when a restore finds no documents, and the empty list offers its placeholder open action.
