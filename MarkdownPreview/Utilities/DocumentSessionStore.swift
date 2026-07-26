@@ -419,6 +419,15 @@ final class DocumentSessionStore: ObservableObject {
         restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth, userDefaults: .standard)
     }
 
+    /// Whether a document list has ever been persisted, which is distinct from the
+    /// list being empty. A brand-new install has no key at all; a user who has
+    /// opened and then removed every document has an empty array persisted under
+    /// the key. Callers that must tell a first-ever launch apart from an emptied
+    /// list — the bundled-sample seed — key off this rather than off emptiness.
+    func hasPersistedDocumentList(in userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.object(forKey: persistedDocumentsKey) != nil
+    }
+
     func persistDocuments(to userDefaults: UserDefaults) {
         let encoder = JSONEncoder()
         let persisted = openedDocuments.map {

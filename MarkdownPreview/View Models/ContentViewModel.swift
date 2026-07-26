@@ -5,6 +5,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import os
 
 /// Which search field the keyboard focus targets. The actual `@FocusState` lives
 /// in the View, but the view model reasons about focus in these terms.
@@ -53,6 +54,9 @@ final class ContentViewModel: ObservableObject {
     let search: SearchViewModel
 
     private var hasPresentedInitialOpenPrompt: Bool
+    private let disablePersistenceRestore: Bool
+    private static let bundledSampleSeededKey = "hasSeededBundledSample"
+    private static let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "FirstLaunch")
     private var focusRequestToken = 0
     private var cancellables = Set<AnyCancellable>()
     #if os(macOS)
@@ -75,6 +79,7 @@ final class ContentViewModel: ObservableObject {
         self.search = SearchViewModel(store: store)
         self.detailMode = showsSourceInPreview ? .source : .preview
         self.hasPresentedInitialOpenPrompt = disablePersistenceRestore
+        self.disablePersistenceRestore = disablePersistenceRestore
 
         // Search state changes on every keystroke and drives the search field,
         // so forward it synchronously — deferring it to a later runloop tick made
@@ -211,9 +216,132 @@ final class ContentViewModel: ObservableObject {
 
     func restorePersistedDocumentsIfNeeded(isCompactWidth: Bool) {
         store.restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth)
+        seedBundledSampleIfNeeded(isCompactWidth: isCompactWidth)
+        refreshSeededSampleIfNeeded(isCompactWidth: isCompactWidth)
         if isCompactWidth, store.selectedDocumentID != nil {
             preferredCompactColumn = .detail
         }
+    }
+
+    /// On the very first launch, puts the bundled `SAMPLE.md` into the list as if
+    /// the user had opened it, so a new user (and a screenshot) is met with a
+    /// rendered document rather than an empty window.
+    ///
+    /// The one-and-only attempt is recorded up front (see `BundledSampleSeeder`
+    /// for why the gate needs all three conditions), so a decline or a failure is
+    /// never retried on a later launch, where the sample turning up on its own
+    /// after the user has added their own files would be confusing.
+    ///
+    /// The sample is copied into the app's own container and opened from there
+    /// rather than in place: the bundle file reads fine, but the sandbox refuses to
+    /// mint a security-scoped bookmark for a file the user did not pick, so opening
+    /// it in place fails when the list persists it (NSCocoaError 256). Failures are
+    /// logged, not shown — this is a first-launch nicety, not a user action.
+    func seedBundledSampleIfNeeded(isCompactWidth: Bool, userDefaults: UserDefaults = .standard) {
+        guard !disablePersistenceRestore else { return }
+
+        let alreadyAttempted = userDefaults.bool(forKey: Self.bundledSampleSeededKey)
+        if !alreadyAttempted {
+            userDefaults.set(true, forKey: Self.bundledSampleSeededKey)
+        }
+
+        guard BundledSampleSeeder.shouldSeed(
+            alreadyAttempted: alreadyAttempted,
+            hasPersistedList: store.hasPersistedDocumentList(in: userDefaults),
+            listIsEmpty: store.openedDocuments.isEmpty
+        ) else { return }
+
+        guard let templateURL = Self.bundledSampleURL() else {
+            Self.log.error("Sample not seeded: SAMPLE.md is missing from the app bundle.")
+            return
+        }
+        guard let container = Self.containerDocumentsURL() else {
+            Self.log.error("Sample not seeded: could not locate the app's Documents directory.")
+            return
+        }
+
+        do {
+            let copiedURL = try BundledSampleSeeder.materialize(
+                templateURL: templateURL,
+                imageURL: Self.bundledSampleImageURL(),
+                version: Self.marketingVersion(),
+                build: Self.buildNumber(),
+                in: container
+            )
+            try store.openDocument(at: copiedURL)
+            detailMode = .preview
+            preferredCompactColumn = isCompactWidth ? .detail : .sidebar
+        } catch {
+            let nsError = error as NSError
+            Self.log.error("Sample not seeded: \(nsError.domain, privacy: .public) code \(nsError.code): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Brings an already-seeded copy up to date when a newly shipped build carries
+    /// a different sample — a version bump changes the substituted title line. Only
+    /// the on-disk file is rewritten; the document is never re-added to the list,
+    /// so one the user removed stays gone. Failures are logged and retried next
+    /// launch, leaving the existing copy untouched.
+    func refreshSeededSampleIfNeeded(isCompactWidth: Bool) {
+        guard !disablePersistenceRestore else { return }
+        guard let templateURL = Self.bundledSampleURL() else { return }
+        guard let containerURL = seededSampleURLInList(named: templateURL.lastPathComponent) else { return }
+
+        do {
+            let didReplace = try BundledSampleSeeder.refresh(
+                templateURL: templateURL,
+                containerURL: containerURL,
+                version: Self.marketingVersion(),
+                build: Self.buildNumber()
+            )
+            if didReplace {
+                store.checkActiveDocumentForChanges(isCompactWidth: isCompactWidth)
+                store.checkAllDocumentsForChanges(isCompactWidth: isCompactWidth)
+            }
+        } catch {
+            let nsError = error as NSError
+            Self.log.error("Sample not refreshed: \(containerURL.lastPathComponent, privacy: .public) — \(nsError.domain, privacy: .public) code \(nsError.code): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// The seeded sample among the open documents, if it is still in the list:
+    /// matched by name and by living in the app's Documents directory, resolving
+    /// symlinks so the container path (under `/private/var`) compares equal.
+    private func seededSampleURLInList(named fileName: String) -> URL? {
+        guard let documents = Self.containerDocumentsURL() else { return nil }
+        let documentsPath = documents.resolvingSymlinksInPath().path
+        return store.openedDocuments.first(where: { document in
+            document.file.url.lastPathComponent == fileName &&
+            document.file.url.deletingLastPathComponent().resolvingSymlinksInPath().path == documentsPath
+        })?.file.url
+    }
+
+    private static func bundledSampleURL() -> URL? {
+        Bundle.main.url(forResource: "SAMPLE", withExtension: "md")
+    }
+
+    private static func bundledSampleImageURL() -> URL? {
+        Bundle.main.url(forResource: "lilsyd", withExtension: "JPG")
+    }
+
+    private static func containerDocumentsURL() -> URL? {
+        try? FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+    }
+
+    /// The marketing version (e.g. "0.7") substituted for the template's
+    /// `{{VERSION}}` token when the copy is written.
+    private static func marketingVersion() -> String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+    }
+
+    /// The build number (e.g. "1") substituted for the template's `{{BUILD}}` token.
+    private static func buildNumber() -> String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
     }
 
     func presentInitialOpenPromptIfNeeded() -> InitialOpenPresentation {

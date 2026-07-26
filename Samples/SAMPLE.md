@@ -1,3 +1,22 @@
+# Markdown Preview by Syd Polk
+Version {{VERSION}} (build {{BUILD}})\
+Copyright ©2026 Syd Polk
+
+Welcome to MarkdownPreview, an application designed to work like Apple's Preview app, but for Markdown files.
+MarkdownPreview has the following features:
+< Insert feature list here>
+If you don't want to see this file again, you can remove it from the list of files.
+
+#### Mac
+<instructions>
+#### iOS
+<instructions>
+#### iPadOS
+<instructions>
+#### 
+For support, please contact support@sydpolk.com.
+
+######
 # Markdown Preview — Feature Sample
 
 This document exercises everything the renderer supports. Open it in the app to

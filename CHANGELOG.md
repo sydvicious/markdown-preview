@@ -5,6 +5,10 @@ Format:
 - Where a date spans a release, a `###` subheading names the version the bullets under it belong to.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-07-25
+
+- On first launch — and only on a genuinely new install — the bundled `SAMPLE.md` and its image are copied into the app's container and added to the document list, so a new user (and a screenshot) opens onto a rendered document instead of an empty window. The document's title carries the app's version and build number, and the on-disk copy is refreshed whenever those change on a later build.
+
 ## 2026-07-19
 
 ### 0.7
