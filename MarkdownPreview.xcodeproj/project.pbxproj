@@ -29,6 +29,7 @@
 		6231AE202F40F583007D442C /* LICENSE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = LICENSE.md; sourceTree = "<group>"; };
 		6231AE212F40F583007D442C /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		6242B0012FF2A00100C0D001 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
+		6246067C3015A90B003F5C92 /* CLAUDE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CLAUDE.md; sourceTree = "<group>"; };
 		62584AF12D45FB4E00831420 /* MarkdownPreview.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MarkdownPreview.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		62584B012D45FB5000831420 /* MarkdownPreviewTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MarkdownPreviewTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		62A96A69300D608400BA1DE1 /* MarkdownCore */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = MarkdownCore; sourceTree = "<group>"; };
@@ -76,6 +77,7 @@
 				62584B042D45FB5000831420 /* MarkdownPreviewTests */,
 				6200A0013B7A000100000001 /* AGENTS.md */,
 				62E0151A2FF1D23200E5ABB9 /* CHANGELOG.md */,
+				6246067C3015A90B003F5C92 /* CLAUDE.md */,
 				6231AE202F40F583007D442C /* LICENSE.md */,
 				6231AE212F40F583007D442C /* README.md */,
 				621B2E752F40F94600DD1CCB /* TODO.md */,
