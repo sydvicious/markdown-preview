@@ -91,6 +91,57 @@ struct MarkdownHTMLBuilderTests {
         )
     }
 
+    // MARK: - Soft break rendering (SoftBreak option)
+
+    @Test func softBreakDefaultsToNewlineNotABreakTag() async throws {
+        // The default is CommonMark: a soft break survives as a newline and no
+        // <br> appears. This guards the conformance default against the option
+        // below leaking in.
+        let html = MarkdownHTMLBuilder.document(for: "foo\nbar")
+
+        #expect(html.contains("<p>foo\nbar</p>"))
+        #expect(!html.contains("<br"))
+    }
+
+    @Test func lineBreakOptionRendersSoftBreakAsABreakTag() async throws {
+        // GitHub "hardbreaks": an ordinary line ending inside a paragraph turns
+        // into a <br> so the text lands as it was typed.
+        let html = MarkdownHTMLBuilder.document(for: "foo\nbar", softBreak: .lineBreak)
+
+        #expect(html.contains("<p>foo<br />\nbar</p>"))
+    }
+
+    @Test func lineBreakOptionAlsoConvertsASingleTrailingSpaceSoftBreak() async throws {
+        // A lone trailing space is normally dropped and the line ending is a
+        // soft break; under .lineBreak that break still becomes a <br>, and the
+        // space is not carried into the output.
+        let html = MarkdownHTMLBuilder.document(for: "foo \nbar", softBreak: .lineBreak)
+
+        #expect(html.contains("<p>foo<br />\nbar</p>"))
+    }
+
+    @Test func lineBreakOptionLeavesTwoTrailingSpaceHardBreaksIntact() async throws {
+        let html = MarkdownHTMLBuilder.document(for: "foo  \nbar", softBreak: .lineBreak)
+
+        #expect(html.contains("<p>foo<br />\nbar</p>"))
+    }
+
+    @Test func lineBreakOptionStillSeparatesParagraphsOnABlankLine() async throws {
+        // Only the within-paragraph newline changes meaning. A blank line is
+        // still a paragraph boundary, not a <br>.
+        let html = MarkdownHTMLBuilder.document(for: "foo\n\nbar", softBreak: .lineBreak)
+
+        #expect(html.contains("<p>foo</p>"))
+        #expect(html.contains("<p>bar</p>"))
+        #expect(!html.contains("<br"))
+    }
+
+    @Test func lineBreakOptionAppliesInsideBlockquotes() async throws {
+        let html = MarkdownHTMLBuilder.document(for: "> first\n> second", softBreak: .lineBreak)
+
+        #expect(html.contains("<blockquote><p>first<br />\nsecond</p></blockquote>"))
+    }
+
     @Test func htmlBuilderNestsSubListsInsideTheirParentItem() async throws {
         let html = MarkdownHTMLBuilder.document(for: "- parent\n  - child\n- sibling")
 

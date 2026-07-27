@@ -5,6 +5,23 @@
 import Foundation
 
 public enum MarkdownHTMLBuilder {
+    /// How a soft line break — an ordinary line ending inside a paragraph — is
+    /// rendered.
+    ///
+    /// CommonMark says a soft break is a newline in the output and nothing more,
+    /// so two source lines flow together as one line on screen. GitHub renders
+    /// its comment fields the other way, turning every soft break into a `<br>`
+    /// ("hardbreaks") so the text lands exactly as it was typed. The core
+    /// defaults to `.newline` to stay CommonMark-conformant; the app selects
+    /// `.lineBreak` so a carriage return in the source is a line break in the
+    /// preview.
+    public enum SoftBreak: Sendable {
+        /// A soft break renders as a newline (CommonMark).
+        case newline
+        /// A soft break renders as `<br />` (GitHub "hardbreaks").
+        case lineBreak
+    }
+
     /// Renders `source` as a standalone HTML document.
     ///
     /// `contentScale` is the Dynamic Type scale factor to apply to the
@@ -12,10 +29,17 @@ public enum MarkdownHTMLBuilder {
     /// `DynamicTypeSize` so that the markdown engine stays free of SwiftUI and
     /// can be built and tested from the command line without an app host; call
     /// sites pass `textSize.scaleFactor`.
-    public static func document(for source: String, contentScale: CGFloat = 1.0) -> String {
+    ///
+    /// `softBreak` chooses how ordinary line endings inside a paragraph render;
+    /// see `SoftBreak`.
+    public static func document(
+        for source: String,
+        contentScale: CGFloat = 1.0,
+        softBreak: SoftBreak = .newline
+    ) -> String {
         let sourceLineTable = MarkdownSourceLineTable(source: source)
         let renderedBlocks = MarkdownBlockParser.parse(source)
-            .map { renderBlock($0, sourceLineTable: sourceLineTable) }
+            .map { renderBlock($0, sourceLineTable: sourceLineTable, softBreak: softBreak) }
             .joined(separator: "\n")
         let body = renderedBlocks.isEmpty ? "<p class=\"empty\"></p>" : renderedBlocks
 
@@ -127,12 +151,15 @@ public enum MarkdownHTMLBuilder {
             p, ul, ol, blockquote, pre, .table-wrap {
               margin: 0 0 1rem 0;
             }
-            p:last-child,
-            ul:last-child,
-            ol:last-child,
-            blockquote:last-child,
-            pre:last-child,
-            .table-wrap:last-child {
+            /* Trim the trailing margin only where a block sits flush against a
+               container edge: the end of the document, and the last child inside
+               a quote or list item. Each top-level block is wrapped in its own
+               `.md-block`, so a naive `p:last-child` would match every paragraph
+               (each is the sole child of its wrapper) and collapse the gap
+               between paragraphs — the reason spacer lines were once needed. */
+            .md-block:last-child > :last-child,
+            blockquote > :last-child,
+            li > :last-child {
               margin-bottom: 0;
             }
             a {
@@ -252,8 +279,12 @@ public enum MarkdownHTMLBuilder {
         """
     }
 
-    private static func renderBlock(_ block: MarkdownBlock, sourceLineTable: MarkdownSourceLineTable) -> String {
-        let content = blockContent(block)
+    private static func renderBlock(
+        _ block: MarkdownBlock,
+        sourceLineTable: MarkdownSourceLineTable,
+        softBreak: SoftBreak
+    ) -> String {
+        let content = blockContent(block, softBreak: softBreak)
         let copyButton = blockWantsCopyButton(block)
             ? "<button type=\"button\" class=\"md-copy-button\" data-copy-button>Copy</button>"
             : nil
@@ -282,22 +313,24 @@ public enum MarkdownHTMLBuilder {
     /// `renderBlock`, because the wrapper carries source offsets into the outer
     /// document and a nested block's line numbers refer to the quote's stripped
     /// content instead.
-    private static func blockContent(_ block: MarkdownBlock) -> String {
+    private static func blockContent(_ block: MarkdownBlock, softBreak: SoftBreak) -> String {
         let content: String
         switch block.kind {
         case .heading(let level, let text):
+            // Headings are a single source line, so no soft break ever reaches
+            // here; the default rendering is correct regardless of `softBreak`.
             let clampedLevel = min(max(level, 1), 6)
             content = "<h\(clampedLevel)>\(renderInlineMarkdownHTML(text))</h\(clampedLevel)>"
         case .paragraph(let text):
-            content = "<p>\(renderInlineMarkdownHTML(text))</p>"
+            content = "<p>\(renderInlineMarkdownHTML(text, softBreak: softBreak))</p>"
         case .list(let items, let isLoose):
-            content = renderList(items, ordered: false, isLoose: isLoose)
+            content = renderList(items, ordered: false, isLoose: isLoose, softBreak: softBreak)
         case .orderedList(let items, let isLoose):
-            content = renderList(items, ordered: true, isLoose: isLoose)
+            content = renderList(items, ordered: true, isLoose: isLoose, softBreak: softBreak)
         case .table(let table):
             content = renderTable(table)
         case .blockquote(let children):
-            content = "<blockquote>\(children.map(blockContent).joined())</blockquote>"
+            content = "<blockquote>\(children.map { blockContent($0, softBreak: softBreak) }.joined())</blockquote>"
         case .rule:
             content = "<hr />"
         case .code(let code, let language):
@@ -308,9 +341,21 @@ public enum MarkdownHTMLBuilder {
         return content
     }
 
-    private static func renderList(_ items: [MarkdownListItem], ordered: Bool, isLoose: Bool) -> String {
+    private static func renderList(
+        _ items: [MarkdownListItem],
+        ordered: Bool,
+        isLoose: Bool,
+        softBreak: SoftBreak
+    ) -> String {
         var index = 0
-        return renderListLevel(items, index: &index, depth: 0, ordered: ordered, isLoose: isLoose)
+        return renderListLevel(
+            items,
+            index: &index,
+            depth: 0,
+            ordered: ordered,
+            isLoose: isLoose,
+            softBreak: softBreak
+        )
     }
 
     /// Emits one nesting level, recursing into deeper items so they land inside
@@ -325,7 +370,8 @@ public enum MarkdownHTMLBuilder {
         index: inout Int,
         depth: Int,
         ordered: Bool,
-        isLoose: Bool
+        isLoose: Bool,
+        softBreak: SoftBreak
     ) -> String {
         let tag = ordered ? "ol" : "ul"
         var rows = ""
@@ -342,13 +388,14 @@ public enum MarkdownHTMLBuilder {
                     index: &index,
                     depth: items[index].indent,
                     ordered: items[index].isOrdered,
-                    isLoose: isLoose
+                    isLoose: isLoose,
+                    softBreak: softBreak
                 )
             }
 
             if let checked = item.checkbox {
                 let checkedAttribute = checked ? " checked" : ""
-                rows += "<li class=\"task\"><label><input type=\"checkbox\" disabled\(checkedAttribute) /><span>\(renderInlineMarkdownHTML(item.text))</span></label>\(nested)</li>"
+                rows += "<li class=\"task\"><label><input type=\"checkbox\" disabled\(checkedAttribute) /><span>\(renderInlineMarkdownHTML(item.text, softBreak: softBreak))</span></label>\(nested)</li>"
                 continue
             }
 
@@ -359,7 +406,7 @@ public enum MarkdownHTMLBuilder {
                 valueAttribute = ""
             }
 
-            let text = renderInlineMarkdownHTML(item.text)
+            let text = renderInlineMarkdownHTML(item.text, softBreak: softBreak)
             let body = isLoose ? "<p>\(text)</p>" : text
             rows += "<li\(valueAttribute)>\(body)\(nested)</li>"
         }
@@ -394,14 +441,17 @@ public enum MarkdownHTMLBuilder {
     }
 
     private static func renderLinesAsHTML(_ text: String) -> String {
+        // Table cells split their own lines into <br>-joined pieces, so each
+        // piece has no line ending left for the soft-break option to act on; the
+        // default rendering is correct here.
         text
             .components(separatedBy: "\n")
-            .map(renderInlineMarkdownHTML)
+            .map { renderInlineMarkdownHTML($0) }
             .joined(separator: "<br>")
     }
 
-    private static func renderInlineMarkdownHTML(_ text: String) -> String {
-        renderInlineMarkdownHTML(Substring(text))
+    private static func renderInlineMarkdownHTML(_ text: String, softBreak: SoftBreak = .newline) -> String {
+        renderInlineMarkdownHTML(Substring(text), softBreak: softBreak)
     }
 
     /// One piece of inline content: either finished HTML, or a run of `*`/`_`
@@ -411,8 +461,8 @@ public enum MarkdownHTMLBuilder {
         case delimiter(character: Character, count: Int, canOpen: Bool, canClose: Bool)
     }
 
-    private static func renderInlineMarkdownHTML(_ text: Substring) -> String {
-        processEmphasis(tokenizeInline(text))
+    private static func renderInlineMarkdownHTML(_ text: Substring, softBreak: SoftBreak = .newline) -> String {
+        processEmphasis(tokenizeInline(text, softBreak: softBreak))
     }
 
     /// Splits inline text into finished HTML and undecided emphasis delimiters.
@@ -420,7 +470,7 @@ public enum MarkdownHTMLBuilder {
     /// Everything that outranks emphasis — escapes, entities, images, links,
     /// code spans — is resolved here, so emphasis matching only ever sees text
     /// it is allowed to affect.
-    private static func tokenizeInline(_ text: Substring) -> [InlineToken] {
+    private static func tokenizeInline(_ text: Substring, softBreak: SoftBreak = .newline) -> [InlineToken] {
         var tokens: [InlineToken] = []
         var index = text.startIndex
 
@@ -452,7 +502,9 @@ public enum MarkdownHTMLBuilder {
 
             // Two or more spaces before a line ending are the other hard break.
             // A single trailing space is dropped, and the line ending itself is
-            // a soft break: a newline in the output, not a <br>.
+            // a soft break. Under `.newline` that soft break is a newline in the
+            // output, not a <br>; under `.lineBreak` it becomes a <br> too, so a
+            // line ending in the source is a line break on screen.
             if text[index] == " " {
                 var runEnd = index
                 while runEnd < text.endIndex, text[runEnd] == " " {
@@ -461,7 +513,8 @@ public enum MarkdownHTMLBuilder {
                 let spaces = text.distance(from: index, to: runEnd)
 
                 if runEnd < text.endIndex, text[runEnd] == "\n" {
-                    appendHTML(spaces >= 2 ? "<br />\n" : "\n")
+                    let isHardBreak = spaces >= 2 || softBreak == .lineBreak
+                    appendHTML(isHardBreak ? "<br />\n" : "\n")
                     index = text.index(after: runEnd)
                     continue
                 }
@@ -472,7 +525,7 @@ public enum MarkdownHTMLBuilder {
             }
 
             if text[index] == "\n" {
-                appendHTML("\n")
+                appendHTML(softBreak == .lineBreak ? "<br />\n" : "\n")
                 index = text.index(after: index)
                 continue
             }

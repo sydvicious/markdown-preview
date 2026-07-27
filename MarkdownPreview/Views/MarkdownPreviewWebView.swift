@@ -840,7 +840,7 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
 #Preview("Markdown Preview WebView") {
     MarkdownPreviewWebView(
         source: MarkdownPreviewFixtures.fullFile.contents,
-        html: MarkdownHTMLBuilder.document(for: MarkdownPreviewFixtures.fullFile.contents),
+        html: MarkdownHTMLBuilder.document(for: MarkdownPreviewFixtures.fullFile.contents, softBreak: .lineBreak),
         baseURL: nil,
         selectedRange: nil
     )

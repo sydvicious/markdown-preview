@@ -4,20 +4,37 @@ Version {{VERSION}} (build {{BUILD}})\
 Copyright ©2026 Syd Polk
 
 Welcome to MarkdownPreview, an application designed to work like Apple's Preview app, but for Markdown files.
-MarkdownPreview has the following features:\
-< Insert feature list here>\
-If you don't want to see this file again, you can remove it from the list of files.
+MarkdownPreview has the following features:
+
+- Supports standard Markdown features:
+  * Text styling, such as bold and italic
+  * Unordered and ordered lists
+  * Headers
+  * Block quotes
+  * Inline code
+  * Fenced code blocks
+  * Local and remote images
+  * Tables
+- Supports macOS 26.0+, iOS 26.0+, and iPadOS 26.0+
+- Finding text in individual documents or across all of them
+- Full support for copying to the clipboard
+
+If you don't want to see this file again, you can remove it from the list of files:
 
 #### Mac
-<instructions>
-#### iOS
-<instructions>
-#### iPadOS
-<instructions>
-#### 
-For support, please contact support@sydpolk.com.
 
-######
+Control-click it in the file list and choose "Remove from List," or select it and press ⌘⌫.
+
+#### iOS
+
+On iPhone the document fills the screen. Tap the chevron (‹) at the top left to go back to the file list, then swipe left on this file and tap Delete.
+
+#### iPadOS
+
+Swipe left on it in the file list and tap Delete.
+
+For support, please contact [support@sydpolk.com](mailto://support@sydpolk.com).
+
 # Markdown Preview — Feature Sample
 
 This document exercises everything the renderer supports. Open it in the app to
@@ -45,14 +62,32 @@ Level two looks like this
 
 ## Paragraphs and line breaks
 
-A paragraph is one or more lines of text. An ordinary line ending inside a
-paragraph is a *soft break* — the lines flow together when rendered, which is
-why this sentence reads as one continuous line despite being written across
-several.
+Every line ending is honored. A newline inside a paragraph renders as a line
+break, so what you type is what you see — no trailing spaces or other markup
+required. That keeps things that belong on their own lines together, such as a
+mailing address:
 
-To force a line break, end a line with two spaces  
-and the next line starts fresh. A trailing backslash does the same thing,\
-like this.
+MarkdownPreview
+1 Markdown Way
+Cupertino, CA
+
+or a sign-off:
+
+Thanks,
+Syd
+Sent from MarkdownPreview
+
+A *blank* line does something different: it starts a new paragraph, set apart
+with more vertical space than a single line break.
+
+This is one paragraph.
+
+This is a second, separated from the first by a blank line — notice the wider
+gap above than between the address lines.
+
+Ending a line with two trailing spaces, or with a trailing backslash,\
+is still an explicit hard break. Now that every newline already breaks the line,
+these are rarely needed, but they remain valid.
 
 ## Emphasis
 

@@ -285,7 +285,18 @@ final class ContentViewModel: ObservableObject {
     func refreshSeededSampleIfNeeded(isCompactWidth: Bool) {
         guard !disablePersistenceRestore else { return }
         guard let templateURL = Self.bundledSampleURL() else { return }
-        guard let containerURL = seededSampleURLInList(named: templateURL.lastPathComponent) else { return }
+        guard let documents = Self.containerDocumentsURL() else { return }
+        let containerURL = documents.appendingPathComponent(templateURL.lastPathComponent)
+
+        // Keep the on-disk copy current on version/build bumps, independent of
+        // whether the user still keeps it in the list. The copy lives in the
+        // app's private Documents container, which the app does not expose to the
+        // user (it does not appear in the Files app, and is not a normal Finder
+        // location), so in practice it is always present and therefore always
+        // updated; re-adding it to the list later then shows the current build's
+        // sample. The existence check is only a safety no-op for the unusual case
+        // where the file is somehow gone — it is not recreated here.
+        guard FileManager.default.fileExists(atPath: containerURL.path) else { return }
 
         do {
             let didReplace = try BundledSampleSeeder.refresh(
@@ -302,18 +313,6 @@ final class ContentViewModel: ObservableObject {
             let nsError = error as NSError
             Self.log.error("Sample not refreshed: \(containerURL.lastPathComponent, privacy: .public) — \(nsError.domain, privacy: .public) code \(nsError.code): \(error.localizedDescription, privacy: .public)")
         }
-    }
-
-    /// The seeded sample among the open documents, if it is still in the list:
-    /// matched by name and by living in the app's Documents directory, resolving
-    /// symlinks so the container path (under `/private/var`) compares equal.
-    private func seededSampleURLInList(named fileName: String) -> URL? {
-        guard let documents = Self.containerDocumentsURL() else { return nil }
-        let documentsPath = documents.resolvingSymlinksInPath().path
-        return store.openedDocuments.first(where: { document in
-            document.file.url.lastPathComponent == fileName &&
-            document.file.url.deletingLastPathComponent().resolvingSymlinksInPath().path == documentsPath
-        })?.file.url
     }
 
     private static func bundledSampleURL() -> URL? {

@@ -44,7 +44,7 @@ struct MarkdownPreviewView: View {
     /// however correct the base URL is. `MarkdownImageSchemeHandler` serves those
     /// URLs from the app process instead.
     private var html: String {
-        let document = MarkdownHTMLBuilder.document(for: source, contentScale: textSize.scaleFactor)
+        let document = MarkdownHTMLBuilder.document(for: source, contentScale: textSize.scaleFactor, softBreak: .lineBreak)
         guard let baseURL else { return document }
 
         // The rewrite checks each image exists, which is itself a privileged

@@ -56,7 +56,9 @@ enum MarkdownSelectionClipboard {
     }
 
     private static func renderedRTF(for markdown: String) -> Data? {
-        let html = MarkdownHTMLBuilder.document(for: markdown)
+        // Match the preview's rendering so copied rich text breaks lines the
+        // same way the user sees them.
+        let html = MarkdownHTMLBuilder.document(for: markdown, softBreak: .lineBreak)
         let htmlData = Data(html.utf8)
         guard let attributedString = try? NSAttributedString(
             data: htmlData,
