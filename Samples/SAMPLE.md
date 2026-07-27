@@ -1,11 +1,10 @@
 # Markdown Preview by Syd Polk
-
 Version {{VERSION}} (build {{BUILD}})\
 Copyright ©2026 Syd Polk
 
 Welcome to MarkdownPreview, an application designed to work like Apple's Preview app, but for Markdown files.
-MarkdownPreview has the following features:
 
+MarkdownPreview has the following features:
 - Supports standard Markdown features:
   * Text styling, such as bold and italic
   * Unordered and ordered lists

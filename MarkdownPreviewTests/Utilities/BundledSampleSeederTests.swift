@@ -86,6 +86,24 @@ struct BundledSampleSeederTests {
         #expect(BundledSampleSeeder.headerBlock(of: "") == "")
     }
 
+    @Test func realSampleTemplateKeepsTheVersionInsideItsHeaderBlock() throws {
+        // refresh() only updates the seeded copy when the header block (everything
+        // up to the first blank line) changes with the version/build. That
+        // requires SAMPLE.md's version/build line to sit *inside* the header block
+        // — i.e. no blank line between the title and it. Guard against the file
+        // drifting back to a title-only header, which silently defeats refresh so
+        // a version bump would never update the on-disk copy.
+        let sampleURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // Utilities
+            .deletingLastPathComponent()   // MarkdownPreviewTests
+            .deletingLastPathComponent()   // repo root
+            .appendingPathComponent("Samples/SAMPLE.md")
+        let contents = try String(contentsOf: sampleURL, encoding: .utf8)
+        let header = BundledSampleSeeder.headerBlock(of: contents)
+        #expect(header.contains(BundledSampleSeeder.versionToken))
+        #expect(header.contains(BundledSampleSeeder.buildToken))
+    }
+
     // MARK: - materialize
 
     @Test func materializeWritesSubstitutedSampleAndImage() throws {
