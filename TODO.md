@@ -111,7 +111,7 @@ This document tracks planned work for MarkdownPreviewApp.
     - Leave a clear place for the feedback and support links to land once those exist, rather than shipping dead links.
     - Vet those links against App Review before shipping them. Anything that reads as taking the user outside the app to transact — donations, purchases, subscriptions — is the usual rejection trigger; a plain support or feedback address is not. Keep it to what the app needs.
     - Localization is the real cost here: this is prose in a bundled file, so every supported language needs its own copy kept in sync, which is worse than localizing a string table. Factor that into how long the document is, and see "Internationalization (i18n) and localization (l10n)".
-    - It is still the first rendered markdown a user sees, so keep it to constructs that currently render correctly (see "Bug fixes").
+    - It is still the first rendered markdown a user sees, so keep it to constructs that currently render correctly (see "Bugs").
   - iOS and iPadOS have no About box and nowhere else to put this content, so the document in the list on first launch is the whole mechanism there, not a supplement to something else. The alternatives considered were a bottom sheet on first launch — explicitly not wanted — or doing nothing at all. If the bundled document does not work out, doing nothing is the fallback; do not reach for the sheet.
   - On macOS the same contents also back the About box, from the same file — one source of truth, so the two cannot drift. That work lives with the document-based redesign, which is where the macOS menu structure gets built (see the App menu under "macOS redesign as a document-based app"); the bundled welcome document itself does not wait on it.
   - Consider a Help menu item to reopen the document, so dismissing it is not irreversible.
@@ -176,7 +176,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - Land any future suite complete and runnable even where it exposes bugs. Do not gate landing the tests on fixing what they find, and do not delete or weaken a test to make the suite green.
     - Let the known-failing cases fail the test run (`Cmd-U` / `swift test`). A failing run is the honest signal that the app does not yet behave correctly; do not skip, disable, or wrap them in `withKnownIssue` to get a clean run. The suite goes green when the bugs are fixed, not before. There is no CI yet — if one is added later (see "Get ready for TestFlight"), the same rule applies to it.
     - Updating a test because the intended behavior changed is a different thing and is expected — four expectations were corrected this way while fixing the conformance failures. What is not allowed is softening an assertion to hide a defect.
-    - File each exposed bug as its own entry under "Bug fixes" so the failing test and the bug are linked.
+    - File each exposed bug as its own entry under "Bugs" so the failing test and the bug are linked.
 
 ### Adopt Swift 6 "MainActor by default" concurrency.
   - Move the targets to the Swift 6 language mode and enable Default Actor Isolation = MainActor (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`). Currently on Swift 5 mode with no default actor isolation.
