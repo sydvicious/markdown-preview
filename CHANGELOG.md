@@ -1,3 +1,5 @@
+<!-- Copyright @2026 Syd Polk. All Rights Reserved -->
+
 # Changelog
 
 Format:
