@@ -112,6 +112,10 @@ private struct MarkdownPreviewCommands: Commands {
 @main
 struct MarkdownPreviewApp: App {
     #if os(macOS)
+    /// Narrowest the window may be dragged. The title bar stops giving ground
+    /// here: the search field holds its own floor and the file name truncates.
+    static let minimumWindowWidth: CGFloat = 300
+
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
     @StateObject private var fileOpenState = FileOpenState.shared
@@ -123,6 +127,7 @@ struct MarkdownPreviewApp: App {
             ContentView()
                 .environmentObject(commandCenter)
                 .environmentObject(fileOpenState)
+                .frame(minWidth: Self.minimumWindowWidth)
         }
         .commands {
             MarkdownPreviewCommands(commandCenter: commandCenter)

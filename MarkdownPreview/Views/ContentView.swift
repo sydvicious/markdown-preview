@@ -653,10 +653,27 @@ struct ContentView: View {
         }
     }
 
+    /// Width of the in-document search field when it lives in the title bar.
+    /// The field holds this width no matter how narrow the window gets; the
+    /// file name shown as the window title truncates instead.
+    ///
+    /// On macOS this is effectively the field's fixed width: `AppKit` sizes a
+    /// custom `NSToolbarItem` to its view's fitting width and never stretches
+    /// it, so the `maxWidth: .infinity` below buys nothing there and blank
+    /// title-bar space to the field's left is expected. (Only
+    /// `NSSearchToolbarItem` — what `.searchable` produces — is resizable by the
+    /// toolbar, and adopting it was considered and declined.) The flexible
+    /// width still matters on iPadOS, where the field is a `.principal`
+    /// navigation-bar item and does expand.
+    ///
+    /// A corollary: at large accessibility text sizes the whole search item can
+    /// still be pushed into the toolbar overflow menu and disappear. That is
+    /// accepted rather than worked around.
+    private static let toolbarSearchFieldMinimumWidth: CGFloat = 180
+
     private var detailSearchToolbarItem: some View {
         HStack(spacing: 8) {
             detailSearchField(compact: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
             detailSearchStatusLabel
                 .fixedSize()
             detailSearchNavigationButtons
@@ -692,7 +709,11 @@ struct ContentView: View {
         }
         .padding(.horizontal, compact ? 10 : 12)
         .padding(.vertical, compact ? 6 : 10)
-        .frame(maxWidth: compact ? .infinity : nil, alignment: .leading)
+        .frame(
+            minWidth: compact ? Self.toolbarSearchFieldMinimumWidth : nil,
+            maxWidth: compact ? .infinity : nil,
+            alignment: .leading
+        )
         .background(searchFieldBackground)
         .modifier(CompactControlSize(isCompact: compact))
         .layoutPriority(compact ? 1 : 0)
