@@ -7,6 +7,8 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ## Bugs
 
+- Releases are signed with an **Apple Development** certificate, so Gatekeeper rejects them on any Mac but this one. `Scripts/make-release-dmg.sh` warns about it at build time. Distribution outside the App Store needs a **Developer ID Application** certificate plus notarization (`xcrun notarytool submit`, then `xcrun stapler staple` the app before packaging). Not urgent while the audience is one to three people who can right-click ▸ Open, but it has to be fixed before the app goes to anyone else — and it is a different certificate from the App Store path, so it is worth sorting out alongside the TestFlight work.
+- On iPhone, the console repeats `sandbox_extension_consume failed: 22 (Invalid argument)` over and over. Harmless-looking, but it is once per polling tick, which makes it a per-second event and a sign that something is being retried pointlessly. `EINVAL` from consuming a sandbox extension usually means the extension token is malformed, already consumed, or no longer valid — so the likely source is a security-scoped bookmark being resolved and re-consumed repeatedly rather than held. Start at `startAccessingSecurityScopedResource` in `DocumentSessionStore` (three sites: the modification-date check around line 285, and lines 591 and 616), since the once-a-second document-change poll runs through there; the balancing `stopAccessing…` calls and the iOS note about resolution implicitly starting a scope are also worth re-reading.
 - On Mac, double-clicking a `.md` file in Finder while the app is already running makes the whole window disappear and then reappear with the new file. Expected: the window stays on screen and its contents update in place (or the file opens in a window without tearing down the existing one).
 
 ### Make the image permission prompt harder to miss.
@@ -112,6 +114,12 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Revisit app icon text.
   - Consider changing the icon text from `MD` to `.md` so it more clearly suggests opening markdown files directly.
+
+### Investigate menus.
+  - iPadOS generates a menu bar automatically from the app's commands, and it comes out wrong: there are **two View menus**, plus other problems worth cataloguing once looked at properly.
+  - The duplication is the obvious lead. The app defines a `CommandMenu("View")` in `MarkdownPreviewCommands` (`MarkdownPreview/MarkdownPreviewApp.swift`) for the text-size commands, while iPadOS also synthesizes its own standard View menu — so both appear. The same likely applies to the `Find` and `Search` menus, which may duplicate or displace system equivalents; `Search` in particular exists only to host Escape as Cancel Search, which is not really a menu-worthy command.
+  - Prefer the standard command groups where they exist (`CommandGroupPlacement.textEditing`, `.toolbar`, `.sidebar`, and the built-in Find group) over bespoke `CommandMenu`s, which is what stops iPadOS synthesizing a second copy.
+  - **Open question: can that generated menu bar be made to appear on the Mac?** Worth investigating — the Mac's menus are currently hand-built by the same `Commands` block, so if the platforms can share one definition that renders correctly on both, that is strictly less to maintain. Find out what iPadOS is generating from and whether macOS can be driven the same way.
 
 ### Add list toolbar menu.
   - Add a hamburger menu next to the `+` button.

@@ -10,6 +10,9 @@ Format:
 
 ## 2026-08-22
 
+### 0.8
+
+- Bumped the app marketing version to `0.8` and the build number to `2` (in `Version.xcconfig`) for the 0.8 release.
 - (macOS) Moved addition and removal of documents to a new control cluster at the bottom of the list
 - (macOS/iPadOS) Various resizing bugs fixed
 - (macOS) Search fields no longer take keyboard focus at launch or on app activation
