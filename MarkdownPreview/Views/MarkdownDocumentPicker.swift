@@ -1,5 +1,6 @@
 //
 // Copyright ©2026 Syd Polk. All Rights Reserved.
+// SPDX-License-Identifier: BSD-3-Clause
 //
 
 #if os(iOS)

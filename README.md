@@ -1,3 +1,6 @@
+<!-- Copyright @2026 Syd Polk. All Rights Reserved -->
+<!-- SPDX-License-Identifier: BSD-3-Clause -->
+
 # Markdown Preview
 
 A native SwiftUI Markdown viewer for macOS, iOS, and iPadOS.

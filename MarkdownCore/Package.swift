@@ -1,6 +1,7 @@
 // swift-tools-version: 6.2
 //
 // Copyright ©2026 Syd Polk. All Rights Reserved.
+// SPDX-License-Identifier: BSD-3-Clause
 //
 //  The markdown engine — parser, HTML builder, and supporting types — as a
 //  plain library, so it can be built and tested from the command line with
