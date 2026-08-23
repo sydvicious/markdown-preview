@@ -50,17 +50,11 @@ struct ContentView: View {
             NavigationStack {
                 sidebarPanel
                     .modifier(SidebarTitleInSingleColumn(isActive: usesSingleColumnNavigation))
+                    // On macOS the list's add/remove controls live in a bar
+                    // beneath the list (`sidebarListActionBar`) rather than in
+                    // the window toolbar, so the toolbar cannot evict them.
+                    #if os(iOS)
                     .toolbar {
-                        #if os(macOS)
-                        // Give the file list its own remove control next to the
-                        // list, so removal is discoverable without hunting through
-                        // the detail toolbar or the row context menu. Always
-                        // present (disabled when nothing is selected) so it does
-                        // not pop in and out of the toolbar.
-                        ToolbarItem(placement: .automatic) {
-                            removeFromListButton
-                        }
-                        #else
                         ToolbarItem(placement: openButtonPlacement) {
                             Button {
                                 viewModel.isImporterPresented = true
@@ -75,8 +69,8 @@ struct ContentView: View {
                                 removeFromListButton
                             }
                         }
-                        #endif
                     }
+                    #endif
             }
         } detail: {
             NavigationStack {
@@ -95,15 +89,6 @@ struct ContentView: View {
                             }
                         }
                         ToolbarItemGroup(placement: viewButtonPlacement) {
-                            #if os(macOS)
-                            Button {
-                                viewModel.isImporterPresented = true
-                            } label: {
-                                Image(systemName: "plus")
-                            }
-                            .accessibilityLabel("Open")
-                            .accessibilityIdentifier("Open")
-                            #endif
                             if let selectedDocumentID = store.selectedDocumentID {
                                 Button {
                                     viewModel.decreaseSelectedTextSize()
@@ -338,8 +323,56 @@ struct ContentView: View {
                     #endif
                 }
             }
+
+            #if os(macOS)
+            sidebarListActionBar
+            #endif
         }
     }
+
+    #if os(macOS)
+    /// Add/remove controls for the file list, in the `+`/`−` bar beneath a list
+    /// that the rest of macOS uses (Login Items, Users & Groups, the Finder
+    /// sidebar editor).
+    ///
+    /// These were window toolbar items until the toolbar proved it could take
+    /// them away: below a sidebar width there was no room for both the sidebar
+    /// toggle and the remove button, so AppKit evicted the remove button to the
+    /// detail toolbar's `»` overflow menu — detached from the list it acts on,
+    /// and unreachable once there. Nothing in the sidebar's own content can be
+    /// evicted, so putting them here removes the failure mode rather than
+    /// bounding it.
+    private var sidebarListActionBar: some View {
+        HStack(spacing: 2) {
+            Button {
+                viewModel.isImporterPresented = true
+            } label: {
+                Image(systemName: "plus")
+                    .frame(width: 20, height: 20)
+            }
+            .accessibilityLabel("Open")
+            .accessibilityIdentifier("Open")
+
+            Button {
+                viewModel.removeSelectedDocumentFromList()
+            } label: {
+                Image(systemName: "minus")
+                    .frame(width: 20, height: 20)
+            }
+            .disabled(store.selectedDocumentID == nil)
+            .accessibilityLabel("Remove from List")
+            .accessibilityIdentifier("RemoveFromList")
+
+            Spacer(minLength: 0)
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+    }
+    #endif
 
     private func sidebarDocumentRow(_ document: DocumentSessionStore.OpenedDocument) -> some View {
         HStack {
@@ -546,13 +579,9 @@ struct ContentView: View {
         #endif
     }
 
-    private var openButtonPlacement: ToolbarItemPlacement {
-        #if os(macOS)
-        return .automatic
-        #else
-        return .topBarTrailing
-        #endif
-    }
+    #if os(iOS)
+    private var openButtonPlacement: ToolbarItemPlacement { .topBarTrailing }
+    #endif
 
     private var viewButtonPlacement: ToolbarItemPlacement {
         #if os(macOS)
@@ -570,6 +599,9 @@ struct ContentView: View {
         #endif
     }
 
+    #if os(iOS)
+    /// iOS keeps removal in the navigation bar. macOS puts it in
+    /// `sidebarListActionBar` instead, so this button exists only here.
     private var removeFromListButton: some View {
         Button {
             viewModel.removeSelectedDocumentFromList()
@@ -581,13 +613,8 @@ struct ContentView: View {
         .accessibilityIdentifier("RemoveFromList")
     }
 
-    private var removeButtonPlacement: ToolbarItemPlacement {
-        #if os(macOS)
-        return .automatic
-        #else
-        return .topBarTrailing
-        #endif
-    }
+    private var removeButtonPlacement: ToolbarItemPlacement { .topBarTrailing }
+    #endif
 
     @ViewBuilder
     private var macFirstResponderSinkBackground: some View {
@@ -692,6 +719,25 @@ struct ContentView: View {
     /// divider can still be dragged rightwards and squeeze the pane on its own.
     private static let searchFieldMinimumWidth: CGFloat = 180
 
+    /// Upper bound for the search field's width, which is a flexible `.infinity`
+    /// on iPadOS and unset on macOS.
+    ///
+    /// Asking for `.infinity` inside an `NSToolbarItem` does not merely fail to
+    /// stretch the field — it makes the hosting view report an unbounded fitting
+    /// width, and `NSToolbar` sizes items by fitting width. The toolbar then
+    /// believes the search item needs the entire bar and pushes other items into
+    /// the `»` overflow menu at every window size, including a full-width
+    /// window. Leaving it unset lets the item report the width it actually
+    /// draws. On iPadOS the field is a `.principal` navigation-bar item, where
+    /// the flexible width does apply and is wanted.
+    private static func searchFieldMaximumWidth(compact: Bool) -> CGFloat? {
+        #if os(macOS)
+        return nil
+        #else
+        return compact ? .infinity : nil
+        #endif
+    }
+
     private var detailSearchToolbarItem: some View {
         HStack(spacing: 8) {
             detailSearchField(compact: true)
@@ -700,7 +746,7 @@ struct ContentView: View {
             detailSearchNavigationButtons
                 .fixedSize()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(FillsAvailableWidthOnIOS())
     }
 
     private func detailSearchField(compact: Bool) -> some View {
@@ -732,7 +778,7 @@ struct ContentView: View {
         .padding(.vertical, compact ? 6 : 10)
         .frame(
             minWidth: Self.searchFieldMinimumWidth,
-            maxWidth: compact ? .infinity : nil,
+            maxWidth: Self.searchFieldMaximumWidth(compact: compact),
             alignment: .leading
         )
         .background(searchFieldBackground)
@@ -852,10 +898,14 @@ struct ContentView: View {
         #endif
     }
 
+    #if os(iOS)
+    /// Backs the iOS list's swipe-to-delete. macOS removes through
+    /// `sidebarListActionBar`, the row context menu, or the Delete key.
     private func deleteFilteredDocuments(at offsets: IndexSet) {
         let idsToDelete = offsets.compactMap { viewModel.filteredSortedDocuments[safe: $0]?.id }
         idsToDelete.forEach { viewModel.removeDocumentFromList(id: $0) }
     }
+    #endif
 
     /// Sets the shared search text (used by the search-field bindings and the
     /// suggestion taps) and optionally moves keyboard focus.
@@ -913,6 +963,21 @@ struct ContentView: View {
 /// in-document search still fits in the title bar. macOS only — on iOS that
 /// placement follows the idiom, not the width, so the measurement would be dead
 /// weight.
+/// Lets a navigation-bar item take the width offered to it on iOS. Inert on
+/// macOS, where a toolbar item is sized to what it draws — see
+/// `ContentView.searchFieldMaximumWidth(compact:)` for why asking for more there
+/// is actively harmful.
+private struct FillsAvailableWidthOnIOS: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content
+        #else
+        content.frame(maxWidth: .infinity, alignment: .leading)
+        #endif
+    }
+}
+
 private struct DetailPaneWidthReader: ViewModifier {
     let onWidthChange: (CGFloat) -> Void
 
