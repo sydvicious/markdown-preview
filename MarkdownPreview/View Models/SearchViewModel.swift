@@ -10,6 +10,26 @@ import MarkdownCore
 /// selection bookkeeping that lets an active search take over — and later
 /// restore — the detail selection). Keyboard focus stays in the View, since
 /// `@FocusState` is inherently a View concern in SwiftUI.
+/// Where a change to the shared search text came from, which decides whether it
+/// is published to the macOS system find pasteboard.
+///
+/// This replaced a check on which field held keyboard focus. Focus looked like
+/// the right signal — the rule is "participate in the shared buffer only while a
+/// search field is in use" — but it cannot be observed reliably: the
+/// in-document field lives inside an `NSToolbarItem`, and SwiftUI's
+/// `@FocusState` there can read nil while AppKit still has the text field as
+/// first responder, so the user's own typing never reached the buffer. The
+/// caller always knows what it is doing; asking it is exact.
+enum SearchTextOrigin {
+    /// The user typing in a search field, or picking a suggestion under one.
+    case userInput
+    /// Text lifted from the shared find buffer, which therefore already holds it.
+    case systemFindBuffer
+    /// A programmatic search that deliberately does not take focus, so it is not
+    /// the user saying "this is what I am looking for" to the whole machine.
+    case passive
+}
+
 @MainActor
 final class SearchViewModel: ObservableObject {
     /// The single search string shared by the file-list and in-document search
@@ -19,6 +39,16 @@ final class SearchViewModel: ObservableObject {
     /// Latest non-empty rendered-preview selection text, published from the
     /// preview web view so selection-driven find can use it.
     @Published var previewSelectedText: String?
+    /// Which search field currently holds keyboard focus, mirrored from the
+    /// View's `@FocusState`.
+    ///
+    /// This scopes the app's participation in the macOS system find pasteboard:
+    /// the shared buffer is read and written only while one of the fields is
+    /// focused. Reading it unfocused meant every activation inherited whatever
+    /// another app had searched for; writing it unfocused meant the app pushed
+    /// its own term back out. Between the two the app fought every other app on
+    /// the system over a buffer it was not currently using.
+    @Published var focusedField: SearchField?
 
     private let store: DocumentSessionStore
     private var didApplyDetailSearchSelection = false
@@ -91,9 +121,9 @@ final class SearchViewModel: ObservableObject {
 
     // MARK: - Mutating the search
 
-    func setSearchText(_ query: String) {
+    func setSearchText(_ query: String, origin: SearchTextOrigin = .userInput) {
         searchText = query
-        updateFindPasteboard(for: query)
+        updateFindPasteboard(for: query, origin: origin)
         scheduleDetailSearchUpdate(for: query)
     }
 
@@ -126,7 +156,8 @@ final class SearchViewModel: ObservableObject {
         updateDetailSearch(for: query)
     }
 
-    private func updateFindPasteboard(for query: String) {
+    private func updateFindPasteboard(for query: String, origin: SearchTextOrigin) {
+        guard origin == .userInput else { return }
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         #if os(macOS)
         // Writing the macOS system find pasteboard is a synchronous XPC round trip
@@ -157,7 +188,7 @@ final class SearchViewModel: ObservableObject {
         guard trimmedSearchText.isEmpty,
               let existingQuery = SystemFindPasteboard.currentQuery(),
               !existingQuery.isEmpty else { return }
-        setSearchText(existingQuery)
+        setSearchText(existingQuery, origin: .systemFindBuffer)
     }
 
     /// Runs the shared search for text chosen from a selection's "Search"
@@ -167,15 +198,29 @@ final class SearchViewModel: ObservableObject {
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return }
-        setSearchText(normalized)
+        setSearchText(normalized, origin: .passive)
     }
 
     #if os(macOS)
+    /// Records the find pasteboard's change count without adopting from it, so a
+    /// term left on the shared buffer before the app launched is not inherited.
+    /// Called once as the app comes up; adopting happens later, on focus.
+    func establishFindPasteboardBaseline() {
+        lastFindPasteboardChangeCount = SystemFindPasteboard.changeCount()
+    }
+
+    /// Adopts a find term another app has published, if it has changed since we
+    /// last looked.
+    ///
+    /// Called when a search field takes focus — not on activation. Bringing the
+    /// app forward is not a statement that the user wants to search, and
+    /// adopting there meant switching back from Safari silently replaced the
+    /// query and re-filtered the file list.
     func adoptSystemFindQueryIfChanged() {
+        guard focusedField != nil else { return }
+
         let changeCount = SystemFindPasteboard.changeCount()
         guard let lastChangeCount = lastFindPasteboardChangeCount else {
-            // First observation only establishes a baseline; don't inherit a
-            // stale find term from before the app started running.
             lastFindPasteboardChangeCount = changeCount
             return
         }
@@ -185,7 +230,7 @@ final class SearchViewModel: ObservableObject {
         guard let query = SystemFindPasteboard.currentQuery(),
               !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               query != searchText else { return }
-        setSearchText(query)
+        setSearchText(query, origin: .systemFindBuffer)
     }
     #endif
 

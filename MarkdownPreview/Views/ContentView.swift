@@ -194,7 +194,16 @@ struct ContentView: View {
             previewSelectedText = nil
             syncCommandCenter()
         }
-        .onChange(of: focusedSearchField) { _, _ in
+        .onChange(of: focusedSearchField) { _, newValue in
+            search.focusedField = newValue
+            #if os(macOS)
+            // Taking focus is the moment the user opts into the shared find
+            // buffer, so this is where a term another app published gets picked
+            // up — not on activation.
+            if newValue != nil {
+                adoptSystemFindQueryIfChanged()
+            }
+            #endif
             syncCommandCenter()
         }
         // Bridge the View's size class into the view model so its command/focus
@@ -221,7 +230,7 @@ struct ContentView: View {
             clearMacDefaultSearchFocusIfNeeded()
             syncCommandCenter()
             #if os(macOS)
-            adoptSystemFindQueryIfChanged()
+            search.establishFindPasteboardBaseline()
             #else
             if !disableLiveFileMonitoring {
                 store.checkActiveDocumentForChanges(isCompactWidth: usesSingleColumnNavigation)
@@ -233,12 +242,7 @@ struct ContentView: View {
             pendingSearchFocusTask?.cancel()
             commandCenter.reset()
         }
-        #if os(macOS)
-        .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
-            adoptSystemFindQueryIfChanged()
-        }
-        #else
+        #if os(iOS)
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             if !disableLiveFileMonitoring {
@@ -621,7 +625,19 @@ struct ContentView: View {
         #if os(macOS)
         MacFirstResponderSinkView(
             sink: macFirstResponderSink,
-            onDelete: viewModel.removeSelectedDocumentFromList
+            onDelete: viewModel.removeSelectedDocumentFromList,
+            onSearchFieldFocusChange: { field in
+                // AppKit is the source of truth for which search field is
+                // focused; `@FocusState` misses the toolbar-hosted field
+                // entirely (see MacFirstResponderSinkNSView). Do the focus
+                // bookkeeping directly rather than via `focusedSearchField`,
+                // whose onChange may never fire for these transitions.
+                search.focusedField = field
+                if field != nil {
+                    adoptSystemFindQueryIfChanged()
+                }
+                syncCommandCenter()
+            }
         )
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
@@ -656,7 +672,7 @@ struct ContentView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
 
-                TextField("Search files", text: searchBinding)
+                TextField(Self.listSearchFieldPlaceholder, text: searchBinding)
                     .searchFieldTextInputBehavior()
                     .focused($focusedSearchField, equals: .list)
                     .accessibilityIdentifier("ListSearchField")
@@ -677,7 +693,7 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .background(searchFieldBackground)
 
-            if focusedSearchField == .list, !search.listSearchSuggestions.isEmpty {
+            if search.focusedField == .list, !search.listSearchSuggestions.isEmpty {
                 searchSuggestionsRow(search.listSearchSuggestions) { suggestion in
                     setSearchText(suggestion)
                 }
@@ -693,7 +709,7 @@ struct ContentView: View {
                 detailSearchNavigationButtons
             }
 
-            if focusedSearchField == .detail, !search.detailSearchSuggestions.isEmpty {
+            if search.focusedField == .detail, !search.detailSearchSuggestions.isEmpty {
                 searchSuggestionsRow(search.detailSearchSuggestions) { suggestion in
                     setSearchText(suggestion, focus: .detail)
                 }
@@ -717,6 +733,12 @@ struct ContentView: View {
     /// The floor also matters in the detail pane, where the window's minimum
     /// width is what normally keeps the bar wide enough — but the sidebar
     /// divider can still be dragged rightwards and squeeze the pane on its own.
+    /// Placeholder strings for the two search fields. Shared with the AppKit
+    /// responder classifier in `MacFirstResponderSinkNSView`, which identifies a
+    /// focused field by its placeholder — keep them unique.
+    fileprivate static let listSearchFieldPlaceholder = "Search files"
+    fileprivate static let detailSearchFieldPlaceholder = "Search in file"
+
     private static let searchFieldMinimumWidth: CGFloat = 180
 
     /// Upper bound for the search field's width, which is a flexible `.infinity`
@@ -754,7 +776,7 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
 
-            TextField("Search in file", text: searchBinding)
+            TextField(Self.detailSearchFieldPlaceholder, text: searchBinding)
                 .searchFieldTextInputBehavior()
                 .focused($focusedSearchField, equals: .detail)
                 .onSubmit {
@@ -1097,17 +1119,20 @@ private final class MacFirstResponderSink {
 private struct MacFirstResponderSinkView: NSViewRepresentable {
     let sink: MacFirstResponderSink
     var onDelete: () -> Void = {}
+    var onSearchFieldFocusChange: (SearchField?) -> Void = { _ in }
 
     func makeNSView(context: Context) -> MacFirstResponderSinkNSView {
         let view = MacFirstResponderSinkNSView(frame: .zero)
         view.setAccessibilityElement(false)
         view.onDelete = onDelete
+        view.onSearchFieldFocusChange = onSearchFieldFocusChange
         sink.view = view
         return view
     }
 
     func updateNSView(_ nsView: MacFirstResponderSinkNSView, context: Context) {
         nsView.onDelete = onDelete
+        nsView.onSearchFieldFocusChange = onSearchFieldFocusChange
         sink.view = nsView
     }
 }
@@ -1116,6 +1141,69 @@ private final class MacFirstResponderSinkNSView: NSView {
     var onDelete: () -> Void = {}
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { true }
+
+    /// Reports which search field, if any, holds the AppKit first responder.
+    ///
+    /// SwiftUI's `@FocusState` misses focus changes in the toolbar-hosted
+    /// "Search in file" field entirely — verified 2026-08-22: the field's editor
+    /// held first responder while `@FocusState` reported nothing. So focus is
+    /// *read* here, at the AppKit level, and `@FocusState` remains only for
+    /// programmatically *setting* focus (the Find commands).
+    var onSearchFieldFocusChange: (SearchField?) -> Void = { _ in }
+
+    private var firstResponderObservation: NSKeyValueObservation?
+    private var lastReportedField: SearchField?
+    private var hasReportedField = false
+
+    /// A focused `NSTextField`'s first responder is normally the window's
+    /// field editor — an `NSTextView` whose delegate is the field itself. The
+    /// field also holds first responder directly for an instant while its field
+    /// editor is being installed; classify both, so the handoff between fields
+    /// does not report a transient "no field focused".
+    private static func searchField(forResponder responder: NSResponder?) -> SearchField? {
+        let field: NSTextField?
+        if let fieldEditor = responder as? NSTextView {
+            field = fieldEditor.delegate as? NSTextField
+        } else {
+            field = responder as? NSTextField
+        }
+        switch field?.placeholderString {
+        case ContentView.listSearchFieldPlaceholder: return .list
+        case ContentView.detailSearchFieldPlaceholder: return .detail
+        default: return nil
+        }
+    }
+
+    private func reportFirstResponder(_ responder: NSResponder?) {
+        let field = Self.searchField(forResponder: responder)
+        guard !hasReportedField || field != lastReportedField else { return }
+        hasReportedField = true
+        lastReportedField = field
+        onSearchFieldFocusChange(field)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        firstResponderObservation = nil
+        guard let window else { return }
+        // A window becoming key hands focus to its `initialFirstResponder`,
+        // which defaults to the first field in the key-view loop — the file-list
+        // search field. Launching the app, or just switching back to it, then
+        // put the keyboard in the search box instead of leaving it where the
+        // user left it. Pointing the initial responder at this inert sink means
+        // there is nothing to steal focus in the first place.
+        window.initialFirstResponder = self
+
+        // First-responder changes happen on the main thread; the hop through
+        // `DispatchQueue.main.async` coalesces reports that fire mid-event and
+        // keeps the SwiftUI state mutation out of the KVO callback itself.
+        firstResponderObservation = window.observe(\.firstResponder, options: [.initial, .new]) { [weak self] window, _ in
+            let responder = window.firstResponder
+            DispatchQueue.main.async {
+                self?.reportFirstResponder(responder)
+            }
+        }
+    }
 
     override func keyDown(with event: NSEvent) {
         // Focus is parked here after a file is selected, so handle Delete /
