@@ -387,6 +387,42 @@ final class ContentViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Detail search placement
+
+    /// Whether the in-document search UI still fits in the macOS title bar.
+    ///
+    /// When the toolbar runs out of room it pushes the whole search item into
+    /// the `»` overflow menu, where the field is not merely hidden but unusable
+    /// — `NSMenu` cannot host a working text field. So below a width the search
+    /// moves into the detail pane (the same inline bar iPhone uses) rather than
+    /// going into overflow.
+    @Published private(set) var detailSearchFitsInToolbar = true
+
+    /// Detail-pane widths bracketing that move, measured from the real toolbar:
+    /// the search item was still usable at ~584pt and had already been pushed
+    /// into overflow at ~508pt. The gap between the two constants is dead band,
+    /// so dragging the window across the threshold cannot make the field flicker
+    /// back and forth between the title bar and the pane.
+    ///
+    /// These are fixed widths, so they do not track accessibility text sizes; at
+    /// large text the toolbar can still overflow above the dropout width.
+    static let detailSearchToolbarDropoutWidth: CGFloat = 580
+    static let detailSearchToolbarRestoreWidth: CGFloat = 620
+
+    /// Feeds the measured detail-pane width in. Ignores zero/negative widths,
+    /// which SwiftUI reports transiently before the pane has been laid out.
+    func updateDetailSearchPlacement(forDetailPaneWidth width: CGFloat) {
+        guard width > 0 else { return }
+
+        if detailSearchFitsInToolbar {
+            if width < Self.detailSearchToolbarDropoutWidth {
+                detailSearchFitsInToolbar = false
+            }
+        } else if width >= Self.detailSearchToolbarRestoreWidth {
+            detailSearchFitsInToolbar = true
+        }
+    }
+
     // MARK: - File-list filtering
 
     var isListSearchFiltering: Bool {

@@ -112,9 +112,15 @@ private struct MarkdownPreviewCommands: Commands {
 @main
 struct MarkdownPreviewApp: App {
     #if os(macOS)
-    /// Narrowest the window may be dragged. The title bar stops giving ground
-    /// here: the search field holds its own floor and the file name truncates.
-    static let minimumWindowWidth: CGFloat = 300
+    /// Narrowest the window may be dragged, chosen so the in-document search bar
+    /// stays fully laid out at the floor rather than compressing.
+    ///
+    /// At this width the search has already moved out of the title bar and into
+    /// the detail pane (see `ContentViewModel.detailSearchToolbarDropoutWidth`),
+    /// which is the intended look here — the pane gives the field more room than
+    /// the toolbar ever did. Verified against the largest text size this Mac
+    /// offers, so it is a floor for that case too, not just the default size.
+    static let minimumWindowWidth: CGFloat = 550
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif

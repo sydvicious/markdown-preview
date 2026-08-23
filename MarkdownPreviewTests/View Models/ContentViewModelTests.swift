@@ -17,6 +17,78 @@ struct ContentViewModelTests {
         return directory
     }
 
+    @Test func detailSearchStartsInTheToolbar() {
+        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+
+        #expect(viewModel.detailSearchFitsInToolbar)
+    }
+
+    @Test func detailSearchLeavesTheToolbarBelowTheDropoutWidth() {
+        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+
+        viewModel.updateDetailSearchPlacement(
+            forDetailPaneWidth: ContentViewModel.detailSearchToolbarDropoutWidth - 1
+        )
+
+        #expect(viewModel.detailSearchFitsInToolbar == false)
+    }
+
+    @Test func detailSearchStaysInTheToolbarAtTheDropoutWidth() {
+        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+
+        viewModel.updateDetailSearchPlacement(
+            forDetailPaneWidth: ContentViewModel.detailSearchToolbarDropoutWidth
+        )
+
+        #expect(viewModel.detailSearchFitsInToolbar)
+    }
+
+    /// The dead band: once the search has moved into the pane, widths between the
+    /// two thresholds must not move it back, or dragging the window edge across
+    /// the boundary would make the field flicker between title bar and pane.
+    @Test func detailSearchStaysInThePaneInsideTheDeadBand() {
+        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        viewModel.updateDetailSearchPlacement(forDetailPaneWidth: 400)
+
+        let deadBandWidth = (
+            ContentViewModel.detailSearchToolbarDropoutWidth
+                + ContentViewModel.detailSearchToolbarRestoreWidth
+        ) / 2
+        viewModel.updateDetailSearchPlacement(forDetailPaneWidth: deadBandWidth)
+
+        #expect(viewModel.detailSearchFitsInToolbar == false)
+    }
+
+    @Test func detailSearchReturnsToTheToolbarAtTheRestoreWidth() {
+        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        viewModel.updateDetailSearchPlacement(forDetailPaneWidth: 400)
+
+        viewModel.updateDetailSearchPlacement(
+            forDetailPaneWidth: ContentViewModel.detailSearchToolbarRestoreWidth
+        )
+
+        #expect(viewModel.detailSearchFitsInToolbar)
+    }
+
+    /// SwiftUI reports a zero width before the pane is laid out; that must not be
+    /// read as "too narrow" and knock the search out of the toolbar on launch.
+    @Test func detailSearchIgnoresUnlaidOutWidths() {
+        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+
+        viewModel.updateDetailSearchPlacement(forDetailPaneWidth: 0)
+        #expect(viewModel.detailSearchFitsInToolbar)
+
+        viewModel.updateDetailSearchPlacement(forDetailPaneWidth: -100)
+        #expect(viewModel.detailSearchFitsInToolbar)
+    }
+
+    @Test func detailSearchDeadBandIsNotInverted() {
+        #expect(
+            ContentViewModel.detailSearchToolbarRestoreWidth
+                > ContentViewModel.detailSearchToolbarDropoutWidth
+        )
+    }
+
     @Test func handleImportOpensEverySelectedFile() throws {
         let temporaryDirectory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }

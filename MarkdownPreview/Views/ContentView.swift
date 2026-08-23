@@ -49,7 +49,7 @@ struct ContentView: View {
         NavigationSplitView(preferredCompactColumn: $viewModel.preferredCompactColumn) {
             NavigationStack {
                 sidebarPanel
-                    .modifier(SidebarTitleOnIPhone(isActive: usesSingleColumnNavigation))
+                    .modifier(SidebarTitleInSingleColumn(isActive: usesSingleColumnNavigation))
                     .toolbar {
                         #if os(macOS)
                         // Give the file list its own remove control next to the
@@ -81,6 +81,11 @@ struct ContentView: View {
         } detail: {
             NavigationStack {
                 detailPanel
+                    .modifier(
+                        DetailPaneWidthReader { width in
+                            viewModel.updateDetailSearchPlacement(forDetailPaneWidth: width)
+                        }
+                    )
                     .navigationTitle(viewModel.detailNavigationTitle())
                     .modifier(InlineTitleOnIOS())
                     .toolbar {
@@ -509,17 +514,33 @@ struct ContentView: View {
         horizontalSizeClass == .compact
     }
 
+    /// Whether the in-document search lives in the title bar rather than in the
+    /// detail pane. Both platforms answer this by width: on macOS from the
+    /// detail pane's measured width, so a narrow window moves the search into
+    /// the pane instead of letting the toolbar bury it in the `»` overflow menu
+    /// where the field cannot be used at all; on iOS from the size class, so a
+    /// compact window gets the inline bar. iPhone is compact almost always and
+    /// so is unaffected by the switch from an idiom test to a width test.
     private var showsToolbarDetailSearch: Bool {
         #if os(macOS)
-        true
+        viewModel.detailSearchFitsInToolbar
         #else
-        UIDevice.current.userInterfaceIdiom != .phone
+        !isCompactWidth
         #endif
     }
 
+    /// Whether the layout shows one column at a time, so a row tap has to push
+    /// to the detail column and Back has to return to the list.
+    ///
+    /// This follows the horizontal size class alone. It deliberately does not
+    /// test the idiom: `NavigationSplitView` collapses to a single column at
+    /// compact width on iPad too — in a narrow Stage Manager or Split View
+    /// window — and gating this on `.phone` left that case with a file list and
+    /// no way to reach the document, since nothing ever moved the preferred
+    /// column to `.detail`. Compact width is the whole condition.
     private var usesSingleColumnNavigation: Bool {
         #if os(iOS)
-        UIDevice.current.userInterfaceIdiom == .phone && isCompactWidth
+        isCompactWidth
         #else
         false
         #endif
@@ -653,23 +674,23 @@ struct ContentView: View {
         }
     }
 
-    /// Width of the in-document search field when it lives in the title bar.
-    /// The field holds this width no matter how narrow the window gets; the
-    /// file name shown as the window title truncates instead.
+    /// Floor for the in-document search field, in the title bar and in the
+    /// detail pane alike. The field never draws narrower than this; in the title
+    /// bar the file name truncates instead.
     ///
-    /// On macOS this is effectively the field's fixed width: `AppKit` sizes a
-    /// custom `NSToolbarItem` to its view's fitting width and never stretches
-    /// it, so the `maxWidth: .infinity` below buys nothing there and blank
-    /// title-bar space to the field's left is expected. (Only
+    /// In the title bar on macOS this is effectively a fixed width: `AppKit`
+    /// sizes a custom `NSToolbarItem` to its view's fitting width and never
+    /// stretches it, so the `maxWidth: .infinity` below buys nothing there and
+    /// blank title-bar space to the field's left is expected. (Only
     /// `NSSearchToolbarItem` — what `.searchable` produces — is resizable by the
-    /// toolbar, and adopting it was considered and declined.) The flexible
-    /// width still matters on iPadOS, where the field is a `.principal`
-    /// navigation-bar item and does expand.
+    /// toolbar, and adopting it was considered and declined.) The flexible width
+    /// still matters on iPadOS, where the field is a `.principal` navigation-bar
+    /// item and does expand.
     ///
-    /// A corollary: at large accessibility text sizes the whole search item can
-    /// still be pushed into the toolbar overflow menu and disappear. That is
-    /// accepted rather than worked around.
-    private static let toolbarSearchFieldMinimumWidth: CGFloat = 180
+    /// The floor also matters in the detail pane, where the window's minimum
+    /// width is what normally keeps the bar wide enough — but the sidebar
+    /// divider can still be dragged rightwards and squeeze the pane on its own.
+    private static let searchFieldMinimumWidth: CGFloat = 180
 
     private var detailSearchToolbarItem: some View {
         HStack(spacing: 8) {
@@ -710,7 +731,7 @@ struct ContentView: View {
         .padding(.horizontal, compact ? 10 : 12)
         .padding(.vertical, compact ? 6 : 10)
         .frame(
-            minWidth: compact ? Self.toolbarSearchFieldMinimumWidth : nil,
+            minWidth: Self.searchFieldMinimumWidth,
             maxWidth: compact ? .infinity : nil,
             alignment: .leading
         )
@@ -888,6 +909,27 @@ struct ContentView: View {
 
 }
 
+/// Reports the detail pane's width so the view model can decide whether the
+/// in-document search still fits in the title bar. macOS only — on iOS that
+/// placement follows the idiom, not the width, so the measurement would be dead
+/// weight.
+private struct DetailPaneWidthReader: ViewModifier {
+    let onWidthChange: (CGFloat) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            onWidthChange(width)
+        }
+        #else
+        content
+        #endif
+    }
+}
+
 private struct InlineTitleOnIOS: ViewModifier {
     func body(content: Content) -> some View {
         #if os(iOS)
@@ -898,7 +940,7 @@ private struct InlineTitleOnIOS: ViewModifier {
     }
 }
 
-private struct SidebarTitleOnIPhone: ViewModifier {
+private struct SidebarTitleInSingleColumn: ViewModifier {
     let isActive: Bool
 
     @ViewBuilder

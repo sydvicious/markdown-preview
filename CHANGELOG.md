@@ -7,6 +7,11 @@ Format:
 - Where a date spans a release, a `###` subheading names the version the bullets under it belong to.
 - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
 
+## 2026-08-22
+
+- On macOS the in-document search field now keeps a minimum width and drops out of the title bar into the detail pane when the window is too narrow to hold it, instead of being buried in the toolbar overflow menu where it could not be used at all; the file name truncates to make room, and the window has a minimum width.
+- On iPadOS a window narrow enough to collapse the split view now behaves the way iPhone does — tapping a file opens it and Back returns to the list, and the in-document search moves out of the navigation bar into the pane — where before it showed a file list with no way to reach the document, because both behaviors were gated on the iPhone idiom rather than on compact width.
+
 ## 2026-07-26
 
 - Line endings inside a paragraph now render as line breaks in the preview. A newline in the source becomes a `<br>` rather than collapsing to a space, so an address, a sign-off, or any lines meant to stand on their own appear exactly as typed — no trailing spaces or other markup required. Blank-line paragraph breaks are unchanged; only the within-paragraph newline changed meaning. This is GitHub's "hardbreaks" rendering, and it is a deliberate departure from the CommonMark soft-break behavior adopted in 0.6 (where a soft break renders as a newline that the browser collapses to a space).
