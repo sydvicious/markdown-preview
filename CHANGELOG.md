@@ -3,11 +3,6 @@
 
 # Changelog
 
-Format:
-- One top-level entry per date in `YYYY-MM-DD` format.
-- Where a date spans a release, a `###` subheading names the version the bullets under it belong to.
-- Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
-
 ## 2026-08-23
 
 - Set marketing version to 0.9; build number to 3
