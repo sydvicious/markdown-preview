@@ -24,7 +24,6 @@ struct ContentView: View {
     @StateObject private var previewSelectionSynchronizer = PreviewSelectionSynchronizer()
     @FocusState private var focusedSearchField: SearchField?
     #if os(macOS)
-    @State private var macFirstResponderSink = MacFirstResponderSink()
     #endif
 
     init(
@@ -167,14 +166,12 @@ struct ContentView: View {
             viewModel.onDocumentsChanged()
             refreshDetailSearch()
             presentInitialOpenPromptIfNeeded()
-            clearMacDefaultSearchFocusIfNeeded()
             syncCommandCenter()
         }
         .onChange(of: store.selectedDocumentID) { _, _ in
             previewSelectedText = nil
             viewModel.onSelectionChanged()
             refreshDetailSearch()
-            clearMacDefaultSearchFocusIfNeeded()
             syncCommandCenter()
         }
         .onChange(of: store.textSizesByDocumentID) { _, _ in
@@ -227,7 +224,6 @@ struct ContentView: View {
             viewModel.restorePersistedDocumentsIfNeeded(isCompactWidth: usesSingleColumnNavigation)
             refreshDetailSearch()
             presentInitialOpenPromptIfNeeded()
-            clearMacDefaultSearchFocusIfNeeded()
             syncCommandCenter()
             #if os(macOS)
             search.establishFindPasteboardBaseline()
@@ -624,7 +620,6 @@ struct ContentView: View {
     private var macFirstResponderSinkBackground: some View {
         #if os(macOS)
         MacFirstResponderSinkView(
-            sink: macFirstResponderSink,
             onDelete: viewModel.removeSelectedDocumentFromList,
             onSearchFieldFocusChange: { field in
                 // AppKit is the source of truth for which search field is
@@ -864,28 +859,6 @@ struct ContentView: View {
         #endif
     }
 
-    #if os(macOS)
-    private func clearMacDefaultSearchFocusIfNeeded() {
-        guard focusedSearchField == nil, !viewModel.isImporterPresented else { return }
-
-        Task { @MainActor in
-            let delays: [UInt64] = [0, 50_000_000, 150_000_000]
-            for delay in delays {
-                if delay == 0 {
-                    await Task.yield()
-                } else {
-                    try? await Task.sleep(nanoseconds: delay)
-                }
-                guard focusedSearchField == nil, !viewModel.isImporterPresented else { return }
-                focusedSearchField = nil
-                macFirstResponderSink.focus()
-            }
-        }
-    }
-    #else
-    private func clearMacDefaultSearchFocusIfNeeded() {}
-    #endif
-
     private var store: DocumentSessionStore { viewModel.store }
     private var search: SearchViewModel { viewModel.search }
 
@@ -1106,18 +1079,7 @@ private struct CompactControlSize: ViewModifier {
 }
 
 #if os(macOS)
-private final class MacFirstResponderSink {
-    weak var view: NSView?
-
-    func focus() {
-        guard let view else { return }
-        let window = view.window ?? NSApp.keyWindow ?? NSApp.mainWindow
-        window?.makeFirstResponder(view)
-    }
-}
-
 private struct MacFirstResponderSinkView: NSViewRepresentable {
-    let sink: MacFirstResponderSink
     var onDelete: () -> Void = {}
     var onSearchFieldFocusChange: (SearchField?) -> Void = { _ in }
 
@@ -1126,14 +1088,12 @@ private struct MacFirstResponderSinkView: NSViewRepresentable {
         view.setAccessibilityElement(false)
         view.onDelete = onDelete
         view.onSearchFieldFocusChange = onSearchFieldFocusChange
-        sink.view = view
         return view
     }
 
     func updateNSView(_ nsView: MacFirstResponderSinkNSView, context: Context) {
         nsView.onDelete = onDelete
         nsView.onSearchFieldFocusChange = onSearchFieldFocusChange
-        sink.view = nsView
     }
 }
 

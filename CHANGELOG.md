@@ -12,6 +12,7 @@ Format:
 - (macOS) Moved addition and removal of documents to a new control cluster at the bottom of the list
 - (macOS/iPadOS) Various resizing bugs fixed
 - (macOS) Search fields no longer take keyboard focus at launch or on app activation, and they share the system find pasteboard only while a search field is in use
+- Clearing a selection now reaches the preview, so a search match stops being highlighted once it no longer matches
 
 ## 2026-07-26
 

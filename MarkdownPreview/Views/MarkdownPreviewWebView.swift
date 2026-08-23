@@ -120,7 +120,10 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         (webView as? MarkdownCopyWebView)?.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
             coordinator?.onSearchSelection(text)
         }
-        let didReceivePreviewOriginatedSelection = context.coordinator.previewOriginatedSelectedRange == selectedRange
+        let didReceivePreviewOriginatedSelection = PreviewSelectionBridge.isEcho(
+            ofPreviewOriginated: context.coordinator.previewOriginatedSelectedRange,
+            incoming: selectedRange
+        )
         if didReceivePreviewOriginatedSelection {
             context.coordinator.previewOriginatedSelectedRange = nil
         }
@@ -243,7 +246,10 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         (webView as? MarkdownCopyWebView)?.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
             coordinator?.onSearchSelection(text)
         }
-        let didReceivePreviewOriginatedSelection = context.coordinator.previewOriginatedSelectedRange == selectedRange
+        let didReceivePreviewOriginatedSelection = PreviewSelectionBridge.isEcho(
+            ofPreviewOriginated: context.coordinator.previewOriginatedSelectedRange,
+            incoming: selectedRange
+        )
         if didReceivePreviewOriginatedSelection {
             context.coordinator.previewOriginatedSelectedRange = nil
         }
@@ -590,6 +596,22 @@ struct PreviewSelectionChangedMessage {
 }
 
 enum PreviewSelectionBridge {
+    /// Whether an incoming selection is the echo of one the preview itself just
+    /// reported, and so should not be pushed back into the web view.
+    ///
+    /// The stored range must actually exist for this to be an echo. Comparing
+    /// the two optionals directly made `nil == nil` report "echo", so every
+    /// transition to *no selection* was suppressed and the web view kept its old
+    /// highlight — visible when a search match stopped matching as the user
+    /// typed another character, and the stale match stayed highlighted.
+    static func isEcho(
+        ofPreviewOriginated previewOriginatedRange: MarkdownSelectionRange?,
+        incoming selectedRange: MarkdownSelectionRange?
+    ) -> Bool {
+        guard let previewOriginatedRange else { return false }
+        return previewOriginatedRange == selectedRange
+    }
+
     static func sourceRanges(fromDisplayRangeResult result: Any?, source: String) -> [MarkdownSelectionRange] {
         let displayRanges = displayRanges(from: result)
         guard !displayRanges.isEmpty else { return [] }

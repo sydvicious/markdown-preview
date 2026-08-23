@@ -9,6 +9,41 @@ import MarkdownCore
 
 struct MarkdownPreviewWebViewTests {
 
+    /// The regression this guards: with nothing selected in the preview and
+    /// nothing incoming, comparing the optionals directly reported an echo, so
+    /// clearing the selection never reached the web view and a stale search
+    /// highlight stayed on screen.
+    @Test func noSelectionIsNotMistakenForAPreviewEcho() {
+        #expect(
+            PreviewSelectionBridge.isEcho(ofPreviewOriginated: nil, incoming: nil) == false
+        )
+    }
+
+    @Test func clearingASelectionIsNotAPreviewEcho() {
+        let previewOriginated = MarkdownSelectionRange(location: 4, length: 8)
+
+        #expect(
+            PreviewSelectionBridge.isEcho(ofPreviewOriginated: previewOriginated, incoming: nil) == false
+        )
+    }
+
+    @Test func aMatchingPreviewOriginatedSelectionIsAnEcho() {
+        let range = MarkdownSelectionRange(location: 4, length: 8)
+
+        #expect(
+            PreviewSelectionBridge.isEcho(ofPreviewOriginated: range, incoming: range)
+        )
+    }
+
+    @Test func aDifferentSelectionIsNotAPreviewEcho() {
+        #expect(
+            PreviewSelectionBridge.isEcho(
+                ofPreviewOriginated: MarkdownSelectionRange(location: 4, length: 8),
+                incoming: MarkdownSelectionRange(location: 9, length: 2)
+            ) == false
+        )
+    }
+
     @Test func previewSelectionBridgeParsesOnlyValidDisplayRangePayloads() async throws {
         let payload: [[String: Any]] = [
             [
