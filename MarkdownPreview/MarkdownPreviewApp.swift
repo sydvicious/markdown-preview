@@ -124,7 +124,12 @@ struct MarkdownPreviewApp: App {
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
-    @StateObject private var fileOpenState = FileOpenState.shared
+    /// Held without observation on purpose. This is the process-wide singleton,
+    /// so its lifetime needs no help from `@StateObject` — and observing it here
+    /// would invalidate the `Scene` body every time a file is opened, since
+    /// `enqueue` publishes twice. `ContentView` observes it through
+    /// `@EnvironmentObject`, which is where the change actually needs to land.
+    private let fileOpenState = FileOpenState.shared
     @StateObject private var commandCenter = MarkdownAppCommandCenter()
 
     var body: some Scene {
