@@ -202,29 +202,20 @@ final class SearchViewModel: ObservableObject {
     }
 
     #if os(macOS)
-    /// Records the find pasteboard's change count without adopting from it, so a
-    /// term left on the shared buffer before the app launched is not inherited.
-    /// Called once as the app comes up; adopting happens later, on focus.
-    func establishFindPasteboardBaseline() {
-        lastFindPasteboardChangeCount = SystemFindPasteboard.changeCount()
-    }
-
     /// Adopts a find term another app has published, if it has changed since we
     /// last looked.
     ///
     /// Called when a search field takes focus — not on activation. Bringing the
     /// app forward is not a statement that the user wants to search, and
     /// adopting there meant switching back from Safari silently replaced the
-    /// query and re-filtered the file list.
+    /// query and re-filtered the file list. Clicking into a search field *is*
+    /// that statement, which is why the first click adopts whatever is on the
+    /// buffer, including a term that predates this launch.
     func adoptSystemFindQueryIfChanged() {
         guard focusedField != nil else { return }
 
         let changeCount = SystemFindPasteboard.changeCount()
-        guard let lastChangeCount = lastFindPasteboardChangeCount else {
-            lastFindPasteboardChangeCount = changeCount
-            return
-        }
-        guard changeCount != lastChangeCount else { return }
+        guard changeCount != lastFindPasteboardChangeCount else { return }
         lastFindPasteboardChangeCount = changeCount
 
         guard let query = SystemFindPasteboard.currentQuery(),

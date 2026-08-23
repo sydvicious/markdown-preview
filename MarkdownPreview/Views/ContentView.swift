@@ -23,8 +23,6 @@ struct ContentView: View {
     @StateObject private var viewModel: ContentViewModel
     @StateObject private var previewSelectionSynchronizer = PreviewSelectionSynchronizer()
     @FocusState private var focusedSearchField: SearchField?
-    #if os(macOS)
-    #endif
 
     init(
         previewFiles: [MarkdownFile] = [],
@@ -225,9 +223,7 @@ struct ContentView: View {
             refreshDetailSearch()
             presentInitialOpenPromptIfNeeded()
             syncCommandCenter()
-            #if os(macOS)
-            search.establishFindPasteboardBaseline()
-            #else
+            #if os(iOS)
             if !disableLiveFileMonitoring {
                 store.checkActiveDocumentForChanges(isCompactWidth: usesSingleColumnNavigation)
                 store.checkAllDocumentsForChanges(isCompactWidth: usesSingleColumnNavigation)

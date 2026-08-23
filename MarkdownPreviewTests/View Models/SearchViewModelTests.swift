@@ -17,7 +17,6 @@ struct SearchViewModelTests {
         return DocumentSessionStore(previewFiles: markdownFiles, disablePersistenceRestore: true)
     }
 
-
     @Test func inDocumentSearchSelectsFirstMatchAndCountsAll() throws {
         let store = makeStore([("doc.md", "alpha beta alpha")])
         let id = try #require(store.selectedDocumentID)
@@ -197,7 +196,6 @@ struct SearchViewModelFindPasteboardTests {
     @Test func findQueryIsNotAdoptedWhileNoFieldIsFocused() {
         let store = makeStore([("doc.md", "alpha beta")])
         let viewModel = SearchViewModel(store: store)
-        viewModel.establishFindPasteboardBaseline()
 
         withFindPasteboard("beta") {
             viewModel.adoptSystemFindQueryIfChanged()
@@ -209,7 +207,6 @@ struct SearchViewModelFindPasteboardTests {
     @Test func findQueryIsAdoptedOnceAFieldIsFocused() {
         let store = makeStore([("doc.md", "alpha beta")])
         let viewModel = SearchViewModel(store: store)
-        viewModel.establishFindPasteboardBaseline()
         viewModel.focusedField = .list
 
         withFindPasteboard("beta") {
@@ -219,19 +216,19 @@ struct SearchViewModelFindPasteboardTests {
         #expect(viewModel.searchText == "beta")
     }
 
-    /// A term already on the shared buffer when the app launched is not the
-    /// user's request either, so the baseline swallows the first observation.
-    @Test func findQueryPresentBeforeLaunchIsNotAdopted() {
+    /// Clicking into a search field is the user asking to search, so the first
+    /// click adopts whatever is on the buffer — including a term published
+    /// before this launch, which an earlier baseline used to swallow.
+    @Test func findQueryPresentBeforeLaunchIsAdoptedOnFirstFocus() {
         let store = makeStore([("doc.md", "alpha beta")])
         let viewModel = SearchViewModel(store: store)
         viewModel.focusedField = .list
 
         withFindPasteboard("beta") {
-            viewModel.establishFindPasteboardBaseline()
             viewModel.adoptSystemFindQueryIfChanged()
         }
 
-        #expect(viewModel.searchText == "")
+        #expect(viewModel.searchText == "beta")
     }
 
     /// The write path, which the read path's tests do not cover: typing in a
@@ -279,7 +276,6 @@ struct SearchViewModelFindPasteboardTests {
         let previous = SystemFindPasteboard.currentQuery()
         defer { if let previous { SystemFindPasteboard.setQuery(previous) } }
 
-        viewModel.establishFindPasteboardBaseline()
         viewModel.focusedField = .list
         SystemFindPasteboard.setQuery("beta")
         let changeCountAfterSeeding = SystemFindPasteboard.changeCount()
