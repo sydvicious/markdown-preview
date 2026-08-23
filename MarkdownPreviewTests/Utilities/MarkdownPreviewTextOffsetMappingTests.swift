@@ -74,7 +74,12 @@ struct MarkdownPreviewTextOffsetMappingTests {
         """
         let mapping = MarkdownPreviewTextOffsetMapping(sourceText: source)
 
-        #expect(mapping.displayText == "Quote linesecond line\nNameCountapples12\nlet value = 42\nnext line")
+        // The quote's line break is a soft break and renders as one, so it is a
+        // newline here too. This expectation previously pinned the concatenated
+        // form, which is how the mismatch with the rendered document survived —
+        // see `WebKitTextNodeAlignmentTests`, which asks WebKit rather than
+        // asserting what we assume.
+        #expect(mapping.displayText == "Quote line\nsecond line\nNameCountapples12\nlet value = 42\nnext line")
     }
 
     @Test func markdownPreviewTextOffsetMappingHandlesSetextHeadingsAndChecklistSyntax() async throws {

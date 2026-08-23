@@ -160,12 +160,32 @@ final class MarkdownDisplayBuilder {
     }
 
     private func appendBlockquote(_ block: MarkdownBlock) {
+        // A line ending inside a quote is a soft break, exactly as in a
+        // paragraph, and the preview renders it as one. Without a separator the
+        // lines ran together here while the rendered document had a newline
+        // between them, so every offset past a quote's first line was short by
+        // one and a search match highlighted the wrong text.
+        var previousContentEnd: Int?
         for lineNumber in block.lineRange {
             guard let lineRange = lineTable.range(forLine: lineNumber),
                   let contentRange = blockquoteContentRange(in: lineRange) else {
                 continue
             }
-            appendInline(from: trimmedRange(contentRange, trimming: .whitespaces))
+            let trimmed = trimmedRange(contentRange, trimming: .whitespaces)
+            guard trimmed.length > 0 else { continue }
+
+            if let previousContentEnd {
+                let gapLength = max(0, trimmed.location - previousContentEnd)
+                appendMappedLiteral(
+                    "\n",
+                    sourceRange: MarkdownSelectionRange(
+                        location: previousContentEnd,
+                        length: gapLength
+                    )
+                )
+            }
+            appendInline(from: trimmed)
+            previousContentEnd = trimmed.location + trimmed.length
         }
     }
 

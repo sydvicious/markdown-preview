@@ -4,6 +4,7 @@
 
 import SwiftUI
 import WebKit
+import os
 import MarkdownCore
 #if os(iOS)
 import UIKit
@@ -183,6 +184,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             self.webView?.applySelection(lastSelectedRange)
+            self.webView?.takeFirstResponderIfUnclaimed()
         }
     }
 
@@ -260,6 +262,9 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             webView.loadHTMLString(html, baseURL: baseURL)
         } else if shouldApplySelection && !didReceivePreviewOriginatedSelection {
             (webView as? MarkdownCopyWebView)?.applySelection(selectedRange)
+            if selectedRange != nil {
+                (webView as? MarkdownCopyWebView)?.takeFirstResponderIfUnclaimed()
+            }
         }
     }
 
@@ -292,12 +297,36 @@ document.addEventListener('click', (event) => {
     return;
   }
 
+  const kind = block.getAttribute('data-copy-kind');
+
   window.getSelection()?.removeAllRanges();
-  window.webkit?.messageHandlers?.copyBlock?.postMessage({ start, end });
+  window.webkit?.messageHandlers?.copyBlock?.postMessage({ start, end, kind });
 }, { capture: true });
 """
 
-private let previewSelectionChangeScript = """
+private let previewSelectedHTMLScript = """
+(() => {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return null;
+  }
+
+  // The Copy button's own markup would come along with the text, so drop it.
+  const container = document.createElement('div');
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    container.appendChild(selection.getRangeAt(index).cloneContents());
+  }
+  container.querySelectorAll('[data-copy-button]').forEach((button) => button.remove());
+
+  const html = container.innerHTML;
+  return html && html.trim().length > 0 ? html : null;
+})();
+"""
+
+/// Installed as a user script; also loaded directly by
+/// `WebKitTextNodeAlignmentTests`, which checks WebKit's own text nodes against
+/// the source-side offset mapping — hence internal rather than private.
+let previewSelectionChangeScript = """
 (() => {
   let pendingSelectionUpdate = null;
   let lastNonEmptySelectionSnapshot = null;
@@ -493,52 +522,56 @@ private let previewSelectedDisplayRangesScript = """
 """
 
 private let previewSelectionScript = """
-((blockStart, blockEnd, displayLocation, displayLength) => {
+((startBlockStart, startBlockEnd, startOffset, endBlockStart, endBlockEnd, endOffset) => {
   const selection = window.getSelection();
   if (selection) {
     selection.removeAllRanges();
   }
 
-  if (
-    !Number.isFinite(blockStart) ||
-    !Number.isFinite(blockEnd) ||
-    !Number.isFinite(displayLocation) ||
-    !Number.isFinite(displayLength) ||
-    displayLocation < 0 ||
-    displayLength <= 0
-  ) {
+  const args = [startBlockStart, startBlockEnd, startOffset, endBlockStart, endBlockEnd, endOffset];
+  if (!args.every((value) => Number.isFinite(value))) {
     return false;
   }
 
-  const block = document.querySelector(
-    `[data-source-start="${blockStart}"][data-source-end="${blockEnd}"]`
-  );
-  if (!block) {
-    return false;
-  }
+  // Finds the text node and offset within it for a position in one block's
+  // rendered text. `isEnd` decides which side a boundary between two nodes
+  // belongs to, so a range ending exactly where a node ends stays inside it.
+  const locate = (blockStart, blockEnd, offset, isEnd) => {
+    const block = document.querySelector(
+      `[data-source-start="${blockStart}"][data-source-end="${blockEnd}"]`
+    );
+    if (!block) {
+      return null;
+    }
 
-  const textNodes = window.markdownPreview?.acceptedTextNodesInBlock?.(block) ?? [];
-  const combinedTextLength = textNodes.reduce((length, entry) => Math.max(length, entry.end), 0);
+    const textNodes = window.markdownPreview?.acceptedTextNodesInBlock?.(block) ?? [];
+    const combinedTextLength = textNodes.reduce((length, entry) => Math.max(length, entry.end), 0);
+    if (combinedTextLength === 0 || offset < 0 || offset > combinedTextLength) {
+      return null;
+    }
 
-  if (combinedTextLength === 0) {
-    return false;
-  }
+    const entry = isEnd
+      ? textNodes.find((candidate) => offset > candidate.start && offset <= candidate.end)
+      : textNodes.find((candidate) => offset >= candidate.start && offset < candidate.end);
+    if (!entry) {
+      return null;
+    }
 
-  const startOffset = displayLocation;
-  const endOffset = displayLocation + displayLength;
-  if (startOffset < 0 || endOffset > combinedTextLength || endOffset <= startOffset) {
-    return false;
-  }
+    return { node: entry.node, offset: offset - entry.start };
+  };
 
-  const startEntry = textNodes.find((entry) => startOffset >= entry.start && startOffset < entry.end);
-  const endEntry = textNodes.find((entry) => endOffset > entry.start && endOffset <= entry.end);
-  if (!startEntry || !endEntry) {
+  const start = locate(startBlockStart, startBlockEnd, startOffset, false);
+  const end = locate(endBlockStart, endBlockEnd, endOffset, true);
+  if (!start || !end) {
     return false;
   }
 
   const range = document.createRange();
-  range.setStart(startEntry.node, startOffset - startEntry.start);
-  range.setEnd(endEntry.node, endOffset - endEntry.start);
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  if (range.collapsed) {
+    return false;
+  }
   selection?.addRange(range);
 
   const boundingRect = range.getBoundingClientRect();
@@ -561,10 +594,15 @@ struct PreviewDisplaySelectionRange: Equatable {
 struct PreviewCopyBlockMessage: Equatable {
     var start: Int
     var end: Int
+    /// What kind of block the range covers, so the handler can strip syntax that
+    /// is decoration rather than content. Nil when the page predates the
+    /// attribute or the value is unrecognized; the raw source is copied then.
+    var kind: MarkdownCopyableBlockKind?
 
-    init(start: Int, end: Int) {
+    init(start: Int, end: Int, kind: MarkdownCopyableBlockKind? = nil) {
         self.start = start
         self.end = end
+        self.kind = kind
     }
 
     init?(messageBody: Any) {
@@ -580,6 +618,7 @@ struct PreviewCopyBlockMessage: Equatable {
 
         self.start = startValue
         self.end = endValue
+        self.kind = (payload["kind"] as? String).flatMap(MarkdownCopyableBlockKind.init(rawValue:))
     }
 }
 
@@ -596,6 +635,37 @@ struct PreviewSelectionChangedMessage {
 }
 
 enum PreviewSelectionBridge {
+    /// The preview's current selection as a single source range, or none.
+    ///
+    /// A selection is a source text offset and a length — one contiguous span
+    /// that both views know how to render. The preview reports its DOM selection
+    /// as one range per visible run of text, which is a rendering detail, so it
+    /// is collapsed here rather than leaking into the selection model.
+    static func contiguousSelectionRanges(
+        fromDisplayRangeResult result: Any?,
+        source: String
+    ) -> [MarkdownSelectionRange] {
+        enclosingRange(of: sourceRanges(fromDisplayRangeResult: result, source: source))
+            .map { [$0] } ?? []
+    }
+
+    /// The single source range spanning `ranges`, from the earliest start to the
+    /// latest end.
+    ///
+    /// A DOM selection is contiguous, but it maps back to one source range per
+    /// visible run of text — the markdown syntax between them falls in the gaps.
+    /// Stitching those pieces together produced plain text with every `#`, link
+    /// target and blank line missing. Spanning them instead yields the raw
+    /// markdown the user actually swept over.
+    static func enclosingRange(of ranges: [MarkdownSelectionRange]) -> MarkdownSelectionRange? {
+        guard let start = ranges.map(\.location).min(),
+              let end = ranges.map({ $0.location + $0.length }).max(),
+              end > start else {
+            return nil
+        }
+        return MarkdownSelectionRange(location: start, length: end - start)
+    }
+
     /// Whether an incoming selection is the echo of one the preview itself just
     /// reported, and so should not be pushed back into the web view.
     ///
@@ -717,7 +787,28 @@ private final class MarkdownCopyWebView: WKWebView {
     var currentSelectionText: String?
     var searchSelectionHandler: ((String) -> Void)?
 
+    /// Puts the keyboard in the document when nothing has a better claim on it.
+    ///
+    /// The mirror of the same method on the source view, and needed for the same
+    /// two reasons: an unfocused web view draws no selection, so a selection
+    /// carried over from the source view would be invisible, and Edit ▸ Copy
+    /// would have no target.
+    ///
+    /// A focused text field owns the window's field editor, itself an
+    /// `NSTextView`, so seeing one means the user is deliberately typing in a
+    /// search field and focus is left alone.
+    func takeFirstResponderIfUnclaimed() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            guard !(window.firstResponder is NSTextView) else { return }
+            window.makeFirstResponder(self)
+        }
+    }
+
     @objc func copy(_ sender: Any?) {
+        Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "PrevCopy").info(
+            "PREVCOPY copy(_:) reached the web view"
+        )
         copySelectionToPasteboard {}
     }
 
@@ -747,26 +838,63 @@ private extension MarkdownCopyWebView {
         evaluateJavaScript(payload)
     }
 
-    func writeBlockRangeToPasteboard(start: Int, end: Int) {
+    func writeBlockRangeToPasteboard(start: Int, end: Int, kind: MarkdownCopyableBlockKind?) {
         guard end > start else { return }
-        _ = MarkdownSelectionClipboard.writeSelection(
-            from: markdownSource,
-            ranges: [MarkdownSelectionRange(location: start, length: end - start)]
+        let ranges = [MarkdownSelectionRange(location: start, length: end - start)]
+
+        guard !MarkdownBlockCopyText.offersRichText(for: kind) else {
+            // Tables (and anything unrecognized) keep the existing behavior:
+            // raw source, in both plain and rich flavors.
+            _ = MarkdownSelectionClipboard.writeSelection(from: markdownSource, ranges: ranges)
+            return
+        }
+
+        // Quotes and code: the syntax is decoration, so hand over the text
+        // itself as plain text only. Selecting the block by hand and copying is
+        // a different path and still yields the raw source, markers and all.
+        guard let blockSource = MarkdownSelectionClipboard.selectedMarkdown(
+            in: markdownSource,
+            ranges: ranges
+        ) else { return }
+        _ = MarkdownSelectionClipboard.writePlainText(
+            MarkdownBlockCopyText.copyText(fromBlockSource: blockSource, kind: kind)
         )
     }
 
     func copySelectionToPasteboard(fallback: @escaping () -> Void) {
         let source = markdownSource
-        evaluateJavaScript(previewSelectedDisplayRangesScript) { result, _ in
-            let selectionRanges = PreviewSelectionBridge.sourceRanges(fromDisplayRangeResult: result, source: source)
+        let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "PrevCopy")
+        evaluateJavaScript(previewSelectedDisplayRangesScript) { [weak self] result, _ in
+            guard let self else {
+                fallback()
+                return
+            }
+            let selectionRanges = PreviewSelectionBridge.contiguousSelectionRanges(
+                fromDisplayRangeResult: result,
+                source: source
+            )
+            log.info("PREVCOPY ranges=\(selectionRanges.count, privacy: .public)")
             guard !selectionRanges.isEmpty else {
+                log.info("PREVCOPY falling back: no ranges")
                 fallback()
                 return
             }
 
-            guard MarkdownSelectionClipboard.writeSelection(from: source, ranges: selectionRanges) else {
-                fallback()
-                return
+            self.evaluateJavaScript(previewSelectedHTMLScript) { htmlResult, _ in
+                let selectionHTML = htmlResult as? String
+                // Plain text is the raw markdown under the selection; rich text
+                // is the rendered HTML the user can see.
+                log.info("PREVCOPY selectionHTML=\(selectionHTML?.count ?? -1, privacy: .public) chars")
+                guard MarkdownSelectionClipboard.writeSelection(
+                    from: source,
+                    ranges: selectionRanges,
+                    richTextHTML: selectionHTML
+                ) else {
+                    log.info("PREVCOPY falling back: write failed")
+                    fallback()
+                    return
+                }
+                log.info("PREVCOPY wrote markdown and rich text")
             }
         }
     }
@@ -775,7 +903,7 @@ private extension MarkdownCopyWebView {
         let source = markdownSource
         evaluateJavaScript(previewSelectionSnapshotScript) { result, _ in
             let payload = PreviewSelectionChangedMessage(messageBody: result as Any)
-            let selectionRanges = PreviewSelectionBridge.sourceRanges(
+            let selectionRanges = PreviewSelectionBridge.contiguousSelectionRanges(
                 fromDisplayRangeResult: payload.displayRangeResult,
                 source: source
             )
@@ -783,19 +911,29 @@ private extension MarkdownCopyWebView {
         }
     }
 
+    /// Logs at `.info`, which never reaches the unified log but does show in
+    /// Xcode's console — cheap to leave in, and the next person debugging a
+    /// selection that does not appear gets the reflection's decision for free.
     static func selectionInvocation(source: String, selectedRange: MarkdownSelectionRange?) -> String {
         guard let reflectedSelection = PreviewSelectionReflection.reflectedSelection(
             in: source,
             selectedRange: selectedRange
         ) else {
-            return previewSelectionScript + "null, null, null, null)"
+            Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "PrevSel").info(
+                "PREVSEL reflection FAILED for \(String(describing: selectedRange), privacy: .public)"
+            )
+            return previewSelectionScript + "null, null, null, null, null, null)"
         }
 
+        let start = reflectedSelection.start
+        let end = reflectedSelection.end
+        Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "PrevSel").info(
+            "PREVSEL reflection ok start=\(start.blockStart, privacy: .public)-\(start.blockEnd, privacy: .public)+\(start.displayOffset, privacy: .public) end=\(end.blockStart, privacy: .public)-\(end.blockEnd, privacy: .public)+\(end.displayOffset, privacy: .public)"
+        )
+
         return previewSelectionScript +
-            "\(reflectedSelection.blockStart), " +
-            "\(reflectedSelection.blockEnd), " +
-            "\(reflectedSelection.displayRange.location), " +
-            "\(reflectedSelection.displayRange.length))"
+            "\(start.blockStart), \(start.blockEnd), \(start.displayOffset), " +
+            "\(end.blockStart), \(end.blockEnd), \(end.displayOffset))"
     }
 }
 
@@ -835,12 +973,15 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
         switch message.name {
         case copyBlockMessageHandlerName:
             guard let payload = PreviewCopyBlockMessage(messageBody: message.body) else { return }
-            webView?.writeBlockRangeToPasteboard(start: payload.start, end: payload.end)
+            webView?.writeBlockRangeToPasteboard(start: payload.start, end: payload.end, kind: payload.kind)
         case previewSelectionChangedMessageHandlerName:
             let payload = PreviewSelectionChangedMessage(messageBody: message.body)
             webView?.currentSelectionText = payload.selectedText
             let selectionRanges = webView.map {
-                PreviewSelectionBridge.sourceRanges(fromDisplayRangeResult: payload.displayRangeResult, source: $0.markdownSource)
+                PreviewSelectionBridge.contiguousSelectionRanges(
+                    fromDisplayRangeResult: payload.displayRangeResult,
+                    source: $0.markdownSource
+                )
             } ?? []
             if !selectionRanges.isEmpty {
                 lastPreviewSelectionRanges = selectionRanges

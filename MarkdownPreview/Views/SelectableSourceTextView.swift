@@ -171,6 +171,24 @@ struct SelectableSourceTextView: UIViewRepresentable {
 import AppKit
 
 private final class MarkdownCopyTextView: NSTextView {
+    /// Puts the keyboard in the document when nothing has a better claim on it.
+    ///
+    /// Without this, showing the source view leaves first responder on the
+    /// app's inert focus sink, so Edit ▸ Copy has no target and ⌘C just beeps
+    /// even with text selected — including a selection the search put there,
+    /// which the user never clicked to create.
+    ///
+    /// A focused text field owns the window's field editor, itself an
+    /// `NSTextView`, so seeing one means the user is typing somewhere on
+    /// purpose — a search field — and focus is left alone.
+    func takeFirstResponderIfUnclaimed() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            guard !(window.firstResponder is NSTextView) else { return }
+            window.makeFirstResponder(self)
+        }
+    }
+
     override func copy(_ sender: Any?) {
         let ranges = selectedRanges.map(\.rangeValue).map(MarkdownSelectionRange.init)
         let didWriteSelection = MarkdownSelectionClipboard.writeSelection(
@@ -292,6 +310,7 @@ struct SelectableSourceTextView: NSViewRepresentable {
         scrollView.documentView = textView
         applySelection(to: textView, from: selections, coordinator: context.coordinator)
         context.coordinator.isApplyingSelection = false
+        textView.takeFirstResponderIfUnclaimed()
         return scrollView
     }
 

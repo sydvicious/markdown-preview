@@ -6,14 +6,7 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ## Bugs
 
-- On Mac and iPad, search box should have a minimum width, but should fill the title bar otherwise. Mac, of course, has the filename, and it should be full. Priority is full file name, then expand Search Bar.
-- On Mac, the remove-from-list toolbar button lands in a weird place: it ends up at the far trailing edge after the toolbar overflow (`»`) chevron, detached from the file list, and renders with an odd blue highlight. Fix the placement/grouping in the current design — this was previously expected to fall out of the document-based redesign, but that is deferred to a later version and 1.0 ships the file-list UI as it stands, so the button has to be fixed where it is.
-- On Mac, the file-list search field takes focus on launch and on every activation, and syncs with the system find pasteboard whether or not it is focused. Two repros: the app is not frontmost (e.g. working in Safari with text in its search bar), then double-click a `.md` file in Finder — the app comes forward and keyboard focus lands in the search field instead of the document; and simply switching away to another app and back puts focus there every time. Activation is not a focus event and should leave focus exactly where the user left it; the field should take focus only when the user clicks in it. The pasteboard sync has the same scope problem — the field should participate in the shared search buffer only while it has focus, since reading or publishing the system search string unfocused makes the app fight other apps over that buffer.
 - On Mac, double-clicking a `.md` file in Finder while the app is already running makes the whole window disappear and then reappear with the new file. Expected: the window stays on screen and its contents update in place (or the file opens in a window without tearing down the existing one).
-- The Copy button on a block quote includes the enclosing `>` quote markers. The button copies the block's raw source range (`data-source-start`/`data-source-end` on the `md-block` wrapper, handed to the `copyBlock` message handler), so a quote comes back with every line still prefixed by `> `. What the user wants on the pasteboard is the quoted text itself. Check what the right rule is for the other copyable block kinds too — `blockWantsCopyButton` also covers tables and code, where the source form may well be what is wanted.
-
-### Verify find/selection across soft-break line breaks.
-  - Best done at runtime in the app, not as a unit test: the preview's text-offset mappings drive search-result selection by aligning source offsets to rendered-HTML offsets. Soft breaks now emit `<br />` where they used to emit a bare newline. Hard breaks already emitted `<br />` and the mappings handle them, so this should just route more cases through the same path — but confirm find/selection still lands correctly on a multi-line paragraph.
 
 ### Make the image permission prompt harder to miss.
   - The "Allow…" prompt is a `safeAreaInset` bar above the preview (`MarkdownPreview/Views/MarkdownPreviewView.swift`, `imageAccessPrompt`). It was missed entirely during the first sandboxed run on macOS: the document itself renders normally, so the eye goes to the content and the bar reads as chrome. The images looked simply broken, with no visible way to fix them.
@@ -152,6 +145,12 @@ This document tracks planned work for MarkdownPreviewApp.
   - Audit that every icon-only control has an accurate label and the right traits, and that the labels are localized. These are the strings the design deliberately concentrates text into, so they are the ones that most need to be right.
 
 ## Tech Debt
+
+### Move all JavaScript and TypeScript in the project into their own files.
+  - The preview's scripts are Swift string literals today — six of them in `MarkdownPreview/Views/MarkdownPreviewWebView.swift` (copy button, selection change, selected HTML, selection snapshot, selected display ranges, apply selection), plus the stylesheet and page scaffolding in `MarkdownCore`'s `MarkdownHTMLBuilder`. Inside a `"""` literal there is no syntax highlighting, no linting, no formatter, and every backslash and interpolation is a hazard.
+  - Moving them to real `.js` files loaded from the bundle would give them tooling and make diffs readable.
+  - The bigger reason is testability: real files can be **tested in JavaScript**, with a JS test runner and a DOM, rather than only through Swift. Today the only way to exercise this code is to drive a `WKWebView` from a Swift test (`MarkdownPreviewTests/Views/WebKitTextNodeAlignmentTests.swift`), which is slow, needs the app test host, and can only check what the whole page does end to end. Unit tests in JS could cover the walkers and range logic directly — the text-node walker, the cross-block selection builder, the display-range reader — including the edge cases that are painful to reach through a rendered document.
+  - Two things to work out before starting: how a bundled script is read at runtime under the sandbox on both platforms, and whether anything still needs Swift-side interpolation (the apply-selection script is currently built by appending arguments to the literal, which would become a call with parameters instead).
 
 ### Rename and simplify `ContentView.swift`.
   - Consider renaming `ContentView.swift` to a clearer top-level container name.

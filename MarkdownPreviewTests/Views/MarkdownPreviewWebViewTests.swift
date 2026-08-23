@@ -44,6 +44,90 @@ struct MarkdownPreviewWebViewTests {
         )
     }
 
+    /// The preview reports one contiguous selection as several ranges, one per
+    /// visible run. Spanning them is what puts the markdown syntax between those
+    /// runs back into the plain-text clip.
+    @Test func enclosingRangeSpansTheGapsBetweenVisibleRuns() throws {
+        let ranges = [
+            MarkdownSelectionRange(location: 10, length: 5),
+            MarkdownSelectionRange(location: 40, length: 8),
+            MarkdownSelectionRange(location: 22, length: 3)
+        ]
+
+        let enclosing = try #require(PreviewSelectionBridge.enclosingRange(of: ranges))
+
+        #expect(enclosing == MarkdownSelectionRange(location: 10, length: 38))
+    }
+
+    /// A selection is one contiguous source range, whichever view reported it,
+    /// so the preview's per-run ranges collapse before they reach the model.
+    @Test func previewSelectionIsReportedAsOneContiguousRange() {
+        let source = "# Heading\n\nA paragraph with text."
+        let payload: [[String: Any]] = [
+            [
+                "blockStart": NSNumber(value: 0),
+                "blockEnd": NSNumber(value: 9),
+                "displayLocation": NSNumber(value: 0),
+                "displayLength": NSNumber(value: 7)
+            ],
+            [
+                "blockStart": NSNumber(value: 11),
+                "blockEnd": NSNumber(value: source.utf16.count),
+                "displayLocation": NSNumber(value: 0),
+                "displayLength": NSNumber(value: 11)
+            ]
+        ]
+
+        let ranges = PreviewSelectionBridge.contiguousSelectionRanges(
+            fromDisplayRangeResult: payload,
+            source: source
+        )
+
+        #expect(ranges.count == 1)
+    }
+
+    @Test func enclosingRangeOfNothingIsNil() {
+        #expect(PreviewSelectionBridge.enclosingRange(of: []) == nil)
+        #expect(
+            PreviewSelectionBridge.enclosingRange(
+                of: [MarkdownSelectionRange(location: 4, length: 0)]
+            ) == nil
+        )
+    }
+
+    @Test func copyBlockMessageCarriesTheBlockKind() throws {
+        let message = try #require(
+            PreviewCopyBlockMessage(messageBody: [
+                "start": NSNumber(value: 4),
+                "end": NSNumber(value: 20),
+                "kind": "blockquote"
+            ])
+        )
+
+        #expect(message == PreviewCopyBlockMessage(start: 4, end: 20, kind: .blockquote))
+    }
+
+    /// A page without the attribute, or with a value this build does not know,
+    /// still copies — just as raw source.
+    @Test func copyBlockMessageToleratesAMissingOrUnknownKind() throws {
+        let missing = try #require(
+            PreviewCopyBlockMessage(messageBody: [
+                "start": NSNumber(value: 0),
+                "end": NSNumber(value: 5)
+            ])
+        )
+        #expect(missing.kind == nil)
+
+        let unknown = try #require(
+            PreviewCopyBlockMessage(messageBody: [
+                "start": NSNumber(value: 0),
+                "end": NSNumber(value: 5),
+                "kind": "sonnet"
+            ])
+        )
+        #expect(unknown.kind == nil)
+    }
+
     @Test func previewSelectionBridgeParsesOnlyValidDisplayRangePayloads() async throws {
         let payload: [[String: Any]] = [
             [

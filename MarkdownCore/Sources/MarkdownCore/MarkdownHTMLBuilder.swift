@@ -285,25 +285,33 @@ public enum MarkdownHTMLBuilder {
         softBreak: SoftBreak
     ) -> String {
         let content = blockContent(block, softBreak: softBreak)
-        let copyButton = blockWantsCopyButton(block)
-            ? "<button type=\"button\" class=\"md-copy-button\" data-copy-button>Copy</button>"
-            : nil
+        let copyKind = copyableKind(of: block)
+        let copyButton = copyKind == nil
+            ? nil
+            : "<button type=\"button\" class=\"md-copy-button\" data-copy-button>Copy</button>"
+        // The kind rides along so the copy handler knows what the source range
+        // it is handed actually is; see `MarkdownBlockCopyText`.
+        let copyKindAttribute = copyKind.map { " data-copy-kind=\"\($0.rawValue)\"" } ?? ""
 
         guard let sourceRange = sourceLineTable.range(for: block.lineRange) else {
             return content
         }
 
         return """
-        <div class="md-block\(copyButton == nil ? "" : " md-copyable-block")" data-source-start="\(sourceRange.location)" data-source-end="\(sourceRange.location + sourceRange.length)">\(copyButton ?? "")\(content)</div>
+        <div class="md-block\(copyButton == nil ? "" : " md-copyable-block")"\(copyKindAttribute) data-source-start="\(sourceRange.location)" data-source-end="\(sourceRange.location + sourceRange.length)">\(copyButton ?? "")\(content)</div>
         """
     }
 
-    private static func blockWantsCopyButton(_ block: MarkdownBlock) -> Bool {
+    private static func copyableKind(of block: MarkdownBlock) -> MarkdownCopyableBlockKind? {
         switch block.kind {
-        case .table, .blockquote, .code:
-            return true
+        case .table:
+            return .table
+        case .blockquote:
+            return .blockquote
+        case .code:
+            return .code
         default:
-            return false
+            return nil
         }
     }
 

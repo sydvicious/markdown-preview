@@ -14,6 +14,8 @@ Format:
 - (macOS) Search fields no longer take keyboard focus at launch or on app activation
 - Search fields share the find buffer only while one of them is in use
 - Clearing a selection now reaches the preview, so a search match stops being highlighted once it no longer matches
+- Copy button for quote, code, and table blocks does the correct thing. Numerous copy and selection bugs from both views addressed.
+- Search and selection inside a multi-line block quote no longer land one character off. Added a test suite that checks the preview's text-offset mapping against WebKit's own text nodes for every block kind.
 
 ## 2026-07-26
 
