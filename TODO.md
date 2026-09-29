@@ -203,6 +203,11 @@ This document tracks planned work for MarkdownPreviewApp.
     - `{"containerPath": "container:MarkdownCore", "identifier": "MarkdownCoreTests", "name": "MarkdownCoreTests"}`
   - Verify any test plan change by its executed-test count, never by its exit status. A plan referencing an unresolvable target reports `** TEST SUCCEEDED **` while running nothing, and a plan file the scheme cannot read fails the same quiet way.
 
+### Move the build and release scripts to a shared repo. (investigate)
+  - Syd, 2026-09-28: "we might need to make a separate repo for build/release scripts." `Scripts/release-build.sh` and `Scripts/bump-version.sh` are adapted copies of the same scripts in `photos-go-round`, and every new app gets another copy (the global `app-release` skill), so each fix has to be made once per app.
+  - Decide how an app consumes the shared scripts — a git submodule, a checkout at a known path beside the apps, or copies kept in sync from one source — and what stays per app: the app name, project and scheme, the version-config path, the releases folder, and the post-export checks (this app's sandbox; `photos-go-round`'s helpers, extensions and Photos entitlement, and its Finder-laid-out DMG).
+  - The same item is in `photos-go-round`'s `TODO.md`; do it once for both.
+
 ## Later versions
 
 ### macOS redesign as a document-based app.
@@ -289,6 +294,8 @@ This document tracks planned work for MarkdownPreviewApp.
   - Key point for revisiting: per-platform pricing does **not** require leaving the App Store — that's B (two records), which keeps the sandbox and App Store auto-updates. C is only worth it for independence from Apple, which is a post-launch strategic call, not a pricing one.
 
 ### Get ready for TestFlight.
+  - Distribution split (Syd, 2026-09-28): the DMG that `Scripts/release-build.sh` makes is the **Mac build only**. The iOS/iPadOS app reaches anyone outside this machine **only through TestFlight builds**.
+  - Eventually, a script that makes both builds and uploads them to App Store Connect. A separate effort from the DMG release script, not an extension of it.
   - Remaining prep before the first submission: the screenshots (see "Generate screenshots for README and App Store Connect") and the marketing/support website (see "Marketing and support website (`sydpolk.com`)"). Sandboxing, entitlements, the privacy manifest, and the build-number scheme already landed in 0.7.
   - Wire the support URL (required) and marketing URL (optional but expected) into App Store Connect once the site is up — see "Marketing and support website (`sydpolk.com`)" for the URLs and hosting decision.
   - Investigate how to submit to App Store as an individual.

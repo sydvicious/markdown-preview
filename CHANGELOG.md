@@ -3,6 +3,14 @@
 
 # Changelog
 
+## 2026-09-28
+
+### 0.9
+
+- (macOS) Release builds are signed with Developer ID, notarized and stapled, so Gatekeeper accepts them on any Mac. The app now runs with the hardened runtime, which notarization requires.
+- `Scripts/release-build.sh` makes a release from a clean `main`, and refuses to start if the repo has any uncommitted or untracked files: a notarized, stapled DMG in the releases folder, and a `release-<version>-build-<build>` tag on the commit it was built from. The new `Release DMG` scheme in Xcode runs it. It replaces `Scripts/make-release-dmg.sh`, and DMG names now carry the build number: `MarkdownPreview 0.9 (3).dmg`.
+- `Scripts/bump-version.sh` bumps the build number (and optionally the version) from a clean `main`: it commits `Version.xcconfig` straight to `main`, tags it `v<version>-<build>`, and pushes `main` and its tags to origin. It is separate from the release, which may take several candidates: a build-only bump for each new candidate, `--minor` once a release ships.
+
 ## 2026-08-23
 
 - Set marketing version to 0.9; build number to 3
