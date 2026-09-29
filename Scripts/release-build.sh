@@ -8,7 +8,8 @@
 #
 #   1. builds a Release MarkdownPreview.app that can be handed to another
 #      person: signed with Developer ID, notarized, stapled, and wrapped with
-#      CHANGELOG.md in a DMG that is signed, notarized and stapled in turn;
+#      a link to /Applications and CHANGELOG.md in a DMG, laid out by Finder,
+#      that is signed, notarized and stapled in turn;
 #   2. tags the commit it built release-<version>-build-<build>.
 #
 # **It does not bump.** A release may take several candidates before one ships,
@@ -20,7 +21,7 @@
 # branch, and does not tag. It never starts from a dirty repo.
 #
 # Syd's to run, not an agent's: it uploads the build to Apple's notary service,
-# and it tags.
+# it tags, and it drives Finder on his screen.
 
 set -euo pipefail
 
@@ -69,8 +70,8 @@ NEEDS, EVERY RELEASE
   "### <version>" heading in CHANGELOG.md for the release.
 
 RESULT
-  <releases>/MarkdownPreview <version> (<build>).dmg, holding the stapled app
-  and CHANGELOG.md, and the tag release-<version>-build-<build>. The build
+  <releases>/MarkdownPreview <version> (<build>).dmg, holding the stapled app,
+  a link to /Applications and CHANGELOG.md, arranged by Finder; and the tag release-<version>-build-<build>. The build
   products stay in <output>. Nothing is pushed.
 
 AFTERWARDS
@@ -218,9 +219,61 @@ echo "==> Packaging $(basename "$DMG")"
 STAGE="$DMG_DIR/stage"
 mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/MarkdownPreview.app"
+ln -s /Applications "$STAGE/Applications"
 cp "$REPO/CHANGELOG.md" "$STAGE/CHANGELOG.md"
-hdiutil create -volname "$TITLE" -srcfolder "$STAGE" -format ULFO -quiet "$DMG"
-rm -rf "$STAGE"
+
+# **Writable first, so Finder can arrange it, then compressed.** Finder writes
+# the window's layout into the volume's .DS_Store when the window closes, which
+# needs a volume it can write to. Extra room for that file.
+RW="$DMG_DIR/rw.dmg"
+hdiutil create -volname "$TITLE" -srcfolder "$STAGE" -fs HFS+ -format UDRW \
+    -size "$(( $(du -sm "$STAGE" | cut -f1) + 20 ))m" -quiet "$RW"
+# `diskutil image attach`, not `hdiutil attach`, which macOS 27 calls deprecated
+# on every run. **Not `--nobrowse`**: Finder has to see the volume to arrange it.
+ATTACHED="$(diskutil image attach "$RW")"
+DEVICE="$(awk -F'\t' '/Apple_HFS/ { print $1 }' <<<"$ATTACHED" | tr -d '[:space:]')"
+MOUNT="$(awk -F'\t' '/Apple_HFS/ { print $NF }' <<<"$ATTACHED")"
+detach() { [[ -n "${DEVICE:-}" ]] && hdiutil detach "$DEVICE" -quiet || true; }
+trap detach EXIT
+
+# Finder lays the window out, the same way as photos-go-round's: 480 x 520
+# points, 96-point icons, no toolbar or status bar. The app and Applications on
+# the first row, so the drag between them is the obvious thing to do, and
+# CHANGELOG.md centred below. Positions are icon centres from the window's top
+# left. **Closed and opened again before it is saved**: closed once, Finder
+# keeps neither the window's size nor its place. The first run asks to let
+# Terminal, or Xcode for the Release DMG target, control Finder.
+osascript <<APPLESCRIPT
+tell application "Finder"
+    tell disk "$TITLE"
+        open
+        set current view of container window to icon view
+        set toolbar visible of container window to false
+        set statusbar visible of container window to false
+        set the bounds of container window to {200, 120, 680, 640}
+        set viewOptions to the icon view options of container window
+        set arrangement of viewOptions to not arranged
+        set icon size of viewOptions to 96
+        set text size of viewOptions to 13
+        set position of item "MarkdownPreview.app" of container window to {120, 80}
+        set position of item "Applications" of container window to {360, 80}
+        set position of item "CHANGELOG.md" of container window to {240, 250}
+        close
+        open
+        update without registering applications
+        delay 2
+        close
+    end tell
+end tell
+APPLESCRIPT
+
+# Finder's event log on the volume is not the user's business.
+if [[ -n "$MOUNT" && -d "$MOUNT/.fseventsd" ]]; then rm -rf "$MOUNT/.fseventsd"; fi
+sync
+detach
+DEVICE=""
+hdiutil convert "$RW" -format ULFO -o "$DMG" -quiet
+rm -rf "$STAGE" "$RW"
 codesign --sign "$IDENTITY" --timestamp "$DMG"
 
 if [[ $NOTARIZE -eq 0 ]]; then
