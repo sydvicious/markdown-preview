@@ -5,6 +5,8 @@
 
 ## 2026-09-28
 
+### 0.10
+
 - (macOS) The release DMG now carries a link to the Applications folder beside the app, and opens as a sized window with its icons arranged: the app and Applications side by side, `CHANGELOG.md` below.
 
 ### 0.9

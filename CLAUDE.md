@@ -6,6 +6,7 @@
 * CHANGELOG.md records shipped or notable changes, in this format:
   - One top-level entry per date, as a `##` heading in `YYYY-MM-DD` format.
   - Where a date spans a release, a `###` subheading names the version the bullets under it belong to.
+  - Whenever you add to CHANGELOG.md, check for a `### <version>` heading for the current `MARKETING_VERSION` in `Version.xcconfig`, and add it above the new bullets if it is missing. `Scripts/release-build.sh` refuses to release without it, so the heading and its content are built up as the work happens, not at release time. For Claude this is automatic: a global hook (`~/.claude/hooks/changelog-version-heading.sh`) adds the heading under the newest date whenever Claude edits the file.
   - Bullets describe user-visible behavior changes, platform updates, or notable implementation changes.
   - Keep bullets terse. Prefix with the platform — `(macOS)`, `(macOS/iPadOS)` — only when the change does not apply everywhere; omit the prefix when it does. Use Apple's capitalization: `macOS`, `iOS`, `iPadOS`.
 * If a new source or text file is generated, please add `Copyright @{{year}} Syd Polk.`
