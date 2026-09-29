@@ -7,7 +7,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ## Bugs
 
-- Releases are signed with an **Apple Development** certificate, so Gatekeeper rejects them on any Mac but this one. `Scripts/make-release-dmg.sh` warns about it at build time. Distribution outside the App Store needs a **Developer ID Application** certificate plus notarization (`xcrun notarytool submit`, then `xcrun stapler staple` the app before packaging). Not urgent while the audience is one to three people who can right-click ▸ Open, but it has to be fixed before the app goes to anyone else — and it is a different certificate from the App Store path, so it is worth sorting out alongside the TestFlight work.
 - On iPhone, the console repeats `sandbox_extension_consume failed: 22 (Invalid argument)` over and over. Harmless-looking, but it is once per polling tick, which makes it a per-second event and a sign that something is being retried pointlessly. `EINVAL` from consuming a sandbox extension usually means the extension token is malformed, already consumed, or no longer valid — so the likely source is a security-scoped bookmark being resolved and re-consumed repeatedly rather than held. Start at `startAccessingSecurityScopedResource` in `DocumentSessionStore` (three sites: the modification-date check around line 285, and lines 591 and 616), since the once-a-second document-change poll runs through there; the balancing `stopAccessing…` calls and the iOS note about resolution implicitly starting a scope are also worth re-reading.
 - On Mac, double-clicking a `.md` file in Finder while the app is already running makes the whole window disappear and then reappear with the new file. Expected: the window stays on screen and its contents update in place (or the file opens in a window without tearing down the existing one).
 
@@ -290,8 +289,12 @@ This document tracks planned work for MarkdownPreviewApp.
   - Not locked until release; before shipping this may switch to one of:
     - **A (current) — one universal app record:** one price for all platforms; simplest; Universal Purchase (buy once, get every platform).
     - **B — two App Store records** (separate Mac and iOS apps, distinct bundle IDs): allows per-platform pricing, still sandboxed and App-Store-updated, but doubles store maintenance and drops Universal Purchase (a both-platforms buyer pays twice).
-    - **C — direct Mac distribution** (off the App Store): full pricing freedom and independence from Apple's cut/review, but then Sparkle for updates (extra XPC/entitlement setup when sandboxed), notarization, own payments/licensing/support, and a container reconsideration — dropping the sandbox would send the seeded `SAMPLE.md` to the real `~/Documents` and trip the Documents TCC prompt (see "Ship a welcome document in the app bundle").
+    - **C — direct Mac distribution** (off the App Store): full pricing freedom and independence from Apple's cut/review, but then Sparkle for updates (extra XPC/entitlement setup when sandboxed), own payments/licensing/support, and a container reconsideration — dropping the sandbox would send the seeded `SAMPLE.md` to the real `~/Documents` and trip the Documents TCC prompt (see "Ship a welcome document in the app bundle").
+  - Notarization is no longer a cost of C: Mac releases have been Developer ID signed and notarized since 0.9 (`Scripts/release-build.sh`).
   - Key point for revisiting: per-platform pricing does **not** require leaving the App Store — that's B (two records), which keeps the sandbox and App Store auto-updates. C is only worth it for independence from Apple, which is a post-launch strategic call, not a pricing one.
+
+### Confirm the notarized DMG on another Mac.
+  - `MarkdownPreview 0.9 (3).dmg` is notarized and stapled, and Gatekeeper accepts it here. Confirm it on a Mac that has never seen the app — the work Mac (macOS 26.x), downloaded through Dropbox's website so it carries the quarantine attribute: it should open with only the "downloaded from the internet" prompt, and `spctl --assess -vv` on the installed app should say `source=Notarized Developer ID`.
 
 ### Get ready for TestFlight.
   - Distribution split (Syd, 2026-09-28): the DMG that `Scripts/release-build.sh` makes is the **Mac build only**. The iOS/iPadOS app reaches anyone outside this machine **only through TestFlight builds**.
@@ -302,7 +305,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - Submit app to App Store.
   - Set up TestFlight.
   - Capture and prepare App Store screenshots for iPhone, iPad, and Mac.
-  - Automate `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` bumps in CI/CD. Both are centralized in `Version.xcconfig`, but they are no longer bumped in lock step: `MARKETING_VERSION` moves on the first commit after a release, while `CURRENT_PROJECT_VERSION` is a build number bumped on every upload and never reset, because App Store Connect requires a unique increasing build number per upload within a marketing version. Any automation has to bump them on those two different triggers rather than together.
+  - Version and build numbers are bumped by `Scripts/bump-version.sh`: with no options it moves the build number only, for each release candidate or upload; with `--minor` it moves `MARKETING_VERSION` too, once a release ships. The build number is never reset, because App Store Connect requires a unique increasing build number per upload within a marketing version. A CI/CD pipeline, or the App Store upload script above, should call it rather than bump the numbers itself.
   - Both platforms share the one build number, so uploading only iOS or only macOS still consumes a number for both. Deliberate — a shared counter is simpler than per-platform ones and only costs some gaps in the sequence.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*

@@ -15,6 +15,7 @@ These instructions apply to the entire directory tree under this folder.
 - The log of shipped or notable changes lives in `CHANGELOG.md`. Add entries there when work should be recorded.
 - Prefer preserving the app's existing structure and conventions unless a task explicitly calls for a broader refactor.
 - When making changes, keep edits focused and avoid touching unrelated files.
+- `Scripts/release-build.sh`, `Scripts/bump-version.sh` and the `Release DMG` scheme are Syd's to run: they upload to Apple's notary service, commit, tag and push. An agent may run `--help`, and `bump-version.sh --dry-run`.
 
 ## Project Context
 

@@ -110,9 +110,13 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
+## Releases
+
+Mac releases are disk images, Developer ID signed and notarized, so they open on any Mac. `Scripts/release-build.sh`, or the `Release DMG` scheme in Xcode, builds one from a clean `main`, puts it in the releases folder, and tags the commit `release-<version>-build-<build>`. `Scripts/bump-version.sh` moves the version and build number in `Version.xcconfig`; `--help` on either script says more. The iOS and iPadOS app is distributed only through TestFlight.
+
 ## Using as Default App for `.md` on macOS
 
-1. Build and place the app where you keep apps (for example `/Applications`).
+1. Install the app from a release disk image by dragging it to `/Applications`, or build it and place it where you keep apps.
 2. In Finder, select a `.md` file and choose **Get Info**.
 3. Under **Open with**, choose **Markdown Preview**.
 4. Click **Change All…**.
