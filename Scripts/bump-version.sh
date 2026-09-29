@@ -5,7 +5,7 @@
 #
 # Moves the version and the build number in Version.xcconfig, commits that one
 # file straight to main, tags the commit, and pushes main and its tags to
-# origin. Adapted from ../photos-go-round/Scripts/bump-version.sh.
+# origin.
 #
 # **main always carries the version of the next release**, and this is how it
 # moves. It is separate from release-build.sh because a release may take

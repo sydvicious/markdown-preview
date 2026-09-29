@@ -19,11 +19,6 @@
 # Nothing is pushed. With --no-notarize it only builds and packages, from any
 # branch, and does not tag. It never starts from a dirty repo.
 #
-# Adapted from ../photos-go-round/Scripts/release-build.sh, and it uses the same
-# signing assets: the Developer ID Application certificate for team R5PQPZARC5,
-# and the "pgr-notary" notarytool profile. Both belong to the team, not to an
-# app, so one set serves both projects.
-#
 # Syd's to run, not an agent's: it uploads the build to Apple's notary service,
 # and it tags.
 
@@ -53,7 +48,7 @@ OPTIONS
   --releases <dir>            Where the finished DMG is copied. Default:
                               ~/iCloud/dev/MarkdownPreview Releases
   --keychain-profile <name>   The notarytool credentials to submit with.
-                              Default: pgr-notary, shared with Photos-Go-Round.
+                              Default: pgr-notary, shared by the team's apps.
   --no-notarize               Sign and package, but upload nothing to Apple,
                               copy nothing to the releases folder, and do not
                               tag. Works from any branch, but still only
@@ -66,7 +61,8 @@ NEEDS, ONCE PER MAC
     xcrun notarytool store-credentials "pgr-notary" \
         --apple-id "sydvicious@mac.com" --team-id "R5PQPZARC5"
 
-  Both are already in place wherever Photos-Go-Round releases are built.
+  Both belong to the team, not to this app, so a Mac already set up to release
+  any of the team's apps needs nothing more.
 
 NEEDS, EVERY RELEASE
   A clean main (no changes, and no untracked files that are not ignored), and a
