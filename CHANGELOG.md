@@ -3,33 +3,21 @@
 
 # Changelog
 
-## 2026-10-04
-
-### 0.10
+## 0.10
 
 - (iOS/iPadOS) A document whose security scope the system refuses is asked for it once per launch, not on every polling tick. The repeated request logged `sandbox_extension_consume failed: 22 (Invalid argument)` to the console once a second.
 - An image the app is not permitted to read is replaced in the preview by an Allow… button that opens the folder picker, in place of a broken image. The bar above the preview that offers the same thing was easy to miss. An image that is simply missing still shows as broken.
 - The preview keeps its scroll position when the document on screen is redrawn: when the file is edited on disk, the text size changes, or a folder is granted for its images. It used to jump back to the top each time.
-
-## 2026-09-28
-
-### 0.10
-
 - (macOS) The release DMG now carries a link to the Applications folder beside the app, and opens as a sized window with its icons arranged: the app and Applications side by side, `CHANGELOG.md` below.
 
-### 0.9
+## 0.9
 
 - (macOS) Release builds are signed with Developer ID, notarized and stapled, so Gatekeeper accepts them on any Mac. The app now runs with the hardened runtime, which notarization requires.
 - `Scripts/release-build.sh` makes a release from a clean `main`, and refuses to start if the repo has any uncommitted or untracked files: a notarized, stapled DMG in the releases folder, and a `release-<version>-build-<build>` tag on the commit it was built from. The new `Release DMG` scheme in Xcode runs it. It replaces `Scripts/make-release-dmg.sh`, and DMG names now carry the build number: `MarkdownPreview 0.9 (3).dmg`.
 - `Scripts/bump-version.sh` bumps the build number (and optionally the version) from a clean `main`: it commits `Version.xcconfig` straight to `main`, tags it `v<version>-<build>`, and pushes `main` and its tags to origin. It is separate from the release, which may take several candidates: a build-only bump for each new candidate, `--minor` once a release ships.
-
-## 2026-08-23
-
 - Set marketing version to 0.9; build number to 3
 
-## 2026-08-22
-
-### 0.8
+## 0.8
 
 - Bumped the app marketing version to `0.8` and the build number to `2` (in `Version.xcconfig`) for the 0.8 release.
 - (macOS) Moved addition and removal of documents to a new control cluster at the bottom of the list
@@ -40,7 +28,7 @@
 - Copy button for quote, code, and table blocks does the correct thing. Numerous copy and selection bugs from both views addressed.
 - Search and selection inside a multi-line block quote no longer land one character off. Added a test suite that checks the preview's text-offset mapping against WebKit's own text nodes for every block kind.
 
-## 2026-07-26
+## 0.7
 
 - Line endings inside a paragraph now render as line breaks in the preview. A newline in the source becomes a `<br>` rather than collapsing to a space, so an address, a sign-off, or any lines meant to stand on their own appear exactly as typed — no trailing spaces or other markup required. Blank-line paragraph breaks are unchanged; only the within-paragraph newline changed meaning. This is GitHub's "hardbreaks" rendering, and it is a deliberate departure from the CommonMark soft-break behavior adopted in 0.6 (where a soft break renders as a newline that the browser collapses to a space).
   - Implementation: `MarkdownHTMLBuilder` gained a `SoftBreak` option (`.newline` | `.lineBreak`) on `document(for:)`, threaded down to the inline tokenizer. It defaults to `.newline`, so `MarkdownCore` stays CommonMark-conformant and the whole conformance suite (and a future command-line converter) is unaffected; the app selects `.lineBreak` everywhere it renders — the preview, rich-text copy, and the web-view preview fixture — so the choice is the app's, not a user setting.
@@ -48,15 +36,7 @@
 - Rewrote the "Paragraphs and line breaks" section of `SAMPLE.md` to match the new rendering, with examples — a mailing address and a sign-off — that render across several lines from plain newlines, and a contrast between a single line break and a blank-line paragraph break.
 - Filled in the welcome document. `SAMPLE.md`'s header now carries the feature list (supported Markdown, platforms, in-document and cross-document find, clipboard), and the removal note is simply that you can take it out of the list of files. A stray empty heading was also removed. The app's copy lives in its private container, which isn't surfaced to the user (the Files app doesn't list it), so there's nothing to delete by hand and the instructions don't pretend otherwise.
 - The seeded sample's on-disk copy is now kept current independent of the list. Its refresh keys off the file in the app's container rather than on list membership, so removing the sample from the list no longer stops it from being updated on later builds — the copy stays current for whenever it is shown again. Because the copy is not user-reachable, it is effectively always present and always updated.
-
-## 2026-07-25
-
 - On first launch — and only on a genuinely new install — the bundled `SAMPLE.md` and its image are copied into the app's container and added to the document list, so a new user (and a screenshot) opens onto a rendered document instead of an empty window. The document's title carries the app's version and build number, and the on-disk copy is refreshed whenever those change on a later build.
-
-## 2026-07-19
-
-### 0.7
-
 - Bumped the app marketing version to `0.7` (in `Version.xcconfig`), following the convention of bumping the version on the first commit after a release.
 - Enabled App Sandbox on macOS, which the App Store requires and which the app had never run under before. The document you open, and any folder you grant, are now reached through security-scoped bookmarks on macOS exactly as they already were on iOS. The entitlements are App Sandbox, user-selected file access, app-scoped bookmarks, and outgoing network connections for `http(s)` images.
   - **User-selected access has to be read-write, although the app never writes a document.** Read-only is enough to open and read a file the user picked, but not to create a security-scoped bookmark from it: `bookmarkData(.withSecurityScope)` fails with `NSCocoaErrorDomain` code 256 even with the scope held open. Without a bookmark nothing reopens after a relaunch, so narrowing this back to read-only makes every Open fail with a message claiming the file could not be opened. The reason is recorded in `MarkdownPreview.entitlements`; do not "tidy" it to read-only on the grounds that the app only reads.
@@ -72,7 +52,7 @@
 - Split the build number from the marketing version. `CURRENT_PROJECT_VERSION` restarts at `1` and is bumped on every upload without ever resetting, while `MARKETING_VERSION` continues to move on the first commit after a release. App Store Connect requires a unique increasing build number for each upload within a marketing version, and a release takes more than one upload whenever a build is rejected or replaced, so keeping the two in lock step burned a marketing version on every retry. Both platforms share the one counter.
 - Removed a reference to the deleted `MarkdownPreviewUITests` target from the shared scheme, where it had remained as a test target with no matching definition in the project. Harmless so far because the test plans name their targets explicitly, but the kind of dangling reference that surfaces during an archive.
 
-### 0.6
+## 0.6
 
 - Released version `0.6` (build `6`).
 - Images in markdown documents now display on macOS, iOS, and iPadOS. `![alt](photo.jpg "title")` renders the picture, with relative paths resolved against the document's own directory, including documents stored on iCloud Drive.
@@ -110,18 +90,12 @@
   - Lists now render as structurally nested `<ul>`/`<ol>` elements rather than one flat list whose items were pushed right with `depth-N` CSS margins. As a side effect, nested checklist items are now indented — the old `li.task` rule zeroed their margin, so they had been rendering flat regardless of depth.
 - Changed the "Remove from List" affordances from a trash can to an X-in-a-circle (`xmark.circle`) so they no longer imply the file will be deleted from disk — removal only takes the file out of the app's list. Covers the macOS list context menu and sidebar toolbar button, and the iOS/iPadOS row context menu and swipe action.
   - Made those same remove affordances visually neutral by dropping their destructive button role, so they no longer render in red; the iOS swipe action is explicitly tinted gray (without a role it would otherwise pick up the accent color).
-
-## 2026-07-08
-
 - Bumped the app marketing version to `0.6` and build number to `6` (both in `Version.xcconfig`), adopting the convention of bumping the version on the first commit after a release.
+
+## 0.5
+
 - Released version `0.5` (build `5`).
-
-## 2026-07-05
-
 - Lowered the deployment targets across all build configurations to widen device support ahead of TestFlight: `IPHONEOS_DEPLOYMENT_TARGET` from `27.0` to `18.0` and `MACOSX_DEPLOYMENT_TARGET` from `26.0` to `15.0`. The project builds cleanly against the lowered targets on macOS with no API availability gaps to resolve.
-
-## 2026-07-03
-
 - Bumped the app marketing version to `0.5` and build number to `5` (both in `Version.xcconfig`), adopting the convention of bumping the version on the first commit after a release.
 - Let the macOS file-open dialog (the `+` button and the startup prompt when the list is empty) select multiple `.md` files at once; all selected files are opened instead of only the first.
 - Fixed macOS so opening multiple `.md` files at once (for example selecting several in Finder) opens all of them instead of only one: a batch Open is now handled by the AppKit app delegate's `application(_:open:)`, which receives every URL together, and incoming URLs are queued and drained rather than overwriting a single slot. (SwiftUI's `.onOpenURL` only surfaced one file from a multi-file open.)
@@ -138,7 +112,7 @@
 - Reduced search-field typing latency (most noticeable on macOS) by moving per-keystroke work off the keystroke path: the in-document search (which rebuilds a whole-document text-offset mapping and applies the match selection through a `WKWebView` round trip) and the macOS system find-pasteboard write are now debounced (~200ms), while the search field and the file-list filter stay live. In-document match count and highlighting settle a beat after you stop typing.
 - Added unit tests for the models and view models and reorganized the test target so each test file mirrors its source file's folder (`View Models/`, `Utilities/`, `Views/`). Removed the auto-generated `MarkdownPreviewUITests` target entirely (its empty UI-test bundle failed to launch and broke `Cmd-U`); a fresh UI Testing Bundle target will be created when a real GUI-test suite is added.
 
-## 2026-06-30
+## 0.4
 
 - Bumped the app marketing version to `0.4` and build number to `4` for this release, with both values now centralized in `Version.xcconfig`.
 - Fixed Preview-mode copy so copying a text selection writes only the selected rendered text's corresponding markdown source, instead of expanding to the whole rendered block.

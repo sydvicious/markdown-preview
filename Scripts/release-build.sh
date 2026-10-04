@@ -67,7 +67,7 @@ NEEDS, ONCE PER MAC
 
 NEEDS, EVERY RELEASE
   A clean main (no changes, and no untracked files that are not ignored), and a
-  "### <version>" heading in CHANGELOG.md for the release.
+  "## <version>" heading in CHANGELOG.md for the release.
 
 RESULT
   <releases>/MarkdownPreview <version> (<build>).dmg, holding the stapled app,
@@ -119,7 +119,7 @@ if [[ $NOTARIZE -eq 1 ]]; then
     problems=()
     [[ "$(git branch --show-current)" == "main" ]] || problems+=("not on main: $(git branch --show-current)")
     git show-ref --verify --quiet "refs/tags/$TAG" && problems+=("tag $TAG already exists")
-    grep -qx "### $VERSION" "$REPO/CHANGELOG.md" || problems+=("no \"### $VERSION\" heading in CHANGELOG.md")
+    grep -qx "## $VERSION" "$REPO/CHANGELOG.md" || problems+=("no \"## $VERSION\" heading in CHANGELOG.md")
     if (( ${#problems[@]} > 0 )); then
         echo "cannot release $VERSION ($BUILD):" >&2
         printf '  %s\n' "${problems[@]}" >&2
