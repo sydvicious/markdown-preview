@@ -7,7 +7,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ## Bugs
 
-- On iPhone, the console repeats `sandbox_extension_consume failed: 22 (Invalid argument)` over and over. Harmless-looking, but it is once per polling tick, which makes it a per-second event and a sign that something is being retried pointlessly. `EINVAL` from consuming a sandbox extension usually means the extension token is malformed, already consumed, or no longer valid — so the likely source is a security-scoped bookmark being resolved and re-consumed repeatedly rather than held. Start at `startAccessingSecurityScopedResource` in `DocumentSessionStore` (three sites: the modification-date check around line 285, and lines 591 and 616), since the once-a-second document-change poll runs through there; the balancing `stopAccessing…` calls and the iOS note about resolution implicitly starting a scope are also worth re-reading.
 - On Mac, double-clicking a `.md` file in Finder while the app is already running makes the whole window disappear and then reappear with the new file. Expected: the window stays on screen and its contents update in place (or the file opens in a window without tearing down the existing one).
 
 ### Make the image permission prompt harder to miss.

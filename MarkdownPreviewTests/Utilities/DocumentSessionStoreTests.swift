@@ -9,6 +9,134 @@ import Testing
 
 struct DocumentSessionStoreTests {
 
+    /// Stands in for the sandbox, counting how often a document's security scope
+    /// is asked for and released.
+    @MainActor
+    private final class ScopeRecorder {
+        var grants: Bool
+        private(set) var startCount = 0
+        private(set) var stopCount = 0
+
+        init(grants: Bool) {
+            self.grants = grants
+        }
+
+        var scope: SecurityScope {
+            SecurityScope(
+                start: { [self] _ in
+                    startCount += 1
+                    return grants
+                },
+                stop: { [self] _ in
+                    stopCount += 1
+                }
+            )
+        }
+    }
+
+    private static func makeTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    // A scope the system refuses stays refused: the bookmark carries the same
+    // token on every resolution. Asking again on each polling tick is what filled
+    // the iPhone console with `sandbox_extension_consume failed: 22`, once a
+    // second, for a document that was readable all along.
+    @MainActor
+    @Test func pollingDoesNotAskAgainForASecurityScopeTheSystemRefused() async throws {
+        let temporaryDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let fileURL = temporaryDirectory.appendingPathComponent("notes.md")
+        try "# Title".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let recorder = ScopeRecorder(grants: false)
+        let store = DocumentSessionStore(disablePersistenceRestore: true, securityScope: recorder.scope)
+        try store.openDocument(at: fileURL)
+        let askedWhileOpening = recorder.startCount
+
+        for _ in 0..<5 {
+            store.checkActiveDocumentForChanges(isCompactWidth: false)
+        }
+
+        #expect(askedWhileOpening == 1)
+        #expect(recorder.startCount == askedWhileOpening)
+        #expect(recorder.stopCount == 0)
+        #expect(store.openedDocuments.map(\.file.fileName) == ["notes.md"])
+        #expect(store.missingActiveDocumentAlert == nil)
+    }
+
+    @MainActor
+    @Test func documentWithARefusedSecurityScopeStillReloadsWhenItChanges() async throws {
+        let temporaryDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let fileURL = temporaryDirectory.appendingPathComponent("notes.md")
+        try "before".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let recorder = ScopeRecorder(grants: false)
+        let store = DocumentSessionStore(disablePersistenceRestore: true, securityScope: recorder.scope)
+        try store.openDocument(at: fileURL)
+        store.checkActiveDocumentForChanges(isCompactWidth: false)
+
+        try "after".write(to: fileURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(60)],
+            ofItemAtPath: fileURL.path
+        )
+        store.checkActiveDocumentForChanges(isCompactWidth: false)
+
+        #expect(store.currentDocument?.file.contents == "after")
+        #expect(recorder.startCount == 1)
+    }
+
+    // The other half of not asking again: a scope that *is* granted is still
+    // taken for every read, and every one taken is released.
+    @MainActor
+    @Test func pollingReleasesEverySecurityScopeItTakes() async throws {
+        let temporaryDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let fileURL = temporaryDirectory.appendingPathComponent("notes.md")
+        try "# Title".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let recorder = ScopeRecorder(grants: true)
+        let store = DocumentSessionStore(disablePersistenceRestore: true, securityScope: recorder.scope)
+        try store.openDocument(at: fileURL)
+        let askedWhileOpening = recorder.startCount
+
+        for _ in 0..<5 {
+            store.checkActiveDocumentForChanges(isCompactWidth: false)
+        }
+
+        #expect(recorder.startCount == askedWhileOpening + 5)
+        #expect(recorder.stopCount == recorder.startCount)
+    }
+
+    // A refusal is remembered against the bookmark, not the file: taking the
+    // document off the list and opening it again is a fresh bookmark and a fresh
+    // chance.
+    @MainActor
+    @Test func reopeningADocumentAsksForItsSecurityScopeAgain() async throws {
+        let temporaryDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let fileURL = temporaryDirectory.appendingPathComponent("notes.md")
+        try "# Title".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let recorder = ScopeRecorder(grants: false)
+        let store = DocumentSessionStore(disablePersistenceRestore: true, securityScope: recorder.scope)
+        try store.openDocument(at: fileURL)
+        store.checkActiveDocumentForChanges(isCompactWidth: false)
+        #expect(recorder.startCount == 1)
+
+        let documentID = try #require(store.selectedDocumentID)
+        _ = store.removeDocument(id: documentID, isCompactWidth: false)
+        try store.openDocument(at: fileURL)
+        store.checkActiveDocumentForChanges(isCompactWidth: false)
+
+        #expect(recorder.startCount == 2)
+    }
+
     @MainActor
     @Test func textSizePreferencePersistsPerDocumentAndClearsWhenRemoved() async throws {
         let suiteName = "DocumentSessionStoreTests.\(#function).\(UUID().uuidString)"

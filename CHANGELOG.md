@@ -3,6 +3,12 @@
 
 # Changelog
 
+## 2026-10-04
+
+### 0.10
+
+- (iOS/iPadOS) A document whose security scope the system refuses is asked for it once per launch, not on every polling tick. The repeated request logged `sandbox_extension_consume failed: 22 (Invalid argument)` to the console once a second.
+
 ## 2026-09-28
 
 ### 0.10

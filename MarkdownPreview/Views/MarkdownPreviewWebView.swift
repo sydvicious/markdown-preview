@@ -920,9 +920,12 @@ private extension MarkdownCopyWebView {
             in: source,
             selectedRange: selectedRange
         ) else {
-            Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "PrevSel").info(
-                "PREVSEL reflection FAILED for \(String(describing: selectedRange), privacy: .public)"
-            )
+            // No selection is not a failure, and it is the case on every load.
+            if let selectedRange {
+                Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "PrevSel").info(
+                    "PREVSEL reflection FAILED for \(String(describing: selectedRange), privacy: .public)"
+                )
+            }
             return previewSelectionScript + "null, null, null, null, null, null)"
         }
 

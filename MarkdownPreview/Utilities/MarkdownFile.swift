@@ -15,14 +15,10 @@ struct MarkdownFile: Identifiable, Equatable {
         url.lastPathComponent
     }
 
+    /// Reads `url`. The caller holds whatever security scope the read needs:
+    /// `DocumentSessionStore` takes it around this call, and taking it a second
+    /// time here would repeat a refused request the store has learned not to make.
     static func load(from url: URL) throws -> MarkdownFile {
-        let hasAccess = url.startAccessingSecurityScopedResource()
-        defer {
-            if hasAccess {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
-
         let data = try readData(from: url)
         guard let text = String(data: data, encoding: .utf8) ??
             String(data: data, encoding: .unicode) ??

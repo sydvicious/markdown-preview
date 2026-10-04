@@ -134,6 +134,20 @@ extension DynamicTypeSize {
     }
 }
 
+/// How the security scope of a bookmark-resolved URL is taken and released.
+///
+/// The store goes through this rather than calling the URL directly so a test
+/// can stand in for a sandbox that refuses the scope, which no test host does.
+struct SecurityScope {
+    var start: (URL) -> Bool
+    var stop: (URL) -> Void
+
+    static let system = SecurityScope(
+        start: { $0.startAccessingSecurityScopedResource() },
+        stop: { $0.stopAccessingSecurityScopedResource() }
+    )
+}
+
 @MainActor
 final class DocumentSessionStore: ObservableObject {
     struct DocumentSection: Identifiable, Equatable {
@@ -181,6 +195,18 @@ final class DocumentSessionStore: ObservableObject {
     @Published private(set) var textSizesByDocumentID: [String: DynamicTypeSize] = [:]
     @Published var missingActiveDocumentAlert: MissingActiveDocumentAlert?
     private let documentSearchIndex: DocumentSearchIndex
+    private let securityScope: SecurityScope
+
+    /// Bookmarks whose security scope the system refused during this launch.
+    ///
+    /// A refusal is a property of the bookmark, not of the moment: every
+    /// resolution hands back the same sandbox token, and one the kernel has
+    /// rejected is rejected again each time it is offered. The active document
+    /// is polled once a second, so asking again is a failed call — and a
+    /// `sandbox_extension_consume failed` line in the console — per second, for
+    /// as long as the document is on screen. The read goes ahead without the
+    /// scope either way, which is all that asking again could have achieved.
+    private var bookmarksWithRefusedScope: Set<Data> = []
 
     private(set) var didRestoreDocuments = false
 
@@ -188,7 +214,8 @@ final class DocumentSessionStore: ObservableObject {
         previewFiles: [MarkdownFile] = [],
         selectedPreviewFileID: String? = nil,
         disablePersistenceRestore: Bool = false,
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        securityScope: SecurityScope = .system
     ) {
         let now = Date()
         let opened = previewFiles.map {
@@ -207,6 +234,7 @@ final class DocumentSessionStore: ObservableObject {
             validDocumentIDs: Set(opened.map(\.id))
         )
         self.documentSearchIndex = DocumentSearchIndex(documents: opened.map(\.file))
+        self.securityScope = securityScope
     }
 
     var sortedDocuments: [OpenedDocument] {
@@ -316,6 +344,9 @@ final class DocumentSessionStore: ObservableObject {
     func upsertDocument(_ file: MarkdownFile, bookmarkData: Data, modificationDate: Date?) {
         let id = file.url.standardizedFileURL.path
         if let index = openedDocuments.firstIndex(where: { $0.id == id }) {
+            if openedDocuments[index].bookmarkData != bookmarkData {
+                bookmarksWithRefusedScope.remove(openedDocuments[index].bookmarkData)
+            }
             openedDocuments[index].file = file
             openedDocuments[index].lastOpened = Date()
             openedDocuments[index].bookmarkData = bookmarkData
@@ -331,6 +362,9 @@ final class DocumentSessionStore: ObservableObject {
 
     func deleteDocuments(at offsets: IndexSet, isCompactWidth: Bool) {
         let idsToDelete = offsets.map { sortedDocuments[$0].id }
+        for document in openedDocuments where idsToDelete.contains(document.id) {
+            bookmarksWithRefusedScope.remove(document.bookmarkData)
+        }
         openedDocuments.removeAll(where: { idsToDelete.contains($0.id) })
         idsToDelete.forEach {
             knownModificationDates.removeValue(forKey: $0)
@@ -350,6 +384,9 @@ final class DocumentSessionStore: ObservableObject {
         isCompactWidth: Bool
     ) -> Bool {
         let wasSelected = selectedDocumentID == id
+        for document in openedDocuments where document.id == id {
+            bookmarksWithRefusedScope.remove(document.bookmarkData)
+        }
         openedDocuments.removeAll(where: { $0.id == id })
         knownModificationDates.removeValue(forKey: id)
         selectionsByDocumentID.removeValue(forKey: id)
@@ -500,14 +537,14 @@ final class DocumentSessionStore: ObservableObject {
             return
         }
 
-        if let modificationDate = currentModificationDate(for: url) {
+        if let modificationDate = currentModificationDate(for: url, resolvedFrom: document.bookmarkData) {
             let knownDate = knownModificationDates[document.id]
             if knownDate != nil, modificationDate <= knownDate! {
                 return
             }
         }
 
-        guard let loaded = loadDocument(at: url) else {
+        guard let loaded = loadDocument(at: url, resolvedFrom: document.bookmarkData) else {
             handleMissingDocument(
                 document,
                 alertIfMissing: alertIfMissing,
@@ -557,7 +594,7 @@ final class DocumentSessionStore: ObservableObject {
         guard let url = resolveBookmarkURL(from: bookmarkData) else {
             return nil
         }
-        return loadDocument(at: url)
+        return loadDocument(at: url, resolvedFrom: bookmarkData)
     }
 
     private func resolveBookmarkURL(from bookmarkData: Data) -> URL? {
@@ -572,7 +609,7 @@ final class DocumentSessionStore: ObservableObject {
             // a limited number of open scoped URLs. This resolves once per
             // document at launch and again on every polling tick, so without it
             // each one leaks a scope until access is refused. Access is taken
-            // explicitly in `loadDocument`.
+            // explicitly in `withSecurityScope`.
             let options: URL.BookmarkResolutionOptions = [.withoutUI, .withoutImplicitStartAccessing]
             #endif
             let url = try URL(
@@ -587,20 +624,59 @@ final class DocumentSessionStore: ObservableObject {
         }
     }
 
-    private func loadDocument(at url: URL) -> (file: MarkdownFile, modificationDate: Date?)? {
-        let hasAccess = url.startAccessingSecurityScopedResource()
-        defer {
-            if hasAccess {
-                url.stopAccessingSecurityScopedResource()
-            }
+    /// Runs `body` holding the security scope of `url`, which was resolved from
+    /// `bookmarkData`, and releases it afterwards.
+    ///
+    /// `body` runs whether or not the scope could be taken: plenty of documents
+    /// are readable without one — anything in the app's own container, and
+    /// everything when the app is not sandboxed — and a read that does need it
+    /// fails on its own, which the callers already treat as a missing document.
+    /// A refused scope is asked for once and not again; see
+    /// `bookmarksWithRefusedScope`.
+    private func withSecurityScope<T>(
+        of url: URL,
+        resolvedFrom bookmarkData: Data,
+        perform body: () -> T
+    ) -> T {
+        guard !bookmarksWithRefusedScope.contains(bookmarkData) else {
+            return body()
         }
+        guard securityScope.start(url) else {
+            bookmarksWithRefusedScope.insert(bookmarkData)
+            logRefusedScope(for: url)
+            return body()
+        }
+        defer { securityScope.stop(url) }
+        return body()
+    }
 
-        do {
-            let file = try MarkdownFile.load(from: url)
-            let modificationDate = modificationDateWithinAccess(for: url)
-            return (file, modificationDate)
-        } catch {
-            return nil
+    /// One line per refused bookmark per launch, saying what would tell a dead
+    /// token on a document that never needed one apart from a document that is
+    /// about to go missing. Filter the console on `[scope]`.
+    private func logRefusedScope(for url: URL) {
+        let readableAnyway = FileManager.default.isReadableFile(atPath: url.path)
+        let inAppContainer = url.standardizedFileURL.path.hasPrefix(
+            URL(fileURLWithPath: NSHomeDirectory()).standardizedFileURL.path + "/"
+        )
+        Self.log.info("""
+            [scope] Security scope refused for \(url.lastPathComponent, privacy: .public); \
+            not asking again this launch. readableWithoutScope=\(readableAnyway), \
+            inAppContainer=\(inAppContainer)
+            """)
+    }
+
+    private func loadDocument(
+        at url: URL,
+        resolvedFrom bookmarkData: Data
+    ) -> (file: MarkdownFile, modificationDate: Date?)? {
+        withSecurityScope(of: url, resolvedFrom: bookmarkData) {
+            do {
+                let file = try MarkdownFile.load(from: url)
+                let modificationDate = modificationDateWithinAccess(for: url)
+                return (file, modificationDate)
+            } catch {
+                return nil
+            }
         }
     }
 
@@ -612,14 +688,10 @@ final class DocumentSessionStore: ObservableObject {
     /// sandboxed that read returns nil — which does not fail loudly, it defeats
     /// the "unchanged, so skip" check and silently re-reads every open document
     /// on every tick.
-    private func currentModificationDate(for url: URL) -> Date? {
-        let hasAccess = url.startAccessingSecurityScopedResource()
-        defer {
-            if hasAccess {
-                url.stopAccessingSecurityScopedResource()
-            }
+    private func currentModificationDate(for url: URL, resolvedFrom bookmarkData: Data) -> Date? {
+        withSecurityScope(of: url, resolvedFrom: bookmarkData) {
+            modificationDateWithinAccess(for: url)
         }
-        return modificationDateWithinAccess(for: url)
     }
 
     /// The same read for callers that already hold the scope, so it is not taken
