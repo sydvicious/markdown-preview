@@ -15,17 +15,26 @@ import AppKit
 
 private let copyBlockMessageHandlerName = "copyBlock"
 private let previewSelectionChangedMessageHandlerName = "previewSelectionChanged"
+private let previewScrollChangedMessageHandlerName = "previewScrollChanged"
+/// Internal, with the script that posts to it, so the tests can check the
+/// button really reaches the app.
+let requestImageAccessMessageHandlerName = "requestImageAccess"
 
 #if os(iOS)
 struct MarkdownPreviewWebView: UIViewRepresentable {
     let source: String
     let html: String
     let baseURL: URL?
+    /// Which document this is, so a reload of the same one can keep the reader's
+    /// place. Without it every reload starts at the top.
+    var documentID: String? = nil
     let selectedRange: MarkdownSelectionRange?
     var selectionSynchronizer: PreviewSelectionSynchronizer?
     var onSelectedTextChange: (String?) -> Void = { _ in }
     var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
     var onSearchSelection: (String) -> Void = { _ in }
+    /// The reader pressed the button that stands in for an unreadable image.
+    var onRequestImageAccess: () -> Void = {}
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String?
@@ -38,6 +47,14 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         var onSelectedTextChange: (String?) -> Void = { _ in }
         var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
         var onSearchSelection: (String) -> Void = { _ in }
+        var onRequestImageAccess: () -> Void = {}
+        /// What the page now loading, or last loaded, is showing.
+        var loadedContent: PreviewScrollRestoration.Content?
+        /// Where the reader last was, as the page reported it.
+        var lastScrollPosition: PreviewScrollPosition?
+        /// Where to put the reader when the page now loading has finished.
+        var scrollRestoration: PreviewScrollRestoration.Restoration = .top
+        var isLoadingPage = false
 
         func webView(
             _ webView: WKWebView,
@@ -56,6 +73,9 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             self.webView?.applySelection(lastSelectedRange)
+            // After the selection, which centres itself: on a reload the
+            // reader's place wins.
+            restoreScrollPosition(in: webView)
         }
     }
 
@@ -81,6 +101,20 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         )
         configuration.userContentController.addUserScript(
             WKUserScript(
+                source: previewImageAccessButtonScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+        )
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: previewScrollReportScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+        )
+        configuration.userContentController.addUserScript(
+            WKUserScript(
                 source: previewSelectionChangeScript,
                 injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
@@ -88,6 +122,8 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         )
         configuration.userContentController.add(context.coordinator, name: copyBlockMessageHandlerName)
         configuration.userContentController.add(context.coordinator, name: previewSelectionChangedMessageHandlerName)
+        configuration.userContentController.add(context.coordinator, name: requestImageAccessMessageHandlerName)
+        configuration.userContentController.add(context.coordinator, name: previewScrollChangedMessageHandlerName)
 
         let webView = MarkdownCopyWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -98,6 +134,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         context.coordinator.onSelectedTextChange = onSelectedTextChange
         context.coordinator.onSelectedRangesChange = onSelectedRangesChange
         context.coordinator.onSearchSelection = onSearchSelection
+        context.coordinator.onRequestImageAccess = onRequestImageAccess
         context.coordinator.updateFlushSelectionHandler()
         webView.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
             coordinator?.onSearchSelection(text)
@@ -106,8 +143,12 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
         webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.loadHTMLString(html, baseURL: baseURL)
-        context.coordinator.lastHTML = html
+        context.coordinator.load(
+            html,
+            baseURL: baseURL,
+            showing: .init(documentID: documentID, source: source),
+            in: webView
+        )
         return webView
     }
 
@@ -118,6 +159,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         context.coordinator.onSelectedTextChange = onSelectedTextChange
         context.coordinator.onSelectedRangesChange = onSelectedRangesChange
         context.coordinator.onSearchSelection = onSearchSelection
+        context.coordinator.onRequestImageAccess = onRequestImageAccess
         context.coordinator.updateFlushSelectionHandler()
         (webView as? MarkdownCopyWebView)?.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
             coordinator?.onSearchSelection(text)
@@ -132,8 +174,12 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         let shouldApplySelection = context.coordinator.lastSelectedRange != selectedRange
         context.coordinator.lastSelectedRange = selectedRange
         if context.coordinator.lastHTML != html {
-            context.coordinator.lastHTML = html
-            webView.loadHTMLString(html, baseURL: baseURL)
+            context.coordinator.load(
+                html,
+                baseURL: baseURL,
+                showing: .init(documentID: documentID, source: source),
+                in: webView
+            )
         } else if shouldApplySelection && !didReceivePreviewOriginatedSelection {
             (webView as? MarkdownCopyWebView)?.applySelection(selectedRange)
         }
@@ -143,6 +189,8 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         coordinator.selectionSynchronizer?.setFlushSelectionHandler(nil)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: copyBlockMessageHandlerName)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: previewSelectionChangedMessageHandlerName)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: requestImageAccessMessageHandlerName)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: previewScrollChangedMessageHandlerName)
     }
 }
 #elseif os(macOS)
@@ -150,11 +198,16 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     let source: String
     let html: String
     let baseURL: URL?
+    /// Which document this is, so a reload of the same one can keep the reader's
+    /// place. Without it every reload starts at the top.
+    var documentID: String? = nil
     let selectedRange: MarkdownSelectionRange?
     var selectionSynchronizer: PreviewSelectionSynchronizer?
     var onSelectedTextChange: (String?) -> Void = { _ in }
     var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
     var onSearchSelection: (String) -> Void = { _ in }
+    /// The reader pressed the button that stands in for an unreadable image.
+    var onRequestImageAccess: () -> Void = {}
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String?
@@ -167,6 +220,14 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         var onSelectedTextChange: (String?) -> Void = { _ in }
         var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
         var onSearchSelection: (String) -> Void = { _ in }
+        var onRequestImageAccess: () -> Void = {}
+        /// What the page now loading, or last loaded, is showing.
+        var loadedContent: PreviewScrollRestoration.Content?
+        /// Where the reader last was, as the page reported it.
+        var lastScrollPosition: PreviewScrollPosition?
+        /// Where to put the reader when the page now loading has finished.
+        var scrollRestoration: PreviewScrollRestoration.Restoration = .top
+        var isLoadingPage = false
 
         func webView(
             _ webView: WKWebView,
@@ -185,6 +246,9 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             self.webView?.applySelection(lastSelectedRange)
+            // After the selection, which centres itself: on a reload the
+            // reader's place wins.
+            restoreScrollPosition(in: webView)
             self.webView?.takeFirstResponderIfUnclaimed()
         }
     }
@@ -211,6 +275,20 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         )
         configuration.userContentController.addUserScript(
             WKUserScript(
+                source: previewImageAccessButtonScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+        )
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: previewScrollReportScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+        )
+        configuration.userContentController.addUserScript(
+            WKUserScript(
                 source: previewSelectionChangeScript,
                 injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
@@ -218,6 +296,8 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         )
         configuration.userContentController.add(context.coordinator, name: copyBlockMessageHandlerName)
         configuration.userContentController.add(context.coordinator, name: previewSelectionChangedMessageHandlerName)
+        configuration.userContentController.add(context.coordinator, name: requestImageAccessMessageHandlerName)
+        configuration.userContentController.add(context.coordinator, name: previewScrollChangedMessageHandlerName)
 
         let webView = MarkdownCopyWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -228,13 +308,18 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         context.coordinator.onSelectedTextChange = onSelectedTextChange
         context.coordinator.onSelectedRangesChange = onSelectedRangesChange
         context.coordinator.onSearchSelection = onSearchSelection
+        context.coordinator.onRequestImageAccess = onRequestImageAccess
         context.coordinator.updateFlushSelectionHandler()
         webView.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
             coordinator?.onSearchSelection(text)
         }
         webView.setValue(false, forKey: "drawsBackground")
-        webView.loadHTMLString(html, baseURL: baseURL)
-        context.coordinator.lastHTML = html
+        context.coordinator.load(
+            html,
+            baseURL: baseURL,
+            showing: .init(documentID: documentID, source: source),
+            in: webView
+        )
         return webView
     }
 
@@ -245,6 +330,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         context.coordinator.onSelectedTextChange = onSelectedTextChange
         context.coordinator.onSelectedRangesChange = onSelectedRangesChange
         context.coordinator.onSearchSelection = onSearchSelection
+        context.coordinator.onRequestImageAccess = onRequestImageAccess
         context.coordinator.updateFlushSelectionHandler()
         (webView as? MarkdownCopyWebView)?.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
             coordinator?.onSearchSelection(text)
@@ -259,8 +345,12 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         let shouldApplySelection = context.coordinator.lastSelectedRange != selectedRange
         context.coordinator.lastSelectedRange = selectedRange
         if context.coordinator.lastHTML != html {
-            context.coordinator.lastHTML = html
-            webView.loadHTMLString(html, baseURL: baseURL)
+            context.coordinator.load(
+                html,
+                baseURL: baseURL,
+                showing: .init(documentID: documentID, source: source),
+                in: webView
+            )
         } else if shouldApplySelection && !didReceivePreviewOriginatedSelection {
             (webView as? MarkdownCopyWebView)?.applySelection(selectedRange)
             if selectedRange != nil {
@@ -273,6 +363,8 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         coordinator.selectionSynchronizer?.setFlushSelectionHandler(nil)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: copyBlockMessageHandlerName)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: previewSelectionChangedMessageHandlerName)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: requestImageAccessMessageHandlerName)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: previewScrollChangedMessageHandlerName)
     }
 }
 #endif
@@ -305,6 +397,43 @@ document.addEventListener('click', (event) => {
 }, { capture: true });
 """
 
+/// The button `MarkdownImageURL.replacingUnreadableImages` puts in place of an
+/// image the app is not allowed to read. Pressing it asks the app to ask the
+/// reader; the app decides what that means.
+let previewImageAccessButtonScript = """
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-image-access-button]');
+  if (!button) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  window.webkit?.messageHandlers?.requestImageAccess?.postMessage({});
+}, { capture: true });
+"""
+
+/// Tells the app where the reader is, so a reload can put them back. Scrolling
+/// fires far more often than the answer is needed, so it is reported at most
+/// ten times a second.
+private let previewScrollReportScript = """
+(() => {
+  let pendingReport = null;
+
+  window.addEventListener('scroll', () => {
+    if (pendingReport !== null) {
+      return;
+    }
+
+    pendingReport = setTimeout(() => {
+      pendingReport = null;
+      window.webkit?.messageHandlers?.previewScrollChanged?.postMessage(\(PreviewScrollRestoration.positionExpression));
+    }, 100);
+  }, { passive: true });
+})();
+"""
+
 private let previewSelectedHTMLScript = """
 (() => {
   const selection = window.getSelection();
@@ -312,12 +441,12 @@ private let previewSelectedHTMLScript = """
     return null;
   }
 
-  // The Copy button's own markup would come along with the text, so drop it.
+  // The preview's own buttons would come along with the text, so drop them.
   const container = document.createElement('div');
   for (let index = 0; index < selection.rangeCount; index += 1) {
     container.appendChild(selection.getRangeAt(index).cloneContents());
   }
-  container.querySelectorAll('[data-copy-button]').forEach((button) => button.remove());
+  container.querySelectorAll('[data-copy-button], [data-image-access-button]').forEach((button) => button.remove());
 
   const html = container.innerHTML;
   return html && html.trim().length > 0 ? html : null;
@@ -620,6 +749,104 @@ struct PreviewCopyBlockMessage: Equatable {
         self.start = startValue
         self.end = endValue
         self.kind = (payload["kind"] as? String).flatMap(MarkdownCopyableBlockKind.init(rawValue:))
+    }
+}
+
+/// Where the reader is in the preview, as the page reports it.
+struct PreviewScrollPosition: Equatable {
+    var x: Double
+    var y: Double
+    /// How far down the page can scroll. Zero when the whole page fits.
+    var maxY: Double
+
+    init(x: Double, y: Double, maxY: Double) {
+        self.x = x
+        self.y = y
+        self.maxY = maxY
+    }
+
+    /// Reads the `[x, y, maxY]` the page posts. Rubber-banding reports offsets
+    /// past either end of the page, which are not places, so they are clamped.
+    init?(messageBody: Any) {
+        guard let values = (messageBody as? [NSNumber])?.map(\.doubleValue),
+              values.count == 3,
+              values.allSatisfy(\.isFinite) else {
+            return nil
+        }
+
+        let maxY = max(0, values[2])
+        self.x = max(0, values[0])
+        self.y = min(max(0, values[1]), maxY)
+        self.maxY = maxY
+    }
+}
+
+/// Keeps the reader's place when the preview reloads.
+///
+/// The preview reloads the whole page whenever its HTML changes, and a reload
+/// starts at the top. When the change is to the document already on screen — it
+/// was edited on disk, the text size changed, a folder was granted for its
+/// images — the reader should be left where they were. Reading a long plan
+/// while it is being edited is the case that matters most.
+enum PreviewScrollRestoration {
+    /// What the preview is showing: which document, and its text.
+    struct Content: Equatable {
+        var documentID: String?
+        var source: String
+    }
+
+    /// Where a freshly loaded page should be scrolled to.
+    enum Restoration: Equatable {
+        /// Leave it where a load puts it.
+        case top
+        /// The same distance down the page as before.
+        case offset(x: Double, y: Double)
+        /// The same way down the page as before, as a share of how far it scrolls.
+        case fraction(x: Double, ofMaxY: Double)
+
+        /// The script that carries it out, or nil when there is nothing to do.
+        var script: String? {
+            switch self {
+            case .top:
+                return nil
+            case let .offset(x, y):
+                return "window.scrollTo(\(x), \(y));"
+            case let .fraction(x, fraction):
+                return "window.scrollTo(\(x), \(fraction) * \(PreviewScrollRestoration.maxYExpression));"
+            }
+        }
+    }
+
+    /// How far down the page can scroll, as the page computes it.
+    static let maxYExpression = "Math.max(0, document.documentElement.scrollHeight - window.innerHeight)"
+
+    /// What the page posts, and what `PreviewScrollPosition` reads.
+    static let positionExpression = "[window.scrollX, window.scrollY, \(maxYExpression)]"
+
+    /// Where to put the reader once `current` has replaced `previous`, given
+    /// where they were.
+    ///
+    /// Only a reload of the same document keeps the place; anything else is a
+    /// different page and starts at the top. If the text changed, the offset is
+    /// kept, which stays true for everything above the edit. If the text is the
+    /// same and only its drawing changed, the height did, so the same offset
+    /// would land somewhere else and the proportion is kept instead.
+    static func restoration(
+        of position: PreviewScrollPosition?,
+        from previous: Content?,
+        to current: Content
+    ) -> Restoration {
+        guard let position,
+              let documentID = current.documentID,
+              previous?.documentID == documentID else {
+            return .top
+        }
+        guard position.x > 0 || position.y > 0 else { return .top }
+
+        if previous?.source == current.source, position.maxY > 0 {
+            return .fraction(x: position.x, ofMaxY: position.y / position.maxY)
+        }
+        return .offset(x: position.x, y: position.y)
     }
 }
 
@@ -941,6 +1168,41 @@ private extension MarkdownCopyWebView {
     }
 }
 
+extension MarkdownPreviewWebView.Coordinator {
+    /// Loads `html`, noting where to put the reader back if this is the
+    /// document they were already reading.
+    func load(
+        _ html: String,
+        baseURL: URL?,
+        showing content: PreviewScrollRestoration.Content,
+        in webView: WKWebView
+    ) {
+        scrollRestoration = PreviewScrollRestoration.restoration(
+            of: lastScrollPosition,
+            from: loadedContent,
+            to: content
+        )
+        if scrollRestoration == .top {
+            // The position belonged to the page being replaced.
+            lastScrollPosition = nil
+        }
+
+        loadedContent = content
+        lastHTML = html
+        isLoadingPage = true
+        webView.loadHTMLString(html, baseURL: baseURL)
+    }
+
+    /// Puts the reader back where `load` found them, once the page is there to
+    /// be scrolled.
+    func restoreScrollPosition(in webView: WKWebView) {
+        isLoadingPage = false
+        guard let script = scrollRestoration.script else { return }
+        scrollRestoration = .top
+        webView.evaluateJavaScript(script)
+    }
+}
+
 extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
     func updateFlushSelectionHandler() {
         selectionSynchronizer?.setFlushSelectionHandler { [weak self] completion in
@@ -997,6 +1259,16 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
                 lastPreviewSelectedText = payload.selectedText
             }
             onSelectedTextChange(payload.selectedText)
+        case requestImageAccessMessageHandlerName:
+            onRequestImageAccess()
+        case previewScrollChangedMessageHandlerName:
+            // A page that is still loading is not where the reader left it;
+            // what it reports would overwrite the place being kept for them.
+            guard !isLoadingPage,
+                  let position = PreviewScrollPosition(messageBody: message.body) else {
+                return
+            }
+            lastScrollPosition = position
         default:
             return
         }

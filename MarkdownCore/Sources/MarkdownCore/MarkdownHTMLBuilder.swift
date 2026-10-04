@@ -136,6 +136,25 @@ public enum MarkdownHTMLBuilder {
             .md-copy-button:active {
               background: var(--copy-button-background-active);
             }
+            .md-image-access-button {
+              border: 0;
+              border-radius: 999px;
+              padding: 0.3rem 0.75rem;
+              background: var(--copy-button-background);
+              color: inherit;
+              font-size: 0.82em;
+              font-weight: 600;
+              cursor: pointer;
+              user-select: none;
+              -webkit-user-select: none;
+              -webkit-touch-callout: none;
+            }
+            .md-image-access-button::before {
+              content: attr(data-label);
+            }
+            .md-image-access-button:active {
+              background: var(--copy-button-background-active);
+            }
             h1, h2, h3, h4, h5, h6 {
               margin: 1.4em 0 0.6em 0;
               line-height: 1.2;
@@ -959,7 +978,7 @@ public enum MarkdownHTMLBuilder {
             .replacingOccurrences(of: "'", with: "&#39;")
     }
 
-    private static func escapeHTMLAttribute(_ text: String) -> String {
+    static func escapeHTMLAttribute(_ text: String) -> String {
         escapeHTML(text)
     }
 }

@@ -27,6 +27,9 @@ final class PreviewSelectionSynchronizer: ObservableObject {
 struct MarkdownPreviewView: View {
     let source: String
     let baseURL: URL?
+    /// Which document this is, so the preview can keep the reader's place when
+    /// that same document is redrawn. Without it every redraw starts at the top.
+    var documentID: String? = nil
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
     var selectionSynchronizer: PreviewSelectionSynchronizer?
@@ -36,25 +39,6 @@ struct MarkdownPreviewView: View {
 
     @ObservedObject private var accessStore = DirectoryAccessStore.shared
     @State private var isRequestingFolderAccess = false
-
-    /// The rendered document, with local image references pointed at the app's
-    /// own URL scheme.
-    ///
-    /// `WKWebView.loadHTMLString(_:baseURL:)` gives the web content process no
-    /// read access to the file system, so a relative image reference never loads
-    /// however correct the base URL is. `MarkdownImageSchemeHandler` serves those
-    /// URLs from the app process instead.
-    private var html: String {
-        let document = MarkdownHTMLBuilder.document(for: source, contentScale: textSize.scaleFactor, softBreak: .lineBreak)
-        guard let baseURL else { return document }
-
-        // The rewrite checks each image exists, which is itself a privileged
-        // read, so it has to happen inside the granted scope. Without this a
-        // folder grant would appear to do nothing.
-        return accessStore.withAccess(to: baseURL) {
-            MarkdownImageURL.rewritingLocalImages(in: document, relativeTo: baseURL)
-        }
-    }
 
     /// Why the document's images failed, if any did.
     ///
@@ -66,53 +50,88 @@ struct MarkdownPreviewView: View {
         case missing
     }
 
-    private var imageProblem: ImageProblem {
-        guard let baseURL else { return .none }
+    /// The rendered document, and what if anything is wrong with its images.
+    private struct Rendering {
+        let html: String
+        let imageProblem: ImageProblem
+    }
 
-        // Telling an unreadable file from an absent one means listing the
-        // directory, which is privileged in the same way the rewrite in `html`
-        // is. Outside the granted scope the listing fails, every unresolved
-        // image is classified `.unreadable`, and the folder prompt is offered
-        // for files that are simply not there — precisely the promise this
-        // distinction exists to avoid making.
-        //
-        // `html` is evaluated first and separately: it takes the same scope
-        // itself, and nesting the two would rely on the access count being
-        // balanced rather than making the scope plainly visible here.
-        let rendered = html
-        let unresolved = accessStore.withAccess(to: baseURL) {
-            MarkdownImageURL.unresolvedLocalImages(in: rendered, relativeTo: baseURL)
+    /// What the button that stands in for an unreadable image says, and its
+    /// tooltip. The same wording as the banner above the preview, so there is
+    /// one set of strings to localize.
+    private static let accessButtonLabel = String(localized: "Allow…")
+    private static let accessExplanation = String(localized: "Images in this document need permission to load.")
+
+    /// Renders the document with local image references pointed at the app's own
+    /// URL scheme, and any image the app is not allowed to read replaced by a
+    /// button that asks for access.
+    ///
+    /// `WKWebView.loadHTMLString(_:baseURL:)` gives the web content process no
+    /// read access to the file system, so a relative image reference never loads
+    /// however correct the base URL is. `MarkdownImageSchemeHandler` serves those
+    /// URLs from the app process instead.
+    private var rendering: Rendering {
+        let document = MarkdownHTMLBuilder.document(for: source, contentScale: textSize.scaleFactor, softBreak: .lineBreak)
+        guard let baseURL else { return Rendering(html: document, imageProblem: .none) }
+
+        // Every step here is a privileged read: the rewrite checks each image
+        // exists, and telling an unreadable file from an absent one means
+        // listing the directory. So all of it happens inside the granted scope.
+        // Outside it a folder grant would appear to do nothing, the listing
+        // would fail, and every unresolved image would be classified
+        // `.unreadable` — offering access for files that are simply not there,
+        // precisely the promise the distinction exists to avoid making.
+        return accessStore.withAccess(to: baseURL) {
+            let rewritten = MarkdownImageURL.rewritingLocalImages(in: document, relativeTo: baseURL)
+            let unresolved = MarkdownImageURL.unresolvedLocalImages(in: rewritten, relativeTo: baseURL)
+            guard !unresolved.isEmpty else { return Rendering(html: rewritten, imageProblem: .none) }
+
+            // Debug level: this renders on every preview update, so it should
+            // not persist in the system log by default. Paths are the user's, so
+            // they are left to the default redaction.
+            Self.log.debug("""
+                Unresolved images: \(unresolved.map { "\($0.source) (\($0.reason))" }.joined(separator: ", ")); \
+                grants: \(accessStore.grantedDirectories.map(\.path).joined(separator: ", "))
+                """)
+
+            // Access is the actionable problem, so it wins when both are present.
+            guard unresolved.contains(where: { $0.reason == .unreadable }) else {
+                return Rendering(html: rewritten, imageProblem: .missing)
+            }
+
+            // The banner above the preview is easy to miss — the document
+            // renders normally around the gap, and the eye goes to the content.
+            // So the gap itself becomes the way to fix it.
+            let html = MarkdownImageURL.replacingUnreadableImages(
+                in: rewritten,
+                relativeTo: baseURL,
+                label: Self.accessButtonLabel,
+                explanation: Self.accessExplanation
+            )
+            return Rendering(html: html, imageProblem: .unreadable)
         }
-        guard !unresolved.isEmpty else { return .none }
-
-        // Debug level: this renders on every preview update, so it should not
-        // persist in the system log by default. Paths are the user's, so they
-        // are left to the default redaction.
-        Self.log.debug("""
-            Unresolved images: \(unresolved.map { "\($0.source) (\($0.reason))" }.joined(separator: ", ")); \
-            grants: \(accessStore.grantedDirectories.map(\.path).joined(separator: ", "))
-            """)
-
-        // Access is the actionable problem, so it wins when both are present.
-        return unresolved.contains { $0.reason == .unreadable } ? .unreadable : .missing
     }
 
     private static let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "Images")
 
     var body: some View {
+        let rendering = rendering
+
         MarkdownPreviewWebView(
             source: source,
-            html: html,
+            html: rendering.html,
             baseURL: baseURL,
+            documentID: documentID,
             selectedRange: selections.first,
             selectionSynchronizer: selectionSynchronizer,
             onSelectedTextChange: onSelectedTextChange,
             onSelectedRangesChange: onSelectedRangesChange,
-            onSearchSelection: onSearchSelection
+            onSearchSelection: onSearchSelection,
+            onRequestImageAccess: { isRequestingFolderAccess = true }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .safeAreaInset(edge: .top, spacing: 0) {
-            switch imageProblem {
+            switch rendering.imageProblem {
             case .none:
                 EmptyView()
             case .unreadable:

@@ -102,6 +102,72 @@ public enum MarkdownImageURL {
         }
     }
 
+    /// The attribute that marks the button standing in for an unreadable image.
+    /// The preview's click handler looks for it.
+    public static let accessButtonAttribute = "data-image-access-button"
+
+    /// Returns `html` with every local image that is there but cannot be read
+    /// replaced by a button that asks for access to it.
+    ///
+    /// A broken image says nothing about why it is broken, and the place the
+    /// reader is looking when they notice it is the image itself — so that is
+    /// where the means of fixing it goes. Only the unreadable case is replaced:
+    /// a file that is simply absent stays a broken image, because a button
+    /// offering access would promise a fix that granting cannot deliver.
+    ///
+    /// Run this on markup that has already been through
+    /// `rewritingLocalImages(in:relativeTo:)`, so the images still pointing at a
+    /// local path are the ones that could not be resolved.
+    ///
+    /// `label` is what the button says and `explanation` its tooltip. Both are
+    /// carried in attributes and the label is drawn by the stylesheet, so the
+    /// button puts no text node in the document: the preview maps selections and
+    /// search results by walking text nodes, and one more would shift every
+    /// offset after it.
+    public static func replacingUnreadableImages(
+        in html: String,
+        relativeTo baseURL: URL?,
+        label: String,
+        explanation: String,
+        fileManager: FileManager = .default
+    ) -> String {
+        let unreadable = Set(
+            unresolvedLocalImages(in: html, relativeTo: baseURL, fileManager: fileManager)
+                .filter { $0.reason == .unreadable }
+                .map(\.source)
+        )
+        guard !unreadable.isEmpty else { return html }
+
+        let escapedLabel = MarkdownHTMLBuilder.escapeHTMLAttribute(label)
+        let button = "<button type=\"button\" class=\"md-image-access-button\" \(accessButtonAttribute)"
+            + " data-label=\"\(escapedLabel)\" aria-label=\"\(escapedLabel)\""
+            + " title=\"\(MarkdownHTMLBuilder.escapeHTMLAttribute(explanation))\"></button>"
+
+        var result = ""
+        var cursor = html.startIndex
+
+        while let match = html.range(of: "<img src=\"", range: cursor..<html.endIndex) {
+            // Attribute values are escaped, so the first `>` past the source is
+            // the end of the tag.
+            guard let closingQuote = html.range(of: "\"", range: match.upperBound..<html.endIndex),
+                  let tagEnd = html.range(of: ">", range: closingQuote.upperBound..<html.endIndex) else {
+                break
+            }
+
+            let source = String(html[match.upperBound..<closingQuote.lowerBound])
+            if unreadable.contains(source) {
+                result += html[cursor..<match.lowerBound]
+                result += button
+            } else {
+                result += html[cursor..<tagEnd.upperBound]
+            }
+            cursor = tagEnd.upperBound
+        }
+
+        result += html[cursor...]
+        return result
+    }
+
     /// Image references in `html` that still point at a local path.
     ///
     /// Run against already-rewritten markup, this is the list of images that

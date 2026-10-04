@@ -7,16 +7,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ## Bugs
 
-- On Mac, double-clicking a `.md` file in Finder while the app is already running makes the whole window disappear and then reappear with the new file. Expected: the window stays on screen and its contents update in place (or the file opens in a window without tearing down the existing one).
-
-### Make the image permission prompt harder to miss.
-  - The "Allow…" prompt is a `safeAreaInset` bar above the preview (`MarkdownPreview/Views/MarkdownPreviewView.swift`, `imageAccessPrompt`). It was missed entirely during the first sandboxed run on macOS: the document itself renders normally, so the eye goes to the content and the bar reads as chrome. The images looked simply broken, with no visible way to fix them.
-  - Convert it to a modal alert, so granting the folder is a decision the user is actually asked to make rather than an offer they can scroll past.
-  - Decide what "once" means before building it, because a modal that reappears is worse than a banner that is ignored. A grant covers a folder, so the natural unit is one prompt per folder per document opened — not per image, and not on every preview update, which `imageProblem` is currently evaluated on.
-  - Keep the distinction the banner already makes: only the unreadable case is worth a modal, because granting fixes it. A file that is simply absent must stay a passive notice — see the `.missing` case — since a modal offering a fix that cannot work is worse than saying nothing.
-  - Consider what happens when the user declines. There is currently no persisted "asked and refused" state, so a naive modal would ask again on the next open of the same document.
-  - This is macOS-specific in urgency: on iOS the same bar sits in a much smaller viewport and is correspondingly harder to overlook. Check whether the modal is wanted there too, or whether the banner should stay on iOS.
-
 ### Async file loading off `@Main`.
   - Read source files in a separate task, not on `@Main`.
   - If loading takes longer than 0.5 seconds, show a spinner with "Loading...".

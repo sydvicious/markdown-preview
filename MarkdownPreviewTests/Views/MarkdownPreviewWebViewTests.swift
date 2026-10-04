@@ -379,3 +379,125 @@ struct MarkdownPreviewWebViewTests {
         }
     }
 }
+
+/// A reload starts the page at the top. When the preview reloads because the
+/// document it is already showing changed, the reader should be left where they
+/// were — reading a long plan while it is being edited is the case that matters.
+struct PreviewScrollRestorationTests {
+
+    private typealias Content = PreviewScrollRestoration.Content
+
+    private let plan = "/tmp/notes/plan.md"
+    private let halfway = PreviewScrollPosition(x: 0, y: 1200, maxY: 2400)
+
+    @Test func anEditedDocumentKeepsTheReadersOffset() {
+        let restoration = PreviewScrollRestoration.restoration(
+            of: halfway,
+            from: Content(documentID: plan, source: "before"),
+            to: Content(documentID: plan, source: "after")
+        )
+
+        // The text changed, so the page's height may have too. The offset is
+        // what stays true for everything above the edit.
+        #expect(restoration == .offset(x: 0, y: 1200))
+    }
+
+    // A text size change, or an image becoming readable, redraws the same text
+    // at a different height. The same offset would land somewhere else, so the
+    // reader is put back the same way down the page.
+    @Test func theSameTextRedrawnKeepsTheReadersPlaceInProportion() {
+        let restoration = PreviewScrollRestoration.restoration(
+            of: halfway,
+            from: Content(documentID: plan, source: "same"),
+            to: Content(documentID: plan, source: "same")
+        )
+
+        #expect(restoration == .fraction(x: 0, ofMaxY: 0.5))
+    }
+
+    @Test func aDifferentDocumentStartsAtTheTop() {
+        let restoration = PreviewScrollRestoration.restoration(
+            of: halfway,
+            from: Content(documentID: plan, source: "same"),
+            to: Content(documentID: "/tmp/notes/other.md", source: "same")
+        )
+
+        #expect(restoration == .top)
+    }
+
+    @Test func theFirstLoadStartsAtTheTop() {
+        let restoration = PreviewScrollRestoration.restoration(
+            of: halfway,
+            from: nil,
+            to: Content(documentID: plan, source: "text")
+        )
+
+        #expect(restoration == .top)
+    }
+
+    // Without an identity there is no telling an update from a different
+    // document that happens to have the same text.
+    @Test func contentWithNoIdentityStartsAtTheTop() {
+        let restoration = PreviewScrollRestoration.restoration(
+            of: halfway,
+            from: Content(documentID: nil, source: "same"),
+            to: Content(documentID: nil, source: "same")
+        )
+
+        #expect(restoration == .top)
+    }
+
+    @Test func aReaderAlreadyAtTheTopStaysThere() {
+        let edited = PreviewScrollRestoration.restoration(
+            of: PreviewScrollPosition(x: 0, y: 0, maxY: 2400),
+            from: Content(documentID: plan, source: "before"),
+            to: Content(documentID: plan, source: "after")
+        )
+        let unknown = PreviewScrollRestoration.restoration(
+            of: nil,
+            from: Content(documentID: plan, source: "before"),
+            to: Content(documentID: plan, source: "after")
+        )
+
+        #expect(edited == .top)
+        #expect(unknown == .top)
+    }
+
+    // A page that fits has nowhere to scroll, so there is no proportion to keep.
+    @Test func aPageThatFitsHasNoProportionToKeep() {
+        let restoration = PreviewScrollRestoration.restoration(
+            of: PreviewScrollPosition(x: 40, y: 0, maxY: 0),
+            from: Content(documentID: plan, source: "same"),
+            to: Content(documentID: plan, source: "same")
+        )
+
+        #expect(restoration == .offset(x: 40, y: 0))
+    }
+
+    @Test func scrollPositionIsReadFromThePagesMessage() throws {
+        let position = try #require(
+            PreviewScrollPosition(messageBody: [NSNumber(value: 12.5), NSNumber(value: 640), NSNumber(value: 1800)])
+        )
+
+        #expect(position == PreviewScrollPosition(x: 12.5, y: 640, maxY: 1800))
+    }
+
+    // Rubber-banding reports offsets past either end; they are not places.
+    @Test func scrollPositionIsClampedToThePage() throws {
+        let above = try #require(
+            PreviewScrollPosition(messageBody: [NSNumber(value: -8), NSNumber(value: -30), NSNumber(value: 1800)])
+        )
+        let below = try #require(
+            PreviewScrollPosition(messageBody: [NSNumber(value: 0), NSNumber(value: 1900), NSNumber(value: 1800)])
+        )
+
+        #expect(above == PreviewScrollPosition(x: 0, y: 0, maxY: 1800))
+        #expect(below == PreviewScrollPosition(x: 0, y: 1800, maxY: 1800))
+    }
+
+    @Test func aMalformedScrollMessageIsIgnored() {
+        #expect(PreviewScrollPosition(messageBody: "top") == nil)
+        #expect(PreviewScrollPosition(messageBody: [NSNumber(value: 1), NSNumber(value: 2)]) == nil)
+        #expect(PreviewScrollPosition(messageBody: [NSNumber(value: 0), NSNumber(value: Double.nan), NSNumber(value: 10)]) == nil)
+    }
+}

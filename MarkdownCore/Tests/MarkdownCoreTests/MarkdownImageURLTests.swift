@@ -408,3 +408,138 @@ struct UnresolvedImageReasonTests {
         #expect(MarkdownImageURL.unresolvedLocalImages(in: html, relativeTo: directory).isEmpty)
     }
 }
+
+struct UnreadableImageButtonTests {
+
+    private func makeDirectory() throws -> URL {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("UnreadableImageButtonTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// A folder the test cannot list, standing in for one the sandbox refuses.
+    private func makeUnlistableDirectory() throws -> URL {
+        let directory = try makeDirectory()
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: directory.path)
+        return directory
+    }
+
+    private func remove(_ directory: URL) {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func replacing(_ html: String, in directory: URL?) -> String {
+        MarkdownImageURL.replacingUnreadableImages(
+            in: html,
+            relativeTo: directory,
+            label: "Allow…",
+            explanation: "Images need permission."
+        )
+    }
+
+    // A broken image says nothing about why it is broken or what to do about
+    // it. Where access is the problem, the image's place is taken by the means
+    // of fixing it.
+    @Test func anUnreadableImageBecomesAButtonThatAsksForAccess() async throws {
+        let directory = try makeUnlistableDirectory()
+        defer { remove(directory) }
+
+        let html = replacing(
+            "<p>before <img src=\"photo.jpg\" alt=\"A photograph\" title=\"Lil Syd\" /> after</p>",
+            in: directory
+        )
+
+        #expect(html == """
+            <p>before <button type="button" class="md-image-access-button" \
+            data-image-access-button data-label="Allow…" aria-label="Allow…" \
+            title="Images need permission."></button> after</p>
+            """)
+    }
+
+    // The preview maps selections and search results by walking text nodes, so
+    // the button's wording is carried in attributes and drawn by the
+    // stylesheet. A text node here would shift every offset after it.
+    @Test func theButtonAddsNoTextToTheDocument() async throws {
+        let directory = try makeUnlistableDirectory()
+        defer { remove(directory) }
+
+        let html = replacing("<p><img src=\"photo.jpg\" alt=\"A photograph\" /></p>", in: directory)
+
+        #expect(html.contains("></button>"))
+        #expect(!html.contains("<img"))
+    }
+
+    // Granting a folder cannot conjure a file that is not in it, so a missing
+    // image is left as the broken image it is.
+    @Test func aMissingImageIsLeftAlone() async throws {
+        let directory = try makeDirectory()
+        defer { remove(directory) }
+
+        let original = "<p><img src=\"absent.png\" alt=\"\" /></p>"
+
+        #expect(replacing(original, in: directory) == original)
+    }
+
+    @Test func onlyTheUnreadableImagesAreReplaced() async throws {
+        let directory = try makeDirectory()
+        defer { remove(directory) }
+
+        let locked = directory.appendingPathComponent("locked.png")
+        try Data([0x89, 0x50]).write(to: locked)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: locked.path) }
+
+        let html = replacing(
+            """
+            <p><img src="mdimage://local/tmp/served.png?key=k" alt="served" /></p>\
+            <p><img src="https://example.com/remote.png" alt="remote" /></p>\
+            <p><img src="absent.png" alt="absent" /></p>\
+            <p><img src="locked.png" alt="locked" /></p>
+            """,
+            in: directory
+        )
+
+        #expect(html.contains("<img src=\"mdimage://local/tmp/served.png?key=k\" alt=\"served\" />"))
+        #expect(html.contains("<img src=\"https://example.com/remote.png\" alt=\"remote\" />"))
+        #expect(html.contains("<img src=\"absent.png\" alt=\"absent\" />"))
+        #expect(!html.contains("locked.png"))
+        #expect(html.components(separatedBy: "data-image-access-button").count == 2)
+    }
+
+    @Test func everyUnreadableImageGetsItsOwnButton() async throws {
+        let directory = try makeUnlistableDirectory()
+        defer { remove(directory) }
+
+        let html = replacing(
+            "<p><img src=\"one.png\" alt=\"\" /> and <img src=\"two.png\" alt=\"\" /></p>",
+            in: directory
+        )
+
+        #expect(html.components(separatedBy: "data-image-access-button").count == 3)
+        #expect(html.contains("</button> and <button"))
+    }
+
+    // The wording comes from the app's localized strings, which are not markup.
+    @Test func theWordingIsEscapedForUseInAttributes() async throws {
+        let directory = try makeUnlistableDirectory()
+        defer { remove(directory) }
+
+        let html = MarkdownImageURL.replacingUnreadableImages(
+            in: "<p><img src=\"photo.jpg\" alt=\"\" /></p>",
+            relativeTo: directory,
+            label: "Allow \"this\" <now>",
+            explanation: "Tom & Jerry's"
+        )
+
+        #expect(html.contains("data-label=\"Allow &quot;this&quot; &lt;now&gt;\""))
+        #expect(html.contains("title=\"Tom &amp; Jerry&#39;s\""))
+    }
+
+    @Test func withoutADocumentFolderNothingIsReplaced() async throws {
+        let original = "<p><img src=\"photo.jpg\" alt=\"\" /></p>"
+
+        #expect(replacing(original, in: nil) == original)
+    }
+}

@@ -84,6 +84,11 @@ struct WebKitTextNodeAlignmentTests {
     /// for the first block: the concatenated text, and the combined length the
     /// walker computed.
     private func webKitBlockText(for source: String) async throws -> (text: String, combinedLength: Int) {
+        try await webKitBlockText(forHTML: MarkdownHTMLBuilder.document(for: source, softBreak: .lineBreak))
+    }
+
+    /// The same, for markup that has been through a later stage than the builder.
+    private func webKitBlockText(forHTML html: String) async throws -> (text: String, combinedLength: Int) {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.addUserScript(
             WKUserScript(
@@ -100,10 +105,7 @@ struct WebKitTextNodeAlignmentTests {
         let observer = LoadObserver()
         webView.navigationDelegate = observer
 
-        webView.loadHTMLString(
-            MarkdownHTMLBuilder.document(for: source, softBreak: .lineBreak),
-            baseURL: nil
-        )
+        webView.loadHTMLString(html, baseURL: nil)
         try await observer.wait()
 
         let result = try await webView.evaluateJavaScript(Self.blockTextScript)
@@ -224,5 +226,207 @@ struct WebKitTextNodeAlignmentTests {
 
         #expect(webKit.text.contains("Copy") == false)
         #expect(webKit.text == MarkdownPreviewTextOffsetMapping(sourceText: quote).displayText)
+    }
+
+    // MARK: - The button that stands in for an unreadable image
+
+    /// A folder the test cannot list, standing in for one the sandbox refuses.
+    private func makeUnlistableDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ImageAccessButton-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: directory.path)
+        return directory
+    }
+
+    private func remove(_ directory: URL) {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    /// The document as the preview renders it when `photo.jpg` cannot be read.
+    private func htmlWithAnAccessButton(for source: String, in directory: URL) -> String {
+        MarkdownImageURL.replacingUnreadableImages(
+            in: MarkdownHTMLBuilder.document(for: source, softBreak: .lineBreak),
+            relativeTo: directory,
+            label: "Allow…",
+            explanation: "Images in this document need permission to load."
+        )
+    }
+
+    /// An image contributes no text, and the button that replaces it must not
+    /// either: its label is drawn by the stylesheet. If WebKit counted the
+    /// label, every selection and search offset after an unreadable image would
+    /// be out by its length.
+    @Test(.timeLimit(.minutes(1)))
+    func webKitSeesNoTextInTheButtonThatReplacesAnUnreadableImage() async throws {
+        let directory = try makeUnlistableDirectory()
+        defer { remove(directory) }
+        let source = "before ![A photograph](photo.jpg) after"
+
+        let html = htmlWithAnAccessButton(for: source, in: directory)
+        try #require(html.contains(MarkdownImageURL.accessButtonAttribute))
+
+        let withImage = try await webKitBlockText(for: source)
+        let withButton = try await webKitBlockText(forHTML: html)
+
+        #expect(withButton.text == withImage.text)
+        #expect(withButton.text.contains("Allow") == false)
+        #expect(withButton.text == MarkdownPreviewTextOffsetMapping(sourceText: source).displayText)
+    }
+
+    private final class MessageRecorder: NSObject, WKScriptMessageHandler {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var received = false
+
+        func wait() async {
+            if received { return }
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+            }
+        }
+
+        func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            received = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    /// Pressing the button has to reach the app, or it is a broken image with
+    /// rounded corners. The time limit is the assertion: with no message the
+    /// wait never returns.
+    @Test(.timeLimit(.minutes(1)))
+    func pressingTheImageAccessButtonAsksTheApp() async throws {
+        let directory = try makeUnlistableDirectory()
+        defer { remove(directory) }
+        let html = htmlWithAnAccessButton(for: "![A photograph](photo.jpg)", in: directory)
+
+        let recorder = MessageRecorder()
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: previewImageAccessButtonScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+        )
+        configuration.userContentController.add(recorder, name: requestImageAccessMessageHandlerName)
+
+        let webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let observer = LoadObserver()
+        webView.navigationDelegate = observer
+        webView.loadHTMLString(html, baseURL: nil)
+        try await observer.wait()
+
+        let pressed = try await webView.evaluateJavaScript("""
+            (() => {
+              const button = document.querySelector('[data-image-access-button]');
+              if (!button) {
+                return false;
+              }
+              button.click();
+              return true;
+            })();
+            """)
+        try #require(pressed as? Bool == true, "expected the button in the rendered document")
+
+        await recorder.wait()
+    }
+
+    // MARK: - Keeping the reader's place across a reload
+
+    /// A page long enough to scroll, with a line in the middle that an edit can
+    /// change without moving anything above it.
+    private func longDocument(middle: String = "The line in the middle.") -> String {
+        let before = (1...60).map { "Paragraph \($0) of the first half." }
+        let after = (1...60).map { "Paragraph \($0) of the second half." }
+        return (before + [middle] + after).joined(separator: "\n\n")
+    }
+
+    private func makeWebView() -> (WKWebView, LoadObserver) {
+        let webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: WKWebViewConfiguration()
+        )
+        let observer = LoadObserver()
+        webView.navigationDelegate = observer
+        return (webView, observer)
+    }
+
+    private func scrollPosition(in webView: WKWebView) async throws -> PreviewScrollPosition {
+        let reported = try await webView.evaluateJavaScript(PreviewScrollRestoration.positionExpression)
+        return try #require(PreviewScrollPosition(messageBody: reported as Any))
+    }
+
+    /// The decision is tested on its own; this checks that the scripts it
+    /// produces do what they say in the engine that has to run them.
+    @Test(.timeLimit(.minutes(1)))
+    func anEditedDocumentIsPutBackAtTheSameOffset() async throws {
+        let before = longDocument()
+        let after = longDocument(middle: "The line in the middle, rewritten.")
+
+        let (webView, observer) = makeWebView()
+        webView.loadHTMLString(MarkdownHTMLBuilder.document(for: before, softBreak: .lineBreak), baseURL: nil)
+        try await observer.wait()
+        _ = try await webView.evaluateJavaScript("window.scrollTo(0, 900); true")
+        let position = try await scrollPosition(in: webView)
+        try #require(position.y == 900, "the page should be long enough to scroll")
+
+        let restoration = PreviewScrollRestoration.restoration(
+            of: position,
+            from: .init(documentID: "/tmp/plan.md", source: before),
+            to: .init(documentID: "/tmp/plan.md", source: after)
+        )
+
+        let (reloaded, reloadObserver) = makeWebView()
+        reloaded.loadHTMLString(MarkdownHTMLBuilder.document(for: after, softBreak: .lineBreak), baseURL: nil)
+        try await reloadObserver.wait()
+        #expect(try await scrollPosition(in: reloaded).y == 0)
+
+        _ = try await reloaded.evaluateJavaScript(try #require(restoration.script) + " true")
+
+        #expect(try await scrollPosition(in: reloaded).y == 900)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func theSameDocumentAtALargerTextSizeIsPutBackTheSameWayDown() async throws {
+        let source = longDocument()
+
+        let (webView, observer) = makeWebView()
+        webView.loadHTMLString(
+            MarkdownHTMLBuilder.document(for: source, contentScale: 1.0, softBreak: .lineBreak),
+            baseURL: nil
+        )
+        try await observer.wait()
+        _ = try await webView.evaluateJavaScript(
+            "window.scrollTo(0, 0.5 * \(PreviewScrollRestoration.maxYExpression)); true"
+        )
+        let position = try await scrollPosition(in: webView)
+        try #require(position.maxY > 0, "the page should be long enough to scroll")
+
+        let restoration = PreviewScrollRestoration.restoration(
+            of: position,
+            from: .init(documentID: "/tmp/plan.md", source: source),
+            to: .init(documentID: "/tmp/plan.md", source: source)
+        )
+
+        let (reloaded, reloadObserver) = makeWebView()
+        reloaded.loadHTMLString(
+            MarkdownHTMLBuilder.document(for: source, contentScale: 1.5, softBreak: .lineBreak),
+            baseURL: nil
+        )
+        try await reloadObserver.wait()
+        _ = try await reloaded.evaluateJavaScript(try #require(restoration.script) + " true")
+
+        let restored = try await scrollPosition(in: reloaded)
+        try #require(restored.maxY > position.maxY, "larger text should make a taller page")
+        #expect(abs(restored.y / restored.maxY - 0.5) < 0.01)
     }
 }
