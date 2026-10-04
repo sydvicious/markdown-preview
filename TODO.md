@@ -7,6 +7,13 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ## Bugs
 
+### (macOS) Search field focus and Find Next across files.
+  - `Command-F` should put focus on the detail view's Search field.
+  - Tab should take focus to the file list's Search field, and Tab again should take it back.
+  - When the detail view's Search field has focus, Return, the next/previous arrows, `Command-G` and `Shift-Command-G` should send focus back to the detail view — and the navigation should still work.
+  - When focus is in the file list's Search field, `Command-G` should search in the current file. When it reaches the bottom of that file, it should open the next file in the list and highlight the search text there.
+  - When focus is in either Search field, Esc should put focus back in the detail view. It should still clear the search text too, as it does today.
+
 ### Async file loading off `@Main`.
   - Read source files in a separate task, not on `@Main`.
   - If loading takes longer than 0.5 seconds, show a spinner with "Loading...".
