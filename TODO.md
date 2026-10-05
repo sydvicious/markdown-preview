@@ -29,21 +29,11 @@ This document tracks planned work for MarkdownPreviewApp.
   - Symptom driving this: opening a new file visibly freezes the GUI. The whole open path — read, parse, HTML build — currently runs on `@Main`, so the window stops responding until it finishes.
   - Schedule this work after the YMMV-related refactor work.
 
-### Crash at launch: two saved documents that resolve to one file. (fixed 2026-10-04; see what is left)
-  - Found 2026-10-04 by reading the code, during the audit under "Audit the test suites and cover every markdown feature", then reproduced the same day in `DocumentSessionStore` on macOS, in a test, not by launching the app.
-  - To reproduce: open `first/notes.md`; move the file to `second/notes.md`; open it again from there. The first entry is not removed by polling, because its bookmark follows the file, so the list holds the document twice, once under each path, and both are saved. On the next restore both resolved to `second/notes.md`, and `DocumentSearchIndex.rebuild` trapped in `Dictionary(uniqueKeysWithValues:)` — at every launch, because the saved list was still the same.
-  - Fixed: `DocumentSessionStore.restoreMigration` keeps one entry for each resolved path, the one opened last, and `DocumentSearchIndex.rebuild` no longer traps on a repeat. Tests: `DocumentSessionStoreTests/twoSavedEntriesForOneFileRestoreAsOne` and `DocumentSearchIndexTests/aDocumentListedTwiceIsIndexedOnce`. On macOS each runs the step that used to trap in a child process (a Swift Testing exit test), so a regression fails the test and not the whole run; exit tests do not exist on iOS, where the same checks run in the test process.
-  - Left:
-    - Until the next launch the document is still listed twice after it is moved and opened again. The entry under the old path keeps that path as its ID.
-    - iOS gets into the same state: checked 2026-10-04 with a temporary test Syd ran from Xcode on an iOS simulator. After the move the first entry stayed in the list, opening the file again added a second, and the first entry's saved bookmark resolved to the new path (and reported itself stale). So before the fix iOS would have crashed the same way; with the fix the restore came back with one entry.
-    - Not checked in the signed, sandboxed Mac app. The macOS reproduction ran in the unsigned test host.
-
-### (iOS) A scroll restore could fall short of where the reader was. (fixed 2026-10-05; needs a full iOS run to confirm)
-  - First seen 2026-10-04 as `WebKitTextNodeAlignmentTests/anEditedDocumentIsPutBackAtTheSameOffset()` failing now and then in a full run on the iPhone 17 simulator (iOS 27.0), and passing on its own.
-  - Cause, confirmed by the failure of 2026-10-05: the page finishes loading before it has been laid out to its full height. That run failed in the test's own setup — a 121-paragraph page, told to scroll to 900 the moment it loaded, stayed at 0. The app asks for the reader's place back at that same moment (`restoreScrollPosition` in `MarkdownPreviewWebView.swift`), with one scroll, so it could land short in the same way. Seen only in a full iOS test run, with many web views loading at once; not seen in the app.
-  - Fixed in `MarkdownPreview/Web/scroll.js`: a restore that falls short is made again as the page grows, until it lands, the reader moves the page (wheel, touch, mouse or key), or two seconds pass. Nothing changed in Swift.
-  - Tests: six in `scroll.test.mjs`; in `WebKitTextNodeAlignmentTests`, `aRestoreMadeBeforeThePageIsTallEnoughLandsOnceItIs` and `aRestoreDoesNotOverrideTheReader`. The two older scroll tests there now use the app's own restore call and wait for the position to settle.
-  - Left: a full iOS run, which is where it failed and which only Syd can do. Remove this entry when that has passed a few times. Worth a look on a device too: reload a long document with images part way down, and see that the place is kept.
+### (macOS) Check moved documents in the signed, sandboxed app.
+  - A document that is moved or renamed while it is in the list is followed to where it is now, and is given a new bookmark there (`DocumentSessionStore.documentDidMove`). The tests for this (`MovedDocumentTests`) run in the unsigned test host, which has no sandbox, so making that bookmark has never been tried where it could be refused.
+  - To check: open a document, move it in Finder, and see that the list shows it under its new folder; that a save made after the move still reaches the preview; and that opening it from its new place does not list it twice.
+  - If the new bookmark is refused there, the entry keeps the one made at the old path, and the first save after the move that replaces the file will report the document missing. That would want its own fix.
+  - The same goes for restoring a saved list that names one file twice, which a list saved by a build before 0.10 can do: it has only run in the test host.
 
 ## Features
 
@@ -58,7 +48,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - Update the index incrementally as files are added, removed, or changed.
   - Use the index to accelerate file-list and in-document search across larger document sets.
   - Optimize search-field typing performance on macOS (still not perfectly smooth; more work needed).
-    - Current state (2026-07-03): both search fields bind to one shared `searchText` in `SearchViewModel`. On macOS the in-document search (which rebuilds the whole-document text-offset mapping and applies the match selection through a WKWebView JS round trip) and the system find-pasteboard write are both debounced ~200ms off the keystroke path. This helped but did not fully fix macOS typing lag; iOS is smooth.
+    - Current state: both search fields bind to one shared `searchText` in `SearchViewModel`. On macOS the in-document search (which rebuilds the whole-document text-offset mapping and applies the match selection through a WKWebView JS round trip) and the system find-pasteboard write are both debounced ~200ms off the keystroke path. Typing on macOS still lags; iOS is smooth.
     - Idea (Syd; low confidence — "I doubt that will help, but still"): split the currently-unified shared `searchText` back out into a separate backing store per search field (list vs. detail), and reconcile them to the shared search string on the same debounce as the pasteboard. The hope is that a keystroke would update only the focused field's local state instead of driving the whole shared-state re-render.
     - Idea: extract the search field(s) + results into a small subview so typing re-renders only that view, not the entire `ContentView`/`NavigationSplitView` (which currently re-runs the file-list filter and calls `updateNSView` on the preview WKWebView every keystroke).
     - Idea: cache the `MarkdownTextOffsetMapping` per document instead of rebuilding it over the whole document on every search.
@@ -69,7 +59,7 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Claim `.md` as our app's file type on iOS. (investigate)
   - On macOS the app already registers as an `Owner` for `net.daringfireball.markdown` (`LSHandlerRank = Owner`) and the user can make it the default through Finder's Get Info → Open With → Change All. iOS has no equivalent user-facing "default app for this type" control, even though the same document-type declarations already ship (the `INFOPLIST_KEY_CFBundleDocumentTypes` / `UTImportedTypeDeclarations` build settings, shared with macOS).
   - Investigate what actually makes iOS route a `.md` file to this app: how iOS picks a default handler among apps that claim a type, whether `LSHandlerRank` / `CFBundleTypeRole` carry any weight there, the roles of `LSSupportsOpeningDocumentsInPlace` and the document-browser APIs, and whether "open in place" vs. "copy to app" changes Share-sheet placement. Goal: a `.md` opened from Files, Mail, or another app reliably offers — and ideally defaults to — MarkdownPreview.
-  - Observed example (behavior only): Indeed's "Job Search" app claims `.doc` for resume uploads and wins that association aggressively — proof the behavior we want for `.md` is achievable. Do **not** reference Indeed's proprietary sources or Info.plist for this; work from Apple's public documentation on document-type declarations, exported/imported UTIs, and handler rank. Syd is investigating over the next few days (as of 2026-07-26).
+  - Observed example (behavior only): Indeed's "Job Search" app claims `.doc` for resume uploads and wins that association aggressively — proof the behavior we want for `.md` is achievable. Do **not** reference Indeed's proprietary sources or Info.plist for this; work from Apple's public documentation on document-type declarations, exported/imported UTIs, and handler rank.
 
 ### Share sheet (iOS) and printing.
   - **iOS/iPadOS: add a share sheet.** Wire a `ShareLink` / `UIActivityViewController` on the current document so the standard system share sheet is available. This earns its keep beyond sharing: the iOS share sheet carries the system **Print** activity for free, so printing on iOS comes along without a bespoke print path, and the sheet is the natural home for future "send a copy" / export actions. Decide what gets shared — the source `.md` file URL (simplest; shares the original document as-is) versus rendered output (HTML/RTF/PDF), which overlaps with "Export documents to HTML and RTF" and should reuse that path rather than growing a second one.
@@ -105,29 +95,17 @@ This document tracks planned work for MarkdownPreviewApp.
   - Define the policy in `MarkdownCore` so the RTF (`NSAttributedString`) and future HTML-export paths inherit it rather than re-deriving it — same requirement noted for the broader inline-HTML work. For export specifically, a raw `<img>` needs the same `data:`-URI inlining as markdown images (see "Export documents to HTML and RTF").
   - Testable in `MarkdownCore` without the app: a raw `<br>` becomes a break tag while `<br onclick=…>`-style noise stays escaped; a raw `<img src="photo.jpg">` rewrites to a nonced `mdimage://` URL with the same resolution rules as `![]()`; `onerror`/`style`/unknown attributes are stripped; a forged `mdimage://` literal in the source stays escaped and never reaches the handler.
 
-### Open images and links in their natural app on click.
-  - Clicking a rendered image should hand the file (or link) off to the system to open in whatever app naturally handles it: an image file opens in the default app for that image type; a link opens in the browser.
-  - Route this through the system open handler (`NSWorkspace.open` on macOS, `UIApplication.open`/`openURL` on iOS) so the app is not choosing the target app itself.
+### Open images in their natural app on click.
+  - Clicking a rendered image should hand the file off to the system to open in the default app for that image type.
+  - Route this through the system open handler (`NSWorkspace.open` on macOS, `UIApplication.open`/`openURL` on iOS), as links already are, so the app is not choosing the target app itself.
 
 ### Ship a welcome document in the app bundle.
-  - **Partly shipped (2026-07-26 build; see the 2026-07-25 changelog), via a different approach than the bundle-resource design sketched below.** What ships copies `SAMPLE.md` into the app's *private* Documents container on first launch — not the user's real `~/Documents` — guarded by the persisted `bundledSampleSeededKey` flag. Writing only inside its own container keeps the app essentially read-only on the user's file system (on Mac especially: nothing lands in `~/Documents`), and the copy is not surfaced to the user — it does not appear in the Files app. (The `UIFileSharingEnabled` / `LSSupportsOpeningDocumentsInPlace` keys that would expose the container were tried and removed on 2026-07-26; a clean install still showed nothing, and exposing the container was not wanted anyway.) Consequences: the on-disk copy is kept current on version/build bumps independent of list membership (`refreshSeededSampleIfNeeded`), so it is effectively always present and always updated; removing it from the list only hides it. Because the file is not user-reachable, there are no delete-from-disk instructions — the welcome document just tells the user how to remove it from the list. So the bundle-resource bullets below are superseded for the *mechanics*; what remains genuinely open is the *content* (About-box text, feedback/support links) and the re-add affordance below.
-  - Re-adding after removal: since the container copy persists, "reopen the welcome document" means re-adding that copy to the list. Provide a Mac/iPad **menu item** and an **iPhone gesture** that do exactly this (see the Help-menu note under "macOS redesign as a document-based app"). The app never re-adds it automatically; this is the user-initiated way back.
-  - Contingency: if keeping even a private container copy draws negative feedback, stop writing the file and instead surface the content through an in-app bottom sheet (modal). Two content sources, not mutually exclusive: fetch release notes from a remote source (GitLab, or wherever the notes live), and/or render the welcome document straight from the app bundle read-only — never written to disk. Either way the app shows the same information without leaving a file behind, and it subsumes the "Show Release Notes" Help-menu item.
-  - Include a `Welcome.md` in the app bundle and add it to the file list on the very first launch, so a new user is met with a rendered document instead of an empty window.
-  - Once the user removes it from the list, remember that and never add it back. From then on the app behaves exactly as it does today: `ContentViewModel.initialOpenPresentation` (`MarkdownPreview/View Models/ContentViewModel.swift:213`) presents the file picker on macOS when a restore finds no documents, and the empty list offers its placeholder open action.
-    - This is a persisted "welcome document has been dismissed" flag, separate from the file list itself. It has to survive the list going empty by other means, so that emptying the list for unrelated reasons does not bring the welcome document back.
-    - It is a first-launch affordance, not a fallback for an empty list — so it is added once, not every time the list happens to be empty.
-  - The document is a bundle resource rather than a user file, which the file list is not currently built for.
-    - The list persists security-scoped bookmarks (`DocumentSessionStore`), and a bundle resource has none. Expect this to need a distinct case rather than a bookmark, with a stable identity so it is not duplicated across launches.
-    - It is read-only inside the bundle, so anything keyed to a writable user file — text size preferences keyed by path, the search index — needs to tolerate it.
-  - This is about-box content: what the app is and does, how to open files, copyright, and where to send feedback and get support. Keep it short. It is not a feature showcase.
-    - Leave a clear place for the feedback and support links to land once those exist, rather than shipping dead links.
-    - Vet those links against App Review before shipping them. Anything that reads as taking the user outside the app to transact — donations, purchases, subscriptions — is the usual rejection trigger; a plain support or feedback address is not. Keep it to what the app needs.
-    - Localization is the real cost here: this is prose in a bundled file, so every supported language needs its own copy kept in sync, which is worse than localizing a string table. Factor that into how long the document is, and see "Internationalization (i18n) and localization (l10n)".
-    - It is still the first rendered markdown a user sees, so keep it to constructs that currently render correctly (see "Bugs").
+  - How it works, for what follows: on first launch the app copies `SAMPLE.md` into its own private Documents container, not the user's `~/Documents`, and adds it to the list. The copy is kept current with each build whether or not it is in the list, and the user cannot reach it — it is deliberately not shown in the Files app. Removing it from the list only hides it.
+  - Vet the feedback and support links against App Review before shipping them. Anything that reads as taking the user outside the app to transact — donations, purchases, subscriptions — is the usual rejection trigger; a plain support or feedback address is not. Keep it to what the app needs.
+  - Localization is the real cost here: this is prose in a bundled file, so every supported language needs its own copy kept in sync, which is worse than localizing a string table. See "Internationalization (i18n) and localization (l10n)".
+  - Open: re-adding after removal. Since the container copy persists, "reopen the welcome document" means re-adding that copy to the list. Provide a Mac/iPad **menu item** and an **iPhone gesture** that do exactly this (see the Help-menu note under "macOS redesign as a document-based app"). The app never re-adds it automatically; this is the user-initiated way back.
   - iOS and iPadOS have no About box and nowhere else to put this content, so the document in the list on first launch is the whole mechanism there, not a supplement to something else. The alternatives considered were a bottom sheet on first launch — explicitly not wanted — or doing nothing at all. If the bundled document does not work out, doing nothing is the fallback; do not reach for the sheet.
-  - On macOS the same contents also back the About box, from the same file — one source of truth, so the two cannot drift. That work lives with the document-based redesign, which is where the macOS menu structure gets built (see the App menu under "macOS redesign as a document-based app"); the bundled welcome document itself does not wait on it.
-  - Consider a Help menu item to reopen the document, so dismissing it is not irreversible.
+  - On macOS the About box is to be simple, with a button that opens the welcome document. That work lives with the document-based redesign, which is where the macOS menu structure gets built (see the App menu under "macOS redesign as a document-based app"); the bundled welcome document itself does not wait on it.
 
 ### Revisit app icon text.
   - Consider changing the icon text from `MD` to `.md` so it more clearly suggests opening markdown files directly.
@@ -142,17 +120,6 @@ This document tracks planned work for MarkdownPreviewApp.
   - Add a hamburger menu next to the `+` button.
   - Include a menu entry that says `©2026 Syd Polk`.
 
-### Command-line converter for markdown to HTML and RTF.
-  - Now that the engine builds as the `MarkdownCore` library (`Package.swift`, 2026-07-19), add an executable target that converts `.md` files without going near the app. Useful for batch conversion, scripting, and inspecting renderer output directly.
-  - HTML is the easy half: `MarkdownHTMLBuilder.document(for:contentScale:)` already produces a standalone document and needs nothing beyond `MarkdownCore`.
-    - Add a body-only mode as well as the full document. `document(for:)` embeds the whole stylesheet, which is what the preview wants but not what a caller piping into another tool wants.
-  - RTF needs a decision first. The conversion lives in `MarkdownSelectionClipboard.renderedRTF(for:)` (`MarkdownPreview/Utilities/MarkdownSelectionClipboard.swift:57`) and works by handing the generated HTML to `NSAttributedString` and asking for RTF back, so it depends on AppKit/UIKit.
-    - AppKit links fine in a command-line tool on macOS, so this works — but it must not be folded into `MarkdownCore`, which is deliberately free of UI frameworks so it stays command-line testable. Put the RTF path in its own target that depends on `MarkdownCore`.
-    - It also makes RTF output macOS-only, while HTML output would work anywhere Swift runs.
-    - Extract the conversion out of `MarkdownSelectionClipboard` so the app and the tool share one implementation rather than diverging.
-  - Sketch of the interface: read from a file or stdin, write to a file or stdout, `--format html|rtf`, `--fragment` for body-only HTML, and accept several input files for batch conversion.
-  - Worth doing early for its own sake: it gives a fast way to see exactly what the renderer produces for a given input, which is how the conformance-suite failures were diagnosed.
-
 ### Internationalization (i18n) and localization (l10n).
   - Standing design principle: expose as little visible text in the GUI as possible, so there is less to localize. The Mac menu bar unavoidably needs it; nearly everything else can avoid it.
     - The larger saving is layout, not translation. Visible strings are what force layouts to reflow for longer translations and to be re-verified per language; a GUI without them largely sidesteps that, and the menu bar is laid out by the system anyway. This is also why concentrating the strings in accessibility labels and placeholders works: labels never affect layout at all, and a field's placeholder does not resize the field.
@@ -160,7 +127,6 @@ This document tracks planned work for MarkdownPreviewApp.
     - Treat any new user-visible string as a cost to be justified, not a default. This applies to empty states, confirmation copy, and error messages as much as to labels.
     - Accessibility labels and field placeholders are where the strings will unavoidably live, and that is accepted: an icon-only interface leans harder on them, and both are user-facing text that must be localized. Budget for localizing them even though they are not visible clutter — see "Accessibility testing."
   - Localize all user-facing strings across iOS, iPadOS, and macOS.
-  - The bundled welcome document is prose in a file rather than a string table, so it needs a localized copy per language, kept in sync by hand. Keep it short for this reason (see "Ship a welcome document in the app bundle").
   - Verify layout/text behavior for longer localized strings. Scope this to wherever visible text survived the principle above — the fewer such places, the cheaper this step gets.
   - Right-to-left languages need a real pass eventually, since RTL affects layout direction and icon mirroring rather than just string length. **Low priority** given the expected number of RTL users for this app. Accessibility comes first.
 
@@ -182,32 +148,22 @@ This document tracks planned work for MarkdownPreviewApp.
     - Consider incremental/virtualized rendering or chunking so opening, scrolling, and searching stay responsive; guard against pathological inputs (huge single lines/tables, deeply nested structures).
     - Relates to the search-field performance work under "Expand search and indexing."
   - Add robustness for markdown edge cases and malformed input across parser/renderer paths.
-  - See "Audit the test suites and cover every markdown feature" for the parser/renderer test work this depends on.
 
 ### Turn content JavaScript off in the preview. (investigate)
-  - Found 2026-10-05, while adding autolinks: clicking a `javascript:` link ran its script in the preview's page. WebKit does not call `decidePolicyFor` for one, so the app's link handling never saw it. Script in the page can read the key `MarkdownImageURL` puts on image URLs, and so ask the scheme handler for other image files the app can read, and can post to the app's message handlers. The inline form, `[text](javascript:…)`, had behaved this way since links were first rendered.
-  - Fixed in the renderer the same day: a link or autolink whose destination is `javascript:` or `vbscript:` is written without its `href`. Tests: `ScriptLinkTests` in the conformance suite, and `WebKitTextNodeAlignmentTests/clickingAScriptLinkRunsNothing`, which asks WebKit whether anything the renderer wrote is still script to it and clicks every link.
-  - That is one layer. The second would be `allowsContentJavaScript = false` on the preview's `WKWebpagePreferences` — it is set to `true` in both platforms' `makeUIView`/`makeNSView` in `MarkdownPreviewWebView.swift`. Apple documents that setting as stopping script the *content* brings, `javascript:` URLs included, while user scripts and `evaluateJavaScript` still run. If that holds, nothing a document contains could run script even if the renderer let something through, and it is the right default before raw HTML is allowed in ("Support inline HTML").
+  - Why: clicking a `javascript:` link runs its script in the preview's page. WebKit does not call `decidePolicyFor` for one, so the app's link handling never sees it. Script in the page can read the key `MarkdownImageURL` puts on image URLs, and so ask the scheme handler for other image files the app can read, and can post to the app's message handlers.
+  - The renderer is one layer: it writes a link or autolink whose destination is `javascript:` or `vbscript:` without its `href`. The second would be `allowsContentJavaScript = false` on the preview's `WKWebpagePreferences` — it is set to `true` in both platforms' `makeUIView`/`makeNSView` in `MarkdownPreviewWebView.swift`. Apple documents that setting as stopping script the *content* brings, `javascript:` URLs included, while user scripts and `evaluateJavaScript` still run. If that holds, nothing a document contains could run script even if the renderer let something through, and it is the right default before raw HTML is allowed in ("Support inline HTML").
   - To check before changing it: that the app's own scripts still work with it off — the Copy button, selection reporting and applying, the image-access button, scroll reporting and restoring. The WebKit tests build their own configuration, so they do not exercise the app's; they would need to share it, or this wants checking in the running app.
 
-### Audit the test suites and cover every markdown feature.
-  - Done 2026-07-19 for the renderer: `MarkdownCore/Tests/MarkdownCoreConformanceTests` covers the block and inline features against CommonMark 0.31.2 and runs headlessly via `swift test`. It exposed 44 failing cases when it landed; all were fixed.
-  - Done 2026-10-04 for the rest of the test work. The suites landed with the run red, each failure filed under "Bugs". Every one of those was fixed by 2026-10-05, and the whole run is green.
-    - The conformance suite grew from 92 cases to 285, and passes in full. It had 30 failing when it was extended.
-    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 81 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. When these landed, 85 cases failed; all pass as of 2026-10-05.
-    - What those failures led to: the mapping no longer parses markdown itself. `MarkdownVisibleText`, in `MarkdownCore`, builds a document's visible text from the parser's own line rules and from the pass that writes the HTML, and has its own suite, `MarkdownVisibleTextTests`, that runs from the command line.
-    - The no-whitespace-between-tags check covers every block type, and passes.
-    - Not covered, because there is nothing to assert yet: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.
-  - Audit of the other suites, 2026-10-04: what the suites outside the renderer and the offset mappings cover, and what they do not. Done by reading the tests against the sources; nothing was run to produce it. "No test" means the name appears nowhere in either test directory, which was checked by search. Anything said about behavior is from reading the code and is marked so.
-    - A possible crash at launch came out of this audit; it has its own entry under "Bugs".
+### Close the gaps the test audit found.
+  - The gaps, from reading the tests against the sources; nothing was run to find them. "No test" means the name appears nowhere in either test directory, which was checked by search. Anything said about behavior is from reading the code and is marked so.
     - Files with no tests at all:
       - `DirectoryAccessStore` — the format-version discard, restoring and pruning bookmarks, granting. It takes a `UserDefaults`, so it can be tested the way `DocumentSessionStore` is.
       - `MarkdownFile` — the UTF-16 fallback and the undecodable-bytes error; only the UTF-8 path is reached, through other suites.
       - `MarkdownImageSchemeHandler` — the refuse / unreadable / not-an-image chain. `WKURLSchemeTask` is a protocol, so a stand-in works; the hard-wired `DirectoryAccessStore.shared` is what is in the way.
-      - `MarkdownSelectionRange` — every offset in the app goes through it. Tests use it as a helper; none is about it. (`MarkdownSourceLineTable` was in the same state and got its own suite with the line-endings fix.)
+      - `MarkdownSelectionRange` — every offset in the app goes through it. Tests use it as a helper; none is about it.
       - `PreviewSelectionSynchronizer` and the none / missing / unreadable image decision, both in `MarkdownPreviewView.swift`.
     - Untested logic in files that do have tests:
-      - `DocumentSessionStore`: `checkAllDocumentsForChanges`, `acknowledgeMissingActiveDocument`, `handleMissingDocument`, `hasPersistedDocumentList` (the gate for seeding the welcome document), and removal at compact width.
+      - `DocumentSessionStore`: `checkAllDocumentsForChanges` for a document that changed or went missing (only a move is tested), `acknowledgeMissingActiveDocument`, `handleMissingDocument`, `hasPersistedDocumentList` (the gate for seeding the welcome document), and removal at compact width.
       - `ContentViewModel`: `handleFindCommand`, `focusDetailSearch`, `navigateDetailSearch`, `cancelFocusedSearch`, `decreaseSelectedTextSize`, `filteredGroupedDocumentsByParentDirectory` (what the Mac sidebar shows), and every single-column branch — no test sets `usesSingleColumnNavigation`.
       - `MarkdownAppCommandCenter`: six of the nine `perform…` methods are never called (project find, use selection, find next, find previous, larger and smaller text), and `ContentView.syncCommandCenter`, which binds each command to a view-model method, has no test. A transposed argument there would pass everything.
       - `MarkdownSearchSession`: no test moves backward, so Find Previous, its wrap, and reversing direction mid-wrap are untested; so is `refresh` when the matches shrink.
@@ -218,7 +174,7 @@ This document tracks planned work for MarkdownPreviewApp.
       - `MarkdownBlockCopyText`: tab and mixed indentation, a fence indented up to three spaces, a quote's continuation line without its `>`.
     - The seam between Swift and the page's scripts. Each side is tested alone, so a rename or a reordered argument on one side passes every suite and the preview fails without an error.
       - The message-handler names `copyBlock`, `previewSelectionChanged` and `previewScrollChanged` are private to `MarkdownPreviewWebView.swift`; only `requestImageAccess` is checked end to end.
-      - `MarkdownCopyWebView.selectionInvocation`, which writes the six arguments of `applySelection`, is private and untested. The per-feature WebKit test added the same day writes those arguments itself, so it covers the script and `PreviewScriptCall.applySelection`, not that function.
+      - `MarkdownCopyWebView.selectionInvocation`, which writes the six arguments of `applySelection`, is private and untested. The per-feature WebKit test writes those arguments itself, so it covers the script and `PreviewScriptCall.applySelection`, not that function.
       - The link policy is inline in the navigation delegate, with no function to test.
     - Tests that do not test what their name says:
       - `MarkdownImageURLTests/refusesDisallowedExtensionsWhenServing` passes a URL with no key, so it is refused at the key check and never reaches the extension check it is named for. No test presents the right key with a disallowed extension.
@@ -230,36 +186,20 @@ This document tracks planned work for MarkdownPreviewApp.
       - `DirectoryContainment.directory(containing:from:)` and `directory(_:contains:)`: nine of that suite's thirteen tests are of functions the app never calls. `MarkdownImageURL.mimeType(forPathExtension:)` is the same.
       - `DirectoryAccessStore.hasAccess` is used only inside a log message.
     - The scripts' tests have the smallest gaps: a selection whose ends are elements, not text nodes (select-all, triple-click); `preventDefault` and `stopPropagation` in the two button handlers; the `touchend` and `pointerup` listeners.
-  - Audit what the existing suites actually cover. The gaps found so far were large: before the nested-list work there were no tests at all for list parsing or list HTML, despite lists being a core feature. Assume other features are in the same state until checked, and write down what is covered and what is not.
-  - Add a unit test per individual markdown feature: generate a small `.md` fragment exercising exactly that feature, render it, and assert the generated HTML is correct.
-    - Cover at least: headings (ATX and setext), paragraphs, bulleted lists, numbered lists, nested and mixed lists, checklists, blockquotes, fenced code, inline code, emphasis and strong, links, images, horizontal rules, and tables (including alignment, inline code in cells, and explicit line breaks).
-    - Include the inline/intraword cases that are easy to get wrong — the intraword-underscore `snake_case` case is covered and passing, and is worth keeping as a regression guard.
-    - Assert on exact HTML where it is stable. The preview builds display offsets by walking text nodes, so incidental whitespace between tags is a real bug, not a formatting detail — keep asserting that lists emit no whitespace between tags, and extend that check to other block types.
-  - Test the offset mappings alongside the HTML: `.md` source to display text, display text back to source, and source to rendered HTML, round-tripping in both directions.
+  - Markdown features with nothing to assert yet, to cover when they exist: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.
   - Land any future suite complete and runnable even where it exposes bugs. Do not gate landing the tests on fixing what they find, and do not delete or weaken a test to make the suite green.
     - Let the known-failing cases fail the test run (`Cmd-U` / `swift test`). A failing run is the honest signal that the app does not yet behave correctly; do not skip, disable, or wrap them in `withKnownIssue` to get a clean run. The suite goes green when the bugs are fixed, not before. There is no CI yet — if one is added later (see "Get ready for TestFlight"), the same rule applies to it.
-    - Updating a test because the intended behavior changed is a different thing and is expected — four expectations were corrected this way while fixing the conformance failures. What is not allowed is softening an assertion to hide a defect.
+    - Updating a test because the intended behavior changed is a different thing and is expected. What is not allowed is softening an assertion to hide a defect.
     - File each exposed bug as its own entry under "Bugs" so the failing test and the bug are linked.
 
 ### Adopt Swift 6 "MainActor by default" concurrency.
   - Move the targets to the Swift 6 language mode and enable Default Actor Isolation = MainActor (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`). Currently on Swift 5 mode with no default actor isolation.
   - Resolve the concurrency diagnostics this surfaces (Combine `objectWillChange` bridges in `ContentViewModel`, the file-monitor/focus `Task`s, `DispatchQueue.main.async` paths, and the AppKit `AppDelegate`).
   - Remove now-redundant explicit `@MainActor` annotations once the default covers them.
-  - Note: audited 2026-07-03 — all `@Published` mutations already run on the main thread, so nothing currently *requires* `@MainActor` beyond what is annotated (`FileOpenState` is the only non-`@MainActor` observable and is only mutated from the main-thread open paths).
   - Do this as its own pass, not bundled with a release build.
 
-### How the `MarkdownCore` package is attached to the project. (solved 2026-07-19 — do not undo)
-  - `MarkdownCore` must be attached to the project as a **folder in the project navigator**, not via Add Package Dependency → Add Local…. This is the difference between Xcode exposing the package's test targets and hiding them, and it cost most of a day to find.
-    - Attached as an `XCLocalSwiftPackageReference` (the Add Local… route), Xcode offers only the package's *library* product. `MarkdownCoreTests` and `MarkdownCoreConformanceTests` never appear in Product → Scheme → New Scheme… or in a test plan's target picker, and a hand-written plan entry for them is silently ignored.
-    - Attached as a navigator folder, the same plan entry works. In `project.pbxproj` the package is then a `PBXFileReference` with `lastKnownFileType = wrapper`, and the product is an `XCSwiftPackageProductDependency` with no `package =` field.
-    - The published consensus says this is impossible — [that only root packages can be tested](https://forums.swift.org/t/cant-add-swiftpm-testtarget-to-xcode-test-plan/71260), with related reports at [Apple Developer Forums](https://developer.apple.com/forums/thread/764589) and an [earlier thread](https://developer.apple.com/forums/thread/133495). That is wrong, or at least out of date: this project now does it with no workspace, opening the `.xcodeproj` directly.
-  - When re-attaching a package this way, link it explicitly. A navigator package can end up a target *dependency* (so it builds) with an empty Frameworks build phase (so it never links), which fails only at link time with "Undefined symbol: ...MarkdownCore...". Add the library under the target's Frameworks, Libraries, and Embedded Content.
-  - The test plan entry for a package test target looks like this — `containerPath` is the package directory, `identifier` is just the target name:
-    - `{"containerPath": "container:MarkdownCore", "identifier": "MarkdownCoreTests", "name": "MarkdownCoreTests"}`
-  - Verify any test plan change by its executed-test count, never by its exit status. A plan referencing an unresolvable target reports `** TEST SUCCEEDED **` while running nothing, and a plan file the scheme cannot read fails the same quiet way.
-
 ### Move the build and release scripts to a shared repo. (investigate)
-  - Syd, 2026-09-28: "we might need to make a separate repo for build/release scripts." `Scripts/release-build.sh` and `Scripts/bump-version.sh` are adapted copies of the same scripts in `photos-go-round`, and every new app gets another copy (the global `app-release` skill), so each fix has to be made once per app.
+  - Syd: "we might need to make a separate repo for build/release scripts." `Scripts/release-build.sh` and `Scripts/bump-version.sh` are adapted copies of the same scripts in `photos-go-round`, and every new app gets another copy (the global `app-release` skill), so each fix has to be made once per app.
   - Decide how an app consumes the shared scripts — a git submodule, a checkout at a known path beside the apps, or copies kept in sync from one source — and what stays per app: the app name, project and scheme, the version-config path, the releases folder, and the post-export checks (this app's sandbox; `photos-go-round`'s helpers, extensions and Photos entitlement, and its Finder-laid-out DMG).
   - The same item is in `photos-go-round`'s `TODO.md`; do it once for both.
 
@@ -275,16 +215,14 @@ This document tracks planned work for MarkdownPreviewApp.
     - **Models and view models, on the other hand, should be shared** — that is the point of putting them in their own package. Both interfaces sit on the same view models and the same `MarkdownCore`, and only the views differ. Where a platform needs something the shared view models cannot express, prefer extending them over forking; the split is meant to fall at the view boundary, not lower.
     - One top-level application file per platform — a Mac one and an iOS one — each in its own directory, rather than a single shared entry point with conditional compilation inside it.
     - Two `Info.plist` files, one per platform. The project already half does this: `GENERATE_INFOPLIST_FILE` is off for macOS with `INFOPLIST_FILE[sdk=macosx*] = Info-macOS.plist`, while iOS still uses a generated one. Make both explicit and give each its own directory alongside its app file.
-    - Attach every new package to the project as a **navigator folder**, not via Add Package Dependency, or its tests will not be visible to Xcode — see "How the `MarkdownCore` package is attached to the project."
+    - Attach every new package to the project as a **navigator folder**, not via Add Package Dependency, or its tests will not be visible to Xcode.
   - Use `DocumentGroup` (or `NSDocument`) so each document opens in its own window.
   - Replace in-app file list with system Recents.
   - Opening a file (for example, double-click in Finder) opens a new window for that doc.
   - Build a sensible menu structure for the document-based app. A standard Mac app has an About box and File and Edit menus, and has since 1984; Window and Help joined them in Mac OS X. This is the baseline users expect, not a checklist to trim because the app is a simple viewer — a Mac app without them reads as unfinished.
     - The app is a viewer, not an editor. File and Edit carry only operations that do not imply changing the document's content — no Save, no Undo, no Cut or Paste, and no editing affordances that would suggest the file can be modified in place. "Export…" is the intended way to write anything out, and it is a 2.0 feature.
-    - App menu: About (same content as the bundled welcome document — see "Ship a welcome document in the app bundle"), and Quit (Cmd-Q).
-      - The About box is backed by the same file as the bundled welcome document — one source of truth, so the two cannot drift. This is why the About box work sits here rather than with the welcome document: it needs the macOS menu structure this redesign builds. The bundled document itself ships independently of this section.
-      - Decide between the standard AppKit About panel and a custom window. `orderFrontStandardAboutPanel` takes attributed-string credits and shows the version and copyright from `Info.plist` for free; a custom window would instead render the markdown through the app's own preview, which keeps one rendering path but means building the window.
-      - If the standard panel is used, the markdown has to become an `NSAttributedString`. The HTML-to-attributed-string conversion in `MarkdownSelectionClipboard.renderedRTF(for:)` (`MarkdownPreview/Utilities/MarkdownSelectionClipboard.swift:57`) already does exactly this and is worth reusing rather than reimplementing.
+    - App menu: About — a simple About box with a button that opens the welcome document (see "Ship a welcome document in the app bundle") — and Quit (Cmd-Q).
+      - The About box work sits here rather than with the welcome document because it needs the macOS menu structure this redesign builds. The bundled document itself ships independently of this section.
       - Supersedes the `©2026 Syd Polk` menu entry under "Add list toolbar menu" if that entry was standing in for an about box; decide which of the two is wanted.
     - File menu: Open (Cmd-O), Open Recent, Close (Cmd-W), Print (Cmd-P). Printing is a future feature and is not implemented yet — see "Share sheet (iOS) and printing" for the macOS `NSPrintOperation` path. Export… for converting to HTML or RTF is a 2.0 feature (see "Export documents to HTML and RTF").
     - Edit menu: Copy (Cmd-C), Select All (Cmd-A), and the Find commands. Read-only operations only, so the menu stays honest about what the app does.
@@ -296,7 +234,7 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Add a small XCUITest suite for key flows.
   - Cover a few high-value end-to-end flows using existing accessibility identifiers (open file → appears in list, list search filters the list, remove from list, Preview⇄Source switch). Keep it compact; AI to author and maintain. Skip brittle targets (WKWebView selection, find-pasteboard sync, native context menus).
   - Wait until BOTH: (1) the document-based macOS app redesign has landed (the UI is changing), and (2) iOS simulators work under Xcode 27 — on-device-only iteration is too slow for a GUI suite right now.
-  - The `MarkdownPreviewUITests` target (auto-generated boilerplate) was removed entirely on 2026-07-03 because an empty UI-test target fails to launch and broke `Cmd-U`. Recreate a fresh UI Testing Bundle target (File → New → Target) when adding these.
+  - There is no UI-test target; create a fresh UI Testing Bundle target (File → New → Target) when adding these.
 
 ### New from clipboard. (2.0)
   - Deferred to 2.0. Until then the app stays a pure viewer, and File and Edit carry no operations that create or write documents.
@@ -306,9 +244,8 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Export documents to HTML and RTF. (2.0)
   - Deferred to 2.0, along with everything else that writes files. Until then the app only reads.
   - File -> Export… : write the current document as HTML or RTF.
-  - Share the conversion with the command-line converter (see "Command-line converter for markdown to HTML and RTF") rather than writing it twice. HTML comes straight from `MarkdownCore`; RTF goes through `NSAttributedString` and is currently buried in `MarkdownSelectionClipboard.renderedRTF(for:)`, which wants extracting either way.
   - Decide whether HTML export emits the full styled document that the preview uses or a bare fragment, and whether the stylesheet is inlined.
-  - Images need embedding as `data:` URIs for both formats. The preview's `mdimage://` scheme only works inside the app's own web view, so an exported file or an RTF built through `NSAttributedString` would show broken images without it. A `MarkdownImageInliner` doing exactly this was written and then removed on 2026-07-19 for having no caller — reinstate it here rather than designing it again. It can reuse `MarkdownImageURL.resolveFile`, `.rewritingImageSources`, and `.mimeType`, which are still in `MarkdownCore` for the preview path.
+  - Images need embedding as `data:` URIs for both formats. The preview's `mdimage://` scheme only works inside the app's own web view, so an exported file or an RTF built through `NSAttributedString` would show broken images without it. A `MarkdownImageInliner` doing exactly this was written and then removed for having no caller; it is in the git history — reinstate it rather than designing it again. It can reuse `MarkdownImageURL.resolveFile`, `.rewritingImageSources`, and `.mimeType`, which are still in `MarkdownCore` for the preview path.
 
 ### Investigate a native visionOS (Vision Pro) app.
   - Only pursue if visionOS / Vision Pro is still a relevant, shipping platform by the time there is something to ship on it.
@@ -325,7 +262,6 @@ This document tracks planned work for MarkdownPreviewApp.
 ## Admin and App Store Connect
 
 ### Improve project documentation and samples.
-  - Make a good `SAMPLE.md` file displaying features. This is a separate thing from the bundled welcome document, which is deliberately not a feature showcase.
   - Make a better, more consumer-based `README.md` with screenshots displaying features.
   - Split out developer instructions to `CONTRIBUTING.md`.
 
@@ -340,28 +276,24 @@ This document tracks planned work for MarkdownPreviewApp.
   - The support URL is also where the welcome document's and About-box feedback/support links should point once they exist (see "Ship a welcome document in the app bundle"), superseding the current `support@sydpolk.com` mailto in `SAMPLE.md`. Keep it to plain support/feedback — off-app transaction links (donations, purchases, subscriptions) are a common App Review rejection trigger.
 
 ### Pricing and distribution.
-  - Decision for now (2026-07-26): a single **$1.99 one-time purchase**, Universal Purchase across macOS/iOS/iPadOS — option A below. One app record, one price, App Store auto-updates, sandboxed on every platform. A one-time purchase, not a subscription or IAP, and keep it that way for a simple viewer.
-  - Known tension with a single price (Syd, 2026-07-26): $1.99 is simultaneously *too expensive* for the iOS market — where this class of app trends free/$0.99 and competes with free markdown viewers, so any price is friction — and *too cheap* for a macOS utility, which can command more (Mac utilities in this space commonly sit ≈$4.99–$14.99). A universal price fits neither market. This is the strongest pull toward **B** (per-platform pricing) before release; weigh it against B's doubled store overhead and loss of Universal Purchase.
+  - Decision for now: a single **$1.99 one-time purchase**, Universal Purchase across macOS/iOS/iPadOS — option A below. One app record, one price, App Store auto-updates, sandboxed on every platform. A one-time purchase, not a subscription or IAP, and keep it that way for a simple viewer.
+  - Known tension with a single price (Syd): $1.99 is simultaneously *too expensive* for the iOS market — where this class of app trends free/$0.99 and competes with free markdown viewers, so any price is friction — and *too cheap* for a macOS utility, which can command more (Mac utilities in this space commonly sit ≈$4.99–$14.99). A universal price fits neither market. This is the strongest pull toward **B** (per-platform pricing) before release; weigh it against B's doubled store overhead and loss of Universal Purchase.
   - Not locked until release; before shipping this may switch to one of:
     - **A (current) — one universal app record:** one price for all platforms; simplest; Universal Purchase (buy once, get every platform).
     - **B — two App Store records** (separate Mac and iOS apps, distinct bundle IDs): allows per-platform pricing, still sandboxed and App-Store-updated, but doubles store maintenance and drops Universal Purchase (a both-platforms buyer pays twice).
     - **C — direct Mac distribution** (off the App Store): full pricing freedom and independence from Apple's cut/review, but then Sparkle for updates (extra XPC/entitlement setup when sandboxed), own payments/licensing/support, and a container reconsideration — dropping the sandbox would send the seeded `SAMPLE.md` to the real `~/Documents` and trip the Documents TCC prompt (see "Ship a welcome document in the app bundle").
-  - Notarization is no longer a cost of C: Mac releases have been Developer ID signed and notarized since 0.9 (`Scripts/release-build.sh`).
   - Key point for revisiting: per-platform pricing does **not** require leaving the App Store — that's B (two records), which keeps the sandbox and App Store auto-updates. C is only worth it for independence from Apple, which is a post-launch strategic call, not a pricing one.
 
 ### Confirm the notarized DMG on another Mac.
   - `MarkdownPreview 0.9 (3).dmg` is notarized and stapled, and Gatekeeper accepts it here. Confirm it on a Mac that has never seen the app — the work Mac (macOS 26.x), downloaded through Dropbox's website so it carries the quarantine attribute: it should open with only the "downloaded from the internet" prompt, and `spctl --assess -vv` on the installed app should say `source=Notarized Developer ID`.
 
 ### Get ready for TestFlight.
-  - Distribution split (Syd, 2026-09-28): the DMG that `Scripts/release-build.sh` makes is the **Mac build only**. The iOS/iPadOS app reaches anyone outside this machine **only through TestFlight builds**.
+  - Distribution split (Syd): the DMG that `Scripts/release-build.sh` makes is the **Mac build only**. The iOS/iPadOS app reaches anyone outside this machine **only through TestFlight builds**.
   - Eventually, a script that makes both builds and uploads them to App Store Connect. A separate effort from the DMG release script, not an extension of it.
-  - Remaining prep before the first submission: the screenshots (see "Generate screenshots for README and App Store Connect") and the marketing/support website (see "Marketing and support website (`sydpolk.com`)"). Sandboxing, entitlements, the privacy manifest, and the build-number scheme already landed in 0.7.
+  - Remaining prep before the first submission: the screenshots (see "Generate screenshots for README and App Store Connect") and the marketing/support website (see "Marketing and support website (`sydpolk.com`)").
   - Wire the support URL (required) and marketing URL (optional but expected) into App Store Connect once the site is up — see "Marketing and support website (`sydpolk.com`)" for the URLs and hosting decision.
   - Investigate how to submit to App Store as an individual.
   - Submit app to App Store.
   - Set up TestFlight.
-  - Capture and prepare App Store screenshots for iPhone, iPad, and Mac.
-  - Version and build numbers are bumped by `Scripts/bump-version.sh`: with no options it moves the build number only, for each release candidate or upload; with `--minor` it moves `MARKETING_VERSION` too, once a release ships. The build number is never reset, because App Store Connect requires a unique increasing build number per upload within a marketing version. A CI/CD pipeline, or the App Store upload script above, should call it rather than bump the numbers itself.
-  - Both platforms share the one build number, so uploading only iOS or only macOS still consumes a number for both. Deliberate — a shared counter is simpler than per-platform ones and only costs some gaps in the sequence.
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*

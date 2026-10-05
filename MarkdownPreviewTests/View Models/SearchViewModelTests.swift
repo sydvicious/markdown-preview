@@ -237,22 +237,27 @@ struct SearchViewModelFindPasteboardTests {
     /// field's focus goes transiently nil as SwiftUI re-hosts the toolbar item.
     /// The write path. Typing must reach the shared buffer regardless of what
     /// `@FocusState` reports, which is why the gate is the origin and not focus.
-    @Test func userInputIsPublishedToTheFindPasteboard() async {
+    @Test func userInputIsPublishedToTheFindPasteboard() async throws {
         let store = makeStore([("doc.md", "alpha beta")])
         let viewModel = SearchViewModel(store: store)
         let previous = SystemFindPasteboard.currentQuery()
         defer { if let previous { SystemFindPasteboard.setQuery(previous) } }
 
         viewModel.setSearchText("alpha")
-        // Outlast the 250ms write debounce.
-        try? await Task.sleep(nanoseconds: 400_000_000)
+        // The write waits for a pause in the typing, and then for its turn on
+        // the main actor. In a full run that turn can be a long time coming, so
+        // this waits for the write and not for a length of time: sleeping 400ms
+        // to outlast the 250ms pause read the pasteboard before the write had
+        // been made, and found whatever the machine had on it.
+        let write = try #require(viewModel.pasteboardWriteTask, "typing should have called for a write")
+        await write.value
 
         #expect(SystemFindPasteboard.currentQuery() == "alpha")
     }
 
     /// A search the user did not type — the selection's Search menu action —
     /// stays out of a buffer the whole machine shares.
-    @Test func passiveSearchIsNotPublishedToTheFindPasteboard() async {
+    @Test func passiveSearchIsNotPublishedToTheFindPasteboard() {
         let store = makeStore([("doc.md", "alpha beta")])
         let viewModel = SearchViewModel(store: store)
         let previous = SystemFindPasteboard.currentQuery()
@@ -263,15 +268,16 @@ struct SearchViewModelFindPasteboardTests {
         // the previous term before the assertion could see what was left.
         SystemFindPasteboard.setQuery(sentinel)
         viewModel.searchForSelection("alpha")
-        try? await Task.sleep(nanoseconds: 400_000_000)
 
+        // No write is waiting to be made, so there is nothing to outlast.
+        #expect(viewModel.pasteboardWriteTask == nil)
         #expect(SystemFindPasteboard.currentQuery() == sentinel)
     }
 
     /// Adopting a term must not turn around and write it back. The value would
     /// be identical either way, so this watches the change count: a needless
     /// write still bumps it, and still counts as touching a shared resource.
-    @Test func adoptedQueryIsNotRepublished() async {
+    @Test func adoptedQueryIsNotRepublished() {
         let store = makeStore([("doc.md", "alpha beta")])
         let viewModel = SearchViewModel(store: store)
         let previous = SystemFindPasteboard.currentQuery()
@@ -282,9 +288,9 @@ struct SearchViewModelFindPasteboardTests {
         let changeCountAfterSeeding = SystemFindPasteboard.changeCount()
 
         viewModel.adoptSystemFindQueryIfChanged()
-        try? await Task.sleep(nanoseconds: 400_000_000)
 
         #expect(viewModel.searchText == "beta")
+        #expect(viewModel.pasteboardWriteTask == nil)
         #expect(SystemFindPasteboard.changeCount() == changeCountAfterSeeding)
     }
 }

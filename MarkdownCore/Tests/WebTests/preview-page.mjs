@@ -34,10 +34,22 @@ export function loadPage(body, scripts) {
     })
   };
 
-  // jsdom lays nothing out, so it cannot scroll and has no geometry. The
-  // scripts only ask where things are and ask to move; both are recorded.
+  // jsdom lays nothing out, so it cannot scroll and has no geometry. Every
+  // request to scroll is recorded, and then carried out the way a page would:
+  // as far as there is page, and no further. `scrolling.ignored` makes the page
+  // take no notice, for a request that goes astray.
   const scrolls = [];
-  window.scrollTo = (...args) => { scrolls.push(args); };
+  const scrolling = { ignored: false };
+  window.scrollTo = (...args) => {
+    scrolls.push(args);
+    if (scrolling.ignored) {
+      return;
+    }
+    // Either `scrollTo(x, y)` or `scrollTo({ left, top })`.
+    const [x, y] = typeof args[0] === 'object' ? [args[0].left, args[0].top] : args;
+    const maxY = Math.max(0, window.document.documentElement.scrollHeight - window.innerHeight);
+    setScrollGeometry(window, { x, y: y === undefined ? undefined : Math.min(Math.max(0, y), maxY) });
+  };
   if (!window.Range.prototype.getBoundingClientRect) {
     window.Range.prototype.getBoundingClientRect = () => ({ top: 0, left: 0, width: 0, height: 0 });
   }
@@ -46,7 +58,7 @@ export function loadPage(body, scripts) {
     window.eval(readFileSync(new URL(`${name}.js`, webFolder), 'utf8'));
   }
 
-  return { window, document: window.document, preview: window.markdownPreview, messages, scrolls };
+  return { window, document: window.document, preview: window.markdownPreview, messages, scrolls, scrolling };
 }
 
 /// A block as the renderer emits one: its source offsets on the element.
@@ -66,11 +78,17 @@ export function select(window, startNode, startOffset, endNode, endOffset) {
 }
 
 /// Gives the page a size and a scroll offset, which jsdom otherwise lacks.
-export function setScrollGeometry(window, { x = 0, y = 0, pageHeight, viewportHeight }) {
-  Object.defineProperty(window, 'scrollX', { value: x, configurable: true });
-  Object.defineProperty(window, 'scrollY', { value: y, configurable: true });
-  Object.defineProperty(window, 'innerHeight', { value: viewportHeight, configurable: true });
-  Object.defineProperty(window.document.documentElement, 'scrollHeight', { value: pageHeight, configurable: true });
+/// Whatever is left out stays as it was.
+export function setScrollGeometry(window, { x, y, pageHeight, viewportHeight }) {
+  const set = (object, name, value) => {
+    if (value !== undefined) {
+      Object.defineProperty(object, name, { value, configurable: true });
+    }
+  };
+  set(window, 'scrollX', x);
+  set(window, 'scrollY', y);
+  set(window, 'innerHeight', viewportHeight);
+  set(window.document.documentElement, 'scrollHeight', pageHeight);
 }
 
 /// The page is a separate JavaScript world with its own `Array` and `Object`,

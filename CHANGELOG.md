@@ -5,6 +5,10 @@
 
 ## 0.10
 
+- (macOS) Tests: the find pasteboard tests wait for the write they are checking, where they used to sleep 400ms and hope it had been made. In a full run it sometimes had not, and `userInputIsPublishedToTheFindPasteboard` read whatever the machine had on the pasteboard.
+- A scroll restore checks that each scroll took, and asks again if the page is not where it was sent. It lasts forty tries, a couple of seconds on screen, where it used to last two seconds by the clock.
+- A scroll restore never asks the page to go further than it can scroll at that moment. On iOS a request for more could be carried out later, once the page had grown, after the reader had moved the page themselves and the restore had stopped trying.
+- A document that is moved or renamed while it is in the list is now listed where it is: under its new name and folder, with its text size and selection, and with the reader's place in the preview kept. Opening it from its new place no longer adds it a second time; it used to be listed under both paths until the next launch. The entry also gets a new bookmark, so a save made after the move still reaches the reader, and a new file put where the old one was is a document of its own.
 - Keeping the reader's place across a reload no longer depends on the page being fully laid out when it finishes loading. A restore that falls short because the page is not tall enough yet is made again as the page grows, until it lands, the reader scrolls, or two seconds pass. It could leave the reader higher up the page than they had been; seen so far only as a test failing now and then on iOS.
 - Indented code blocks: a line indented four spaces or a tab is code, as are the indented lines after it, with the blank lines between them. Indented under a paragraph it is still the paragraph's next line. The Copy button, find and selection treat it as they do fenced code.
 - A list marker indented four or more columns past where the item above starts its text is no longer a nested item; it is that item's next line, as CommonMark has it. Nesting goes one level at a time.

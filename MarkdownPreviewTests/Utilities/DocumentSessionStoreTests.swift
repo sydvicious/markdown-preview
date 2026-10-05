@@ -492,11 +492,12 @@ struct DocumentSessionStoreTests {
     }
 
     // Two saved entries can name one file. Open a document, move it, and open
-    // it again from its new place: it is now in the list under both paths, and
-    // the first entry's bookmark follows the file, so on the next launch both
-    // resolve to the same path. Restoring that list used to trap while building
-    // the search index, and went on trapping at every launch, because the saved
-    // list was still the same.
+    // it again from its new place: it used to be in the list under both paths,
+    // and the first entry's bookmark follows the file, so on the next launch
+    // both resolved to the same path. Restoring that list used to trap while
+    // building the search index, and went on trapping at every launch, because
+    // the saved list was still the same. The list no longer gets that way
+    // (`MovedDocumentTests`), but one saved by an earlier build can be.
     //
     // The restore runs in a child process, so that if it ever traps again it
     // fails this test and not the whole run.

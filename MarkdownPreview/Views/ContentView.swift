@@ -490,7 +490,7 @@ struct ContentView: View {
                 MarkdownPreviewView(
                     source: document.file.contents,
                     baseURL: document.file.url.deletingLastPathComponent(),
-                    documentID: document.id,
+                    documentID: document.stableID.uuidString,
                     textSize: store.textSize(for: document.id),
                     selections: Binding(
                         get: { store.selections(for: document.id) },

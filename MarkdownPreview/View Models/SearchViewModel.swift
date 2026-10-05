@@ -58,7 +58,11 @@ final class SearchViewModel: ObservableObject {
     private var pendingSearchQuery: String?
     #if os(macOS)
     private var lastFindPasteboardChangeCount: Int?
-    private var pasteboardWriteTask: Task<Void, Never>?
+    /// The write of the last typed term to the find pasteboard, which waits for
+    /// a pause in the typing. Nil if nothing typed has called for one. Readable
+    /// so that a test can wait for the write itself and not guess how long the
+    /// pause, and everything queued behind it, will take.
+    private(set) var pasteboardWriteTask: Task<Void, Never>?
     #endif
 
     init(store: DocumentSessionStore) {

@@ -502,22 +502,34 @@ struct WebKitTextNodeAlignmentTests {
     }
 
     /// The scroll position once `hasSettled` says it is where it was going, or
-    /// after three seconds whatever it is by then.
+    /// after ten seconds whatever it is by then.
     ///
     /// A page finishes loading before it has necessarily been laid out to its
     /// full height, so a scroll asked for at that moment can fall short. The
     /// page's own restore allows for that by trying again as the page grows,
-    /// which means the answer is not always there on the first look.
+    /// which means the answer is not always there on the first look. Nor on
+    /// the tenth: these web views are in no window, and a page that is not on
+    /// screen has its timers held back, so its tries come far apart.
     private func scrollPosition(
         in webView: WKWebView,
         once hasSettled: (PreviewScrollPosition) -> Bool
     ) async throws -> PreviewScrollPosition {
         var position = try await scrollPosition(in: webView)
-        for _ in 0..<60 where !hasSettled(position) {
+        for _ in 0..<200 where !hasSettled(position) {
             try await Task.sleep(for: .milliseconds(50))
             position = try await scrollPosition(in: webView)
         }
         return position
+    }
+
+    /// What the page's last restore did, for a failure to say: how many tries
+    /// it had, how many scrolls it asked for, the last place it asked for, how
+    /// far the page could scroll then, and how it ended.
+    private func restoreReport(in webView: WKWebView) async -> String {
+        let state = try? await webView.evaluateJavaScript(
+            "JSON.stringify(window.markdownPreview.restoreState())"
+        )
+        return "the restore: \((state as? String) ?? "not reported")"
     }
 
     /// The decision is tested on its own; this checks that the scripts it
@@ -554,7 +566,8 @@ struct WebKitTextNodeAlignmentTests {
         // scrolled, which tells a page that never grew tall enough from a
         // restore that went to the wrong place.
         let restored = try await scrollPosition(in: reloaded) { $0.y == 900 }
-        #expect(restored.y == 900, "restored to \(restored.y), of a possible \(restored.maxY)")
+        let report = await restoreReport(in: reloaded)
+        #expect(restored.y == 900, "restored to \(restored.y), of a possible \(restored.maxY); \(report)")
     }
 
     /// Makes the page taller after the fact, the way a page still being laid
@@ -577,14 +590,24 @@ struct WebKitTextNodeAlignmentTests {
         webView.loadHTMLString(MarkdownHTMLBuilder.document(for: "A short page.", softBreak: .lineBreak), baseURL: nil)
         try await observer.wait()
 
+        let clock = ContinuousClock()
+        let asked = clock.now
         _ = try await webView.evaluateJavaScript(PreviewScriptCall.scrollToOffset(x: 0, y: 900) + " true")
         let tooSoon = try await scrollPosition(in: webView)
         try #require(tooSoon.y == 0 && tooSoon.maxY < 900, "the page should start too short to scroll that far")
 
         _ = try await webView.evaluateJavaScript(Self.growThePage)
+        let grew = clock.now
 
         let restored = try await scrollPosition(in: webView) { $0.y == 900 }
-        #expect(restored.y == 900, "restored to \(restored.y), of a possible \(restored.maxY)")
+        let report = await restoreReport(in: webView)
+        #expect(
+            restored.y == 900,
+            """
+            restored to \(restored.y), of a possible \(restored.maxY); the page grew \(grew - asked) after the \
+            restore was asked for, and was last looked at \(clock.now - grew) after that; \(report)
+            """
+        )
     }
 
     /// Once the reader has moved the page themselves, a restore still waiting
@@ -601,8 +624,9 @@ struct WebKitTextNodeAlignmentTests {
         try await Task.sleep(for: .milliseconds(400))
 
         let position = try await scrollPosition(in: webView)
+        let report = await restoreReport(in: webView)
         try #require(position.maxY >= 900, "the page should have grown")
-        #expect(position.y == 0)
+        #expect(position.y == 0, "\(report)")
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -636,10 +660,11 @@ struct WebKitTextNodeAlignmentTests {
         let restored = try await scrollPosition(in: reloaded) {
             $0.maxY > position.maxY && abs($0.y / $0.maxY - 0.5) < 0.01
         }
+        let report = await restoreReport(in: reloaded)
         try #require(restored.maxY > position.maxY, "larger text should make a taller page")
         #expect(
             abs(restored.y / restored.maxY - 0.5) < 0.01,
-            "restored to \(restored.y), of a possible \(restored.maxY)"
+            "restored to \(restored.y), of a possible \(restored.maxY); \(report)"
         )
     }
 }

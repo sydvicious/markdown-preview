@@ -28,7 +28,8 @@ test('a page that fits has nowhere to scroll', () => {
 });
 
 test('the reader can be put back at the same distance down the page', () => {
-  const { preview, scrolls } = page();
+  const { window, preview, scrolls } = page();
+  setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
 
   preview.scrollToOffset(0, 900);
 
@@ -55,18 +56,102 @@ test('a restore that falls short is made again when the page grows', async () =>
   setScrollGeometry(window, { pageHeight: 700, viewportHeight: 600 });
 
   preview.scrollToOffset(0, 900);
-  assert.deepEqual(plain(scrolls), [[0, 900]], 'tried at once, though the page is too short');
+  assert.deepEqual(plain(scrolls), [[0, 100]], 'as far as the page goes, for now');
 
   await tick(120);
-  assert.deepEqual(plain(scrolls), [[0, 900]], 'not repeated while nothing has changed');
+  assert.deepEqual(plain(scrolls), [[0, 100]], 'not repeated while nothing has changed');
 
   setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
   await tick(120);
-  assert.deepEqual(plain(scrolls), [[0, 900], [0, 900]], 'made again once there is page to scroll');
+  assert.deepEqual(plain(scrolls), [[0, 100], [0, 900]], 'made again once there is page to scroll');
 
   setScrollGeometry(window, { pageHeight: 5000, viewportHeight: 600 });
   await tick(120);
-  assert.deepEqual(plain(scrolls), [[0, 900], [0, 900]], 'and left alone after it has landed');
+  assert.deepEqual(plain(scrolls), [[0, 100], [0, 900]], 'and left alone after it has landed');
+});
+
+// The page is never asked to scroll further than it can. A browser would stop
+// at the bottom anyway, but WebKit on iOS does not throw the rest away: the
+// scrolling is done outside the page, the request goes there as it was made,
+// and it is carried out against whatever height the page has by then. So a
+// request for 900 made of a short page could come true after the page grew,
+// and after the reader had taken over and this had stopped trying.
+test('a restore never asks for more than the page can scroll', async () => {
+  const { window, preview, scrolls } = page();
+  setScrollGeometry(window, { pageHeight: 400, viewportHeight: 600 });
+
+  preview.scrollToOffset(0, 900);
+  assert.deepEqual(plain(scrolls), [], 'a page that cannot scroll is not asked to');
+
+  setScrollGeometry(window, { pageHeight: 1100, viewportHeight: 600 });
+  await tick(120);
+  setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
+  await tick(120);
+
+  assert.deepEqual(plain(scrolls), [[0, 500], [0, 900]]);
+});
+
+// Asking is not the same as getting there. Where the scrolling is done outside
+// the page, a request is carried out later and against what is known there,
+// which may be an older, shorter page. So a restore does not take a scroll on
+// trust: it looks where the page is on its next try, and asks again.
+test('a scroll that did not take is made again until it does', async () => {
+  const { window, preview, scrolls, scrolling } = page();
+  setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
+
+  scrolling.ignored = true;
+  preview.scrollToOffset(0, 900);
+  await tick(170);
+  assert.ok(scrolls.length >= 3, `asked again while the page had not moved, ${scrolls.length} times`);
+  assert.ok(plain(scrolls).every(([x, y]) => x === 0 && y === 900));
+
+  scrolling.ignored = false;
+  await tick(120);
+  assert.equal(window.scrollY, 900);
+
+  const asked = scrolls.length;
+  await tick(170);
+  assert.equal(scrolls.length, asked, 'and left alone once it is there');
+});
+
+// A restore lasts a number of tries, not a length of time. Timers are held
+// back in a page that is not on screen, and a busy machine can use up two
+// seconds between one step and the next; a clock would then run out before a
+// second try had been made.
+test('a restore that never takes stops after forty tries', async () => {
+  const { window, preview, scrolls, scrolling } = page();
+  setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
+
+  scrolling.ignored = true;
+  preview.scrollToOffset(0, 900);
+  await tick(3000);
+
+  assert.equal(scrolls.length, 40);
+});
+
+// What a restore did, for a test to say when one does not end where it should.
+test('a restore says what it did', async () => {
+  const { window, preview } = page();
+  setScrollGeometry(window, { pageHeight: 700, viewportHeight: 600 });
+  assert.equal(plain(preview.restoreState()), null);
+
+  preview.scrollToOffset(0, 900);
+  await tick(120);
+  assert.deepEqual(
+    { ...plain(preview.restoreState()), tries: undefined },
+    { tries: undefined, scrolls: 1, askedForY: 100, maxY: 100, ended: null }
+  );
+
+  setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
+  await tick(170);
+  assert.deepEqual(
+    { ...plain(preview.restoreState()), tries: undefined },
+    { tries: undefined, scrolls: 2, askedForY: 900, maxY: 2400, ended: 'landed' }
+  );
+
+  preview.scrollToFraction(0, 0.5);
+  window.dispatchEvent(new window.Event('wheel'));
+  assert.equal(plain(preview.restoreState()).ended, 'the reader took over');
 });
 
 test('a restore that can land straight away is one scroll', async () => {
@@ -101,7 +186,7 @@ test('the reader taking over ends a restore', async () => {
     setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
     await tick(120);
 
-    assert.deepEqual(plain(scrolls), [[0, 900]], `${type} should have ended it`);
+    assert.deepEqual(plain(scrolls), [[0, 100]], `${type} should have ended it`);
   }
 });
 
@@ -114,7 +199,7 @@ test('a new restore replaces the one before', async () => {
   setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
   await tick(120);
 
-  assert.deepEqual(plain(scrolls), [[0, 900], [0, 400], [0, 400]]);
+  assert.deepEqual(plain(scrolls), [[0, 100], [0, 400]]);
 });
 
 test('a restore gives up after a couple of seconds', async () => {
@@ -122,11 +207,11 @@ test('a restore gives up after a couple of seconds', async () => {
   setScrollGeometry(window, { pageHeight: 700, viewportHeight: 600 });
 
   preview.scrollToOffset(0, 900);
-  await tick(2200);
+  await tick(3000);
   setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
   await tick(120);
 
-  assert.deepEqual(plain(scrolls), [[0, 900]], 'the page grew too late to be put back');
+  assert.deepEqual(plain(scrolls), [[0, 100]], 'the page grew too late to be put back');
 });
 
 test('scrolling is reported to the app, a burst of it once', async () => {

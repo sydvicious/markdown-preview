@@ -164,10 +164,17 @@ final class DocumentSessionStore: ObservableObject {
     }
 
     struct OpenedDocument: Identifiable, Equatable {
-        let id: String
+        /// The file's path, which is what the list, the saved session and
+        /// everything kept per document go by. It changes when the file is
+        /// moved or renamed; see `documentDidMove`.
+        var id: String
         var file: MarkdownFile
         var lastOpened: Date
         var bookmarkData: Data
+        /// Names this entry for as long as it is in the list, wherever its file
+        /// goes. To the reader a document that was moved is the same document,
+        /// so the preview keeps their place by this and not by `id`.
+        var stableID = UUID()
     }
 
     private struct PersistedDocument: Codable {
@@ -343,6 +350,15 @@ final class DocumentSessionStore: ObservableObject {
 
     func upsertDocument(_ file: MarkdownFile, bookmarkData: Data, modificationDate: Date?) {
         let id = file.url.standardizedFileURL.path
+        if !openedDocuments.contains(where: { $0.id == id }) {
+            // Not in the list under this path, but it may be there under the
+            // one it was moved from: the entry is only brought up to date when
+            // it is next looked at, which for a document that is not on screen
+            // can be ten seconds away. Adding it now would list it twice.
+            for document in openedDocuments where resolvedID(of: document) == id {
+                documentDidMove(from: document.id, to: file, modificationDate: modificationDate)
+            }
+        }
         if let index = openedDocuments.firstIndex(where: { $0.id == id }) {
             if openedDocuments[index].bookmarkData != bookmarkData {
                 bookmarksWithRefusedScope.remove(openedDocuments[index].bookmarkData)
@@ -537,6 +553,36 @@ final class DocumentSessionStore: ObservableObject {
             return
         }
 
+        guard url.standardizedFileURL.path == document.id else {
+            // The bookmark followed the file somewhere else. It only counts as
+            // a move if the file can be read there; a bookmark can also resolve
+            // to a path with nothing at it.
+            guard let loaded = loadDocument(at: url, resolvedFrom: document.bookmarkData) else {
+                handleMissingDocument(
+                    document,
+                    alertIfMissing: alertIfMissing,
+                    isCompactWidth: isCompactWidth
+                )
+                return
+            }
+            // The bookmark in hand was made at the old path, and a bookmark is
+            // looked up by path before it is looked up by file. Kept, it would
+            // lose the document to the next atomic save, which leaves a new file
+            // at the new path and nothing at the old one, and would hand the
+            // entry to any new file put where this one used to be. If a new one
+            // cannot be made the old one stays, and reads as it did.
+            let bookmarkData = withSecurityScope(of: url, resolvedFrom: document.bookmarkData) {
+                try? makeBookmarkData(for: url)
+            }
+            documentDidMove(
+                from: document.id,
+                to: loaded.file,
+                modificationDate: loaded.modificationDate,
+                bookmarkData: bookmarkData
+            )
+            return
+        }
+
         if let modificationDate = currentModificationDate(for: url, resolvedFrom: document.bookmarkData) {
             let knownDate = knownModificationDates[document.id]
             if knownDate != nil, modificationDate <= knownDate! {
@@ -561,6 +607,74 @@ final class DocumentSessionStore: ObservableObject {
         openedDocuments[index].file = loaded.file
         documentSearchIndex.upsert(loaded.file)
         clampSelections(for: document.id, text: loaded.file.contents)
+    }
+
+    /// Brings the entry listed as `oldID` up to date with where its file is now.
+    ///
+    /// A bookmark follows its file, so a document that is moved or renamed
+    /// while it is in the list stays readable — under a path that is no longer
+    /// its own. Left like that, opening the file from its new place adds it to
+    /// the list a second time, and both entries are saved. So the entry moves
+    /// with the file, and takes with it everything kept under its path: the
+    /// selection, the text size, its place in the search index.
+    ///
+    /// If the file is already listed where it is now, that entry stays and this
+    /// one goes, handing over whatever the other has no value of its own for.
+    private func documentDidMove(
+        from oldID: String,
+        to file: MarkdownFile,
+        modificationDate: Date?,
+        bookmarkData: Data? = nil
+    ) {
+        let newID = file.url.standardizedFileURL.path
+        guard newID != oldID,
+              let index = openedDocuments.firstIndex(where: { $0.id == oldID }) else {
+            return
+        }
+
+        documentSearchIndex.remove(documentID: oldID)
+        if let existingIndex = openedDocuments.firstIndex(where: { $0.id == newID }) {
+            openedDocuments[existingIndex].file = file
+            bookmarksWithRefusedScope.remove(openedDocuments[index].bookmarkData)
+            openedDocuments.remove(at: index)
+        } else {
+            openedDocuments[index].id = newID
+            openedDocuments[index].file = file
+            if let bookmarkData, bookmarkData != openedDocuments[index].bookmarkData {
+                bookmarksWithRefusedScope.remove(openedDocuments[index].bookmarkData)
+                openedDocuments[index].bookmarkData = bookmarkData
+            }
+        }
+        documentSearchIndex.upsert(file)
+
+        Self.moveValue(in: &knownModificationDates, from: oldID, to: newID)
+        Self.moveValue(in: &selectionsByDocumentID, from: oldID, to: newID)
+        Self.moveValue(in: &textSizesByDocumentID, from: oldID, to: newID)
+        if let modificationDate {
+            knownModificationDates[newID] = modificationDate
+        }
+        clampSelections(for: newID, text: file.contents)
+
+        if selectedDocumentID == oldID {
+            selectedDocumentID = newID
+        }
+        if missingActiveDocumentAlert?.id == oldID {
+            missingActiveDocumentAlert = nil
+        }
+    }
+
+    /// Moves what is kept for `oldID` to `newID`, unless `newID` already has a
+    /// value, in which case the old one is dropped.
+    private static func moveValue<Value>(in values: inout [String: Value], from oldID: String, to newID: String) {
+        guard let value = values.removeValue(forKey: oldID), values[newID] == nil else { return }
+        values[newID] = value
+    }
+
+    /// The path `document` would be listed under if it were opened now, or nil
+    /// if its bookmark no longer leads anywhere.
+    private func resolvedID(of document: OpenedDocument) -> String? {
+        guard !document.bookmarkData.isEmpty else { return nil }
+        return resolveBookmarkURL(from: document.bookmarkData)?.standardizedFileURL.path
     }
 
     private func handleMissingDocument(
@@ -740,11 +854,13 @@ final class DocumentSessionStore: ObservableObject {
             guard let loaded = loadFromBookmarkData(entry.bookmarkData) else { continue }
             let resolvedID = loaded.file.url.standardizedFileURL.path
             idMap[entry.id] = resolvedID
-            // Two entries can resolve to one file: a document opened, moved, and
-            // opened again from its new place is saved under both paths, and the
-            // first entry's bookmark follows the file. `persisted` arrives newest
-            // first, so the one kept is the one opened last; the other's ID still
-            // maps to it, for the selection and text size saved under that ID.
+            // Two entries can resolve to one file. A list saved before entries
+            // followed their files (`documentDidMove`) holds a document that was
+            // opened, moved, and opened again from its new place under both
+            // paths, and the first entry's bookmark follows the file. `persisted`
+            // arrives newest first, so the one kept is the one opened last; the
+            // other's ID still maps to it, for the selection and text size saved
+            // under that ID.
             guard !restored.contains(where: { $0.id == resolvedID }) else { continue }
             restored.append(
                 .init(
