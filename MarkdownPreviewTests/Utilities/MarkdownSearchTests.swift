@@ -83,6 +83,8 @@ struct MarkdownSearchFeatureTests {
         .init("link text", in: "[Alpha](https://example.com/beta)", find: "alpha", ["Alpha"]),
         .init("link destination is not text", in: "[Alpha](https://example.com/beta)", find: "example", []),
         .init("image description", in: "![Alpha](pic.png)", find: "alpha", ["Alpha"]),
+        .init("autolink address", in: "see <https://example.com/alpha>", find: "example.com/alpha", ["example.com/alpha"]),
+        .init("autolink brackets are not text", in: "see <https://example.com/alpha>", find: "<", []),
         .init("code span", in: "Use `let alpha` here", find: "let alpha", ["let alpha"]),
         .init("underscores inside a word", in: "use snake_case_name here", find: "snake_case", ["snake_case"]),
         .init("asterisks with spaces around them", in: "2 * 3 * 4", find: "2 * 3", ["2 * 3"]),

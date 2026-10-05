@@ -1016,6 +1016,59 @@ struct AutolinkTests {
     @Test func anythingElseInAngleBracketsIsText() async throws {
         #expect(blockHTML("<not a link>") == "<p>&lt;not a link&gt;</p>")
     }
+
+    @Test func aSpaceInsideMeansItIsNotAnAutolink() async throws {
+        #expect(blockHTML("<https://foo.bar/baz bim>") == "<p>&lt;https://foo.bar/baz bim&gt;</p>")
+        #expect(blockHTML("< https://foo.bar >") == "<p>&lt; https://foo.bar &gt;</p>")
+    }
+
+    @Test func aSchemeIsAtLeastTwoCharacters() async throws {
+        #expect(blockHTML("<m:abc>") == "<p>&lt;m:abc&gt;</p>")
+        #expect(blockHTML("<made-up-scheme://foo,bar>") == "<p><a href=\"made-up-scheme://foo,bar\">made-up-scheme://foo,bar</a></p>")
+    }
+
+    @Test func nothingInsideAnAutolinkIsMarkup() async throws {
+        // Not emphasis, and not an escape: the address is taken as written.
+        #expect(
+            blockHTML("<https://example.com/a_b_c*d*>")
+                == "<p><a href=\"https://example.com/a_b_c*d*\">https://example.com/a_b_c*d*</a></p>"
+        )
+        #expect(
+            blockHTML("<https://example.com/\\[\\>")
+                == "<p><a href=\"https://example.com/%5C%5B%5C\">https://example.com/\\[\\</a></p>"
+        )
+    }
+
+    @Test func anAmpersandInTheAddressIsEscaped() async throws {
+        #expect(
+            blockHTML("<https://a.b/?x=1&y=2>")
+                == "<p><a href=\"https://a.b/?x=1&amp;y=2\">https://a.b/?x=1&amp;y=2</a></p>"
+        )
+    }
+
+    @Test func anAutolinkOutranksEmphasisAndLinkText() async throws {
+        #expect(
+            blockHTML("*<https://a.b/*>*")
+                == "<p><em><a href=\"https://a.b/*\">https://a.b/*</a></em></p>"
+        )
+        // Spec example 526: the bracket inside the address does not end the
+        // link text, so there is no link around it.
+        #expect(
+            blockHTML("[foo<https://example.com/?search=](uri)>")
+                == "<p>[foo<a href=\"https://example.com/?search=%5D(uri)\">https://example.com/?search=](uri)</a></p>"
+        )
+    }
+
+    @Test func aBackslashMeansItIsNotAnEmailAutolink() async throws {
+        #expect(blockHTML("<foo\\+@bar.example.com>") == "<p>&lt;foo+@bar.example.com&gt;</p>")
+    }
+
+    @Test func anEmailAddressMayHaveSubdomainsAndPunctuation() async throws {
+        #expect(
+            blockHTML("<foo+special@Bar.baz-bar0.com>")
+                == "<p><a href=\"mailto:foo+special@Bar.baz-bar0.com\">foo+special@Bar.baz-bar0.com</a></p>"
+        )
+    }
 }
 
 @Suite("Link reference definitions (spec 4.7, 6.3)")
@@ -1184,6 +1237,57 @@ struct RawHTMLTests {
             blockHTML("<img src=\"x\" onerror=\"alert(1)\">")
                 == "<p>&lt;img src=&quot;x&quot; onerror=&quot;alert(1)&quot;&gt;</p>"
         )
+    }
+}
+
+// Deliberate deviation from CommonMark, which has nothing to say about what a
+// link may point at. A `javascript:` destination is script: clicking it runs in
+// the preview's page, without the app's link handling ever being asked. That is
+// the one way a document could get script into the preview, so the renderer
+// writes such a link without its `href`. The text is still there; it is not a
+// link. These assert the app's intent.
+@Suite("Script links are not links (deliberate deviation)")
+struct ScriptLinkTests {
+
+    @Test func aScriptDestinationIsLeftOffTheLink() async throws {
+        #expect(blockHTML("[foo](javascript:alert(1))") == "<p><a>foo</a></p>")
+        #expect(blockHTML("[foo](vbscript:msgbox(1))") == "<p><a>foo</a></p>")
+    }
+
+    @Test func theTitleIsKept() async throws {
+        #expect(blockHTML("[foo](javascript:alert(1) \"title\")") == "<p><a title=\"title\">foo</a></p>")
+    }
+
+    @Test func theSchemeIsRecognizedHoweverItIsWritten() async throws {
+        // A browser reads a scheme without regard to case, and ignores tabs
+        // and line endings inside it.
+        #expect(blockHTML("[foo](JaVaScRiPt:alert(1))") == "<p><a>foo</a></p>")
+        #expect(blockHTML("[foo](<java\tscript:alert(1)>)") == "<p><a>foo</a></p>")
+    }
+
+    @Test func spacesBeforeTheSchemeMakeItAnOrdinaryAddress() async throws {
+        // A destination in angle brackets has its spaces written as %20, and
+        // "%20%20javascript:" is not a scheme to a browser: it is a relative
+        // address, and harmless. So this one keeps its href.
+        #expect(
+            blockHTML("[foo](<  javascript:alert(1)>)")
+                == "<p><a href=\"%20%20javascript:alert(1)\">foo</a></p>"
+        )
+    }
+
+    @Test func aScriptAutolinkIsNotALink() async throws {
+        #expect(blockHTML("<javascript:alert(1)>") == "<p><a>javascript:alert(1)</a></p>")
+        #expect(blockHTML("<JAVASCRIPT:alert(1)>") == "<p><a>JAVASCRIPT:alert(1)</a></p>")
+    }
+
+    @Test func otherDestinationsAreUntouched() async throws {
+        #expect(blockHTML("[foo](/docs/javascript:intro)") == "<p><a href=\"/docs/javascript:intro\">foo</a></p>")
+        #expect(blockHTML("[foo](javascripts.html)") == "<p><a href=\"javascripts.html\">foo</a></p>")
+        #expect(blockHTML("[foo](mailto:a@b.c)") == "<p><a href=\"mailto:a@b.c\">foo</a></p>")
+    }
+
+    @Test func aLinkAroundAScriptLinkIsStillNotTwoLinks() async throws {
+        #expect(blockHTML("[foo [bar](javascript:alert(1))](/url)") == "<p>[foo <a>bar</a>](/url)</p>")
     }
 }
 

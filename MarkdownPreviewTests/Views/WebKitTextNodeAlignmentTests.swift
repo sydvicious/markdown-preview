@@ -313,6 +313,49 @@ struct WebKitTextNodeAlignmentTests {
         }
     }
 
+    // MARK: - Script links
+
+    /// A `javascript:` link runs in the page when it is clicked, and WebKit
+    /// does not ask the app first. The renderer writes such a link without its
+    /// `href`, which the engine's own tests check as text; this asks WebKit
+    /// whether anything the renderer wrote is still script to it, and clicks
+    /// every link to see.
+    @Test(.timeLimit(.minutes(1)))
+    func clickingAScriptLinkRunsNothing() async throws {
+        let source = [
+            "[inline](javascript:void(document.title='ran'))",
+            "<javascript:void(document.title='ran')>",
+            "[mixed case](JaVaScRiPt:void(document.title='ran'))",
+            "[a tab inside](<java\tscript:void(document.title='ran')>)",
+            "[spaces before](<  javascript:void(document.title='ran')>)",
+            "[an ordinary link](https://example.com)",
+        ].joined(separator: "\n\n")
+        let webView = try await loadedPreview(for: source)
+
+        let counted = try await webView.evaluateJavaScript("""
+            (() => {
+              document.title = 'untouched';
+              const links = Array.from(document.querySelectorAll('a'));
+              return {
+                links: links.length,
+                scriptLinks: links.filter((link) => link.protocol === 'javascript:').length
+              };
+            })();
+            """)
+        let counts = try #require(counted as? [String: Any])
+        #expect((counts["links"] as? NSNumber)?.intValue == 6)
+        #expect((counts["scriptLinks"] as? NSNumber)?.intValue == 0)
+
+        // All but the ordinary link, which would only ask to leave the page.
+        _ = try await webView.evaluateJavaScript("""
+            Array.from(document.querySelectorAll('a')).slice(0, 5).forEach((link) => link.click()); true
+            """)
+        // A script link runs a moment after the click, not during it.
+        try await Task.sleep(for: .milliseconds(300))
+
+        #expect(try await webView.evaluateJavaScript("document.title") as? String == "untouched")
+    }
+
     // MARK: - The button that stands in for an unreadable image
 
     /// A folder the test cannot list, standing in for one the sandbox refuses.

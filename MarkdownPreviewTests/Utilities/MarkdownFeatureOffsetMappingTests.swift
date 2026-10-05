@@ -170,6 +170,18 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
         ),
         .init("unclosed link", "[Alpha](/url", visible: "[Alpha](/url", words: ["Alpha"]),
         .init(
+            "autolink",
+            "See <https://example.com/alpha_beta> now",
+            visible: "See https://example.com/alpha_beta now",
+            words: ["https://example.com/alpha_beta", "now"]
+        ),
+        .init(
+            "email autolink",
+            "Mail <syd@example.com> today",
+            visible: "Mail syd@example.com today",
+            words: ["syd@example.com", "today"]
+        ),
+        .init(
             "link with parentheses in its destination",
             "See [Alpha](/wiki/Alpha_(letter)) now",
             visible: "See Alpha now",

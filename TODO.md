@@ -35,9 +35,8 @@ This document tracks planned work for MarkdownPreviewApp.
   - Failing tests: `ListTests/itemTextContinuesOnAnIndentedLine`, `lazyContinuationLineStaysInTheItem`, `itemsMayHoldSeveralParagraphs`, `itemsContainOtherBlocks`; `BlockQuoteTests/lazyContinuationLineStaysInTheQuote`.
 
 ### CommonMark constructs the renderer does not implement.
-  - Asserted in the conformance suite because its expectations come from the spec; each fails until it is built. All three are in scope (Syd, 2026-10-04).
+  - Asserted in the conformance suite because its expectations come from the spec; each fails until it is built. All are in scope (Syd, 2026-10-04). Autolinks, the third, were built on 2026-10-05.
   - Indented code blocks (spec 4.4): four spaces or a tab. `IndentedCodeTests`, 4 failing.
-  - Autolinks (spec 6.5): `<https://example.com>` and `<foo@example.com>`. `AutolinkTests`, 2 failing.
   - Link reference definitions (spec 4.7): `[foo][bar]`, `[foo][]`, `[foo]` with `[bar]: /url` elsewhere, and the image form. `ReferenceLinkTests`, 5 failing.
 
 ### Crash at launch: two saved documents that resolve to one file. (fixed 2026-10-04; see what is left)
@@ -194,11 +193,17 @@ This document tracks planned work for MarkdownPreviewApp.
   - Add robustness for markdown edge cases and malformed input across parser/renderer paths.
   - See "Audit the test suites and cover every markdown feature" for the parser/renderer test work this depends on.
 
+### Turn content JavaScript off in the preview. (investigate)
+  - Found 2026-10-05, while adding autolinks: clicking a `javascript:` link ran its script in the preview's page. WebKit does not call `decidePolicyFor` for one, so the app's link handling never saw it. Script in the page can read the key `MarkdownImageURL` puts on image URLs, and so ask the scheme handler for other image files the app can read, and can post to the app's message handlers. The inline form, `[text](javascript:…)`, had behaved this way since links were first rendered.
+  - Fixed in the renderer the same day: a link or autolink whose destination is `javascript:` or `vbscript:` is written without its `href`. Tests: `ScriptLinkTests` in the conformance suite, and `WebKitTextNodeAlignmentTests/clickingAScriptLinkRunsNothing`, which asks WebKit whether anything the renderer wrote is still script to it and clicks every link.
+  - That is one layer. The second would be `allowsContentJavaScript = false` on the preview's `WKWebpagePreferences` — it is set to `true` in both platforms' `makeUIView`/`makeNSView` in `MarkdownPreviewWebView.swift`. Apple documents that setting as stopping script the *content* brings, `javascript:` URLs included, while user scripts and `evaluateJavaScript` still run. If that holds, nothing a document contains could run script even if the renderer let something through, and it is the right default before raw HTML is allowed in ("Support inline HTML").
+  - To check before changing it: that the app's own scripts still work with it off — the Copy button, selection reporting and applying, the image-access button, scroll reporting and restoring. The WebKit tests build their own configuration, so they do not exercise the app's; they would need to share it, or this wants checking in the running app.
+
 ### Audit the test suites and cover every markdown feature.
   - Done 2026-07-19 for the renderer: `MarkdownCore/Tests/MarkdownCoreConformanceTests` covers the block and inline features against CommonMark 0.31.2 and runs headlessly via `swift test`. It exposed 44 failing cases when it landed; all were fixed.
   - Done 2026-10-04 for the rest of the test work. The suites landed with the run red: each failure was filed under "Bugs", and the suites go green as those are fixed.
-    - The conformance suite grew from 92 cases to 228. 16 of them fail, all in the renderer: the two entries left under "Bugs" that name `ListTests`, `BlockQuoteTests`, `IndentedCodeTests`, `AutolinkTests` and `ReferenceLinkTests`.
-    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 69 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. When these landed, 85 cases failed; all pass as of 2026-10-05.
+    - The conformance suite grew from 92 cases to 242. 14 of them fail, all in the renderer: the two entries left under "Bugs" that name `ListTests`, `BlockQuoteTests`, `IndentedCodeTests` and `ReferenceLinkTests`.
+    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 71 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. When these landed, 85 cases failed; all pass as of 2026-10-05.
     - What those failures led to: the mapping no longer parses markdown itself. `MarkdownVisibleText`, in `MarkdownCore`, builds a document's visible text from the parser's own line rules and from the pass that writes the HTML, and has its own suite, `MarkdownVisibleTextTests`, that runs from the command line.
     - The no-whitespace-between-tags check covers every block type, and passes.
     - Not covered, because there is nothing to assert yet: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.

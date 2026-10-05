@@ -214,6 +214,9 @@ on hover. Destinations containing spaces are written in angle brackets, like
 [this one](</some path/file.md>). Link text can be *formatted* too, as in
 [**this bold link**](https://example.com).
 
+An address in angle brackets is a link all by itself: <https://commonmark.org>,
+or for mail, <support@sydpolk.com>.
+
 Images use the same syntax as links, with a leading exclamation mark. They come
 in two kinds.
 
@@ -292,7 +295,7 @@ Named and numeric HTML entities are decoded: &amp; &lt; &gt; &copy; &mdash;
 These are recognized markdown elsewhere but render as literal text here:
 
 - Reference-style links, written as `[text][label]` with a definition elsewhere
-- Autolinks, written as `<https://example.com>` or as a bare URL
+- Bare URLs: an address is a link only in angle brackets or in link syntax
 - Strikethrough, written as `~~text~~`
 - Raw inline or block HTML, which is always escaped and shown as text
 - Indented (four-space) code blocks — use a fenced block instead

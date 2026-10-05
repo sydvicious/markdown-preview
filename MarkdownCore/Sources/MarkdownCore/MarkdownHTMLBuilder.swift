@@ -304,7 +304,7 @@ public enum MarkdownHTMLBuilder {
     /// is taken a stretch at a time.
     private static func startsInlineConstruct(_ character: Character) -> Bool {
         switch character {
-        case "\\", " ", "\n", "&", "!", "[", "`", "*", "_":
+        case "\\", " ", "\n", "&", "!", "[", "`", "<", "*", "_":
             return true
         default:
             return false
@@ -430,6 +430,12 @@ public enum MarkdownHTMLBuilder {
             if let code = parseCodeSpan(in: text, from: index) {
                 appendRendered((code.html, code.runs))
                 index = code.endIndex
+                continue
+            }
+
+            if let autolink = parseAutolink(in: text, from: index) {
+                appendRendered((autolink.html, autolink.runs))
+                index = autolink.endIndex
                 continue
             }
 
@@ -742,12 +748,134 @@ public enum MarkdownHTMLBuilder {
         return (character, end)
     }
 
+    /// The `href` attribute for a link to `destination`, or nothing at all when
+    /// the destination is script.
+    ///
+    /// Clicking a `javascript:` link runs it in the page. The web view does not
+    /// ask the app first, as it does for every other link, so this is the one
+    /// way a document could run script in the preview — where it could read the
+    /// key that `MarkdownImageURL` puts on image URLs, and post to the app's
+    /// message handlers. Raw HTML is escaped to keep script out; a link without
+    /// its `href` keeps this door shut too. The text still shows.
+    private static func hrefAttribute(_ destination: String) -> String {
+        isScript(destination) ? "" : " href=\"\(escapeHTMLAttribute(destination))\""
+    }
+
+    /// Whether a browser would run `destination` as script. It reads the scheme
+    /// without regard to case, skips whitespace and control characters before
+    /// it, and ignores tabs and line endings inside it; so does this.
+    private static func isScript(_ destination: String) -> Bool {
+        let scheme = destination.unicodeScalars
+            .filter { $0.value > 0x20 && $0.value != 0x7F }
+            .prefix(11)
+            .map { Character($0).lowercased() }
+            .joined()
+        return scheme.hasPrefix("javascript:") || scheme.hasPrefix("vbscript:")
+    }
+
+    /// Parses an autolink: an absolute URI or an email address between angle
+    /// brackets, which becomes a link whose text is the address.
+    ///
+    /// Nothing inside is markup. The address is taken as written — no escapes,
+    /// no emphasis — and ends the attempt if it holds a space, which is what
+    /// keeps `a < b and c > d` from being read as one.
+    private static func parseAutolink(
+        in text: Substring,
+        from start: String.Index
+    ) -> (html: String, runs: [MarkdownInlineRun], endIndex: String.Index)? {
+        guard text[start] == "<" else { return nil }
+
+        let addressStart = text.index(after: start)
+        var close = addressStart
+        while close < text.endIndex, text[close] != ">" {
+            let character = text[close]
+            if character == "<" || character == " " || character.isNewline
+                || character.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) {
+                return nil
+            }
+            close = text.index(after: close)
+        }
+        guard close < text.endIndex else { return nil }
+
+        let address = text[addressStart..<close]
+        let destination: String
+        if isAbsoluteURI(address) {
+            destination = percentEncodedForLink(address)
+        } else if isEmailAddress(address) {
+            destination = "mailto:" + address
+        } else {
+            return nil
+        }
+
+        let html = "<a\(hrefAttribute(destination))>\(escapeHTML(String(address)))</a>"
+        return (html, [MarkdownInlineRun(source: addressStart..<close)], text.index(after: close))
+    }
+
+    /// A scheme — a letter, then letters, digits, `+`, `.` or `-`, two to
+    /// thirty-two characters in all — a colon, and whatever follows.
+    private static func isAbsoluteURI(_ address: Substring) -> Bool {
+        guard let colon = address.firstIndex(of: ":") else { return false }
+        let scheme = address[..<colon]
+
+        guard (2...32).contains(scheme.count),
+              let first = scheme.first, first.isASCII, first.isLetter else { return false }
+        return scheme.allSatisfy { character in
+            character.isASCII
+                && (character.isLetter || character.isNumber || character == "+" || character == "." || character == "-")
+        }
+    }
+
+    /// An email address as HTML's own definition has it: a name, an `@`, and a
+    /// host made of labels separated by dots.
+    private static func isEmailAddress(_ address: Substring) -> Bool {
+        guard let at = address.firstIndex(of: "@") else { return false }
+        let name = address[..<at]
+        let host = address[address.index(after: at)...]
+
+        let nameCharacters = ".!#$%&'*+/=?^_`{|}~-"
+        guard !name.isEmpty,
+              name.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || nameCharacters.contains($0)) }) else {
+            return false
+        }
+
+        func isASCIIAlphanumeric(_ character: Character) -> Bool {
+            character.isASCII && (character.isLetter || character.isNumber)
+        }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        return !labels.isEmpty && labels.allSatisfy { label in
+            guard (1...63).contains(label.count),
+                  let first = label.first, isASCIIAlphanumeric(first),
+                  let last = label.last, isASCIIAlphanumeric(last) else { return false }
+            return label.allSatisfy { isASCIIAlphanumeric($0) || $0 == "-" }
+        }
+    }
+
+    /// An address as it goes into an `href`, with every byte a URL may not hold
+    /// written as a percent escape.
+    private static func percentEncodedForLink(_ address: Substring) -> String {
+        let allowed = "-_.+!*'(),%#@?=;:/&$~"
+        var encoded = ""
+        for scalar in address.unicodeScalars {
+            let isAllowed = scalar.isASCII
+                && (CharacterSet.alphanumerics.contains(scalar) || allowed.unicodeScalars.contains(scalar))
+            if isAllowed {
+                encoded.unicodeScalars.append(scalar)
+            } else {
+                for byte in String(scalar).utf8 {
+                    encoded += String(format: "%%%02X", byte)
+                }
+            }
+        }
+        return encoded
+    }
+
     /// The `]` that closes the bracket at `open`, which is where a link's text
     /// or an image's description ends.
     ///
     /// Brackets inside pair up, so `[foo [bar]](/url)` and a badge —
-    /// `[![alt](image)](/url)` — end where they should. A backslash escape and
-    /// a code span are skipped whole, so a bracket inside either is not counted.
+    /// `[![alt](image)](/url)` — end where they should. A backslash escape, a
+    /// code span and an autolink are skipped whole, so a bracket inside any of
+    /// them is not counted.
     private static func closingBracket(in text: Substring, forBracketAt open: String.Index) -> String.Index? {
         var depth = 0
         var index = text.index(after: open)
@@ -762,6 +890,11 @@ public enum MarkdownHTMLBuilder {
             case "`":
                 if let code = parseCodeSpan(in: text, from: index) {
                     index = code.endIndex
+                    continue
+                }
+            case "<":
+                if let autolink = parseAutolink(in: text, from: index) {
+                    index = autolink.endIndex
                     continue
                 }
             case "[":
@@ -842,9 +975,9 @@ public enum MarkdownHTMLBuilder {
         let rendered = renderInline(label)
         // Links do not nest. If the text holds a link of its own, that one is
         // the link, and these brackets are text around it.
-        guard !rendered.html.contains("<a href=\"") else { return nil }
+        guard !rendered.html.contains("<a ") && !rendered.html.contains("<a>") else { return nil }
         let titleAttribute = target.title.map { " title=\"\(escapeHTMLAttribute($0))\"" } ?? ""
-        let html = "<a href=\"\(escapeHTMLAttribute(target.destination))\"\(titleAttribute)>"
+        let html = "<a\(hrefAttribute(target.destination))\(titleAttribute)>"
             + "\(rendered.html)</a>"
         return (html, rendered.runs, text.index(after: closeParen))
     }

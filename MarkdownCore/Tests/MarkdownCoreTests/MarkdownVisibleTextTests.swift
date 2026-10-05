@@ -68,6 +68,13 @@ struct MarkdownVisibleTextTests {
         #expect(pieces(of: "[*Alpha* b](https://example.com \"t\") c") == [["Alpha", "Alpha"], [" b", " b"], [" c", " c"]])
     }
 
+    @Test func anAutolinkIsShownAsItsAddressWithoutTheBrackets() {
+        #expect(
+            pieces(of: "see <https://example.com/a_b> or <syd@example.com>")
+                == [["see ", "see "], ["https://example.com/a_b", "https://example.com/a_b"], [" or ", " or "], ["syd@example.com", "syd@example.com"]]
+        )
+    }
+
     @Test func anImageDescriptionCountsOnlyWhenAsked() {
         #expect(pieces(of: "a ![Alt *text*](p.png) b") == [["a ", "a "], ["Alt ", "Alt "], ["text", "text"], [" b", " b"]])
         #expect(pieces(of: "a ![Alt *text*](p.png) b", includesImageDescriptions: false) == [["a ", "a "], [" b", " b"]])
@@ -186,6 +193,7 @@ struct MarkdownVisibleTextTests {
         "AT&amp;T &copy; &#35; &nosuch; a < b & c > \"d\"",
         "first line\nsecond line  \nthird line\\\nfourth *line\nfifth* line",
         "<b>raw</b> <!-- comment -->",
+        "an <https://example.com/?a=1&b=2> autolink and <syd@example.com>",
     ])
     func visibleTextIsTheTextOfTheRenderedHTML(source: String) {
         let html = MarkdownHTMLBuilder.document(for: source, softBreak: .lineBreak)
