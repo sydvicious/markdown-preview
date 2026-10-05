@@ -228,6 +228,91 @@ struct WebKitTextNodeAlignmentTests {
         #expect(webKit.text == MarkdownPreviewTextOffsetMapping(sourceText: quote).displayText)
     }
 
+    // MARK: - Every markdown feature
+
+    /// The preview's page for `source`, with the scripts that read and set the
+    /// selection running in it.
+    private func loadedPreview(for source: String) async throws -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        for script in [MarkdownWebResources.Script.selection, .applySelection] {
+            configuration.userContentController.addUserScript(
+                WKUserScript(
+                    source: MarkdownWebResources.script(script),
+                    injectionTime: .atDocumentEnd,
+                    forMainFrameOnly: true
+                )
+            )
+        }
+
+        let webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let observer = LoadObserver()
+        webView.navigationDelegate = observer
+        webView.loadHTMLString(MarkdownHTMLBuilder.document(for: source, softBreak: .lineBreak), baseURL: nil)
+        try await observer.wait()
+        return webView
+    }
+
+    /// The other half of `MarkdownFeatureOffsetMappingTests`, which checks the
+    /// source mapping against the same hand-written text: here it is WebKit,
+    /// through the preview's own walker, that has to agree with it.
+    @Test(.timeLimit(.minutes(1)), arguments: MarkdownFeature.all)
+    func webKitShowsTheExpectedTextForEachFeature(feature: MarkdownFeature) async throws {
+        let webKit = try await webKitBlockText(for: feature.source)
+
+        #expect(webKit.text == feature.visible)
+        #expect(webKit.combinedLength == webKit.text.utf16.count)
+    }
+
+    /// The whole trip, both ways, with nothing stood in for: a range in the
+    /// source is reflected into the page by the call the app makes, WebKit is
+    /// asked what it then has selected, and what the page reports back is
+    /// turned into a source range again.
+    @Test(.timeLimit(.minutes(1)), arguments: MarkdownFeature.all.filter { !$0.words.isEmpty })
+    func aSourceSelectionReachesThePageAndComesBackForEachFeature(feature: MarkdownFeature) async throws {
+        let webView = try await loadedPreview(for: feature.source)
+
+        for word in feature.words {
+            let inSource = try #require(feature.sourceRange(of: word), "\(word) is not in the source")
+            guard let reflected = PreviewSelectionReflection.reflectedSelection(
+                in: feature.source,
+                selectedRange: inSource
+            ) else {
+                Issue.record("the source selection of \(word) reflects to nothing")
+                continue
+            }
+
+            let arguments = "\(reflected.start.blockStart), \(reflected.start.blockEnd), "
+                + "\(reflected.start.displayOffset), \(reflected.end.blockStart), "
+                + "\(reflected.end.blockEnd), \(reflected.end.displayOffset)"
+            let result = try await webView.evaluateJavaScript("""
+                (() => {
+                  const applied = \(PreviewScriptCall.applySelection(arguments));
+                  return {
+                    applied: applied === true,
+                    text: window.getSelection()?.toString() ?? '',
+                    ranges: \(PreviewScriptCall.selectedDisplayRanges)
+                  };
+                })();
+                """)
+            let payload = try #require(result as? [String: Any])
+
+            #expect(payload["applied"] as? Bool == true, "the page made no selection for \(word)")
+            #expect(payload["text"] as? String == word, "what the page selected, for \(word)")
+
+            let reported = PreviewSelectionBridge.sourceRanges(
+                fromDisplayRangeResult: payload["ranges"],
+                source: feature.source
+            )
+            #expect(
+                PreviewSelectionBridge.enclosingRange(of: reported) == inSource,
+                "what came back to the source, for \(word)"
+            )
+        }
+    }
+
     // MARK: - The button that stands in for an unreadable image
 
     /// A folder the test cannot list, standing in for one the sandbox refuses.

@@ -29,6 +29,78 @@ This document tracks planned work for MarkdownPreviewApp.
   - Symptom driving this: opening a new file visibly freezes the GUI. The whole open path — read, parse, HTML build — currently runs on `@Main`, so the window stops responding until it finishes.
   - Schedule this work after the YMMV-related refactor work.
 
+### Find and selection: the source mapping reads markdown differently from the renderer.
+  - Found 2026-10-04 by the per-feature tests; see "Audit the test suites and cover every markdown feature". `MarkdownDisplayBuilder` (`MarkdownPreview/Utilities/DisplayTextMappings.swift`) works out a block's visible text with an inline parser of its own, which does not match the one in `MarkdownHTMLBuilder`. Where the two disagree, a search misses, or the highlight lands on the wrong characters or nowhere. It disagrees on 18 of the 60 fragments in `MarkdownFeature.all`; two of them have their own entries below (`1)` lists, Windows line endings).
+  - Inline, 7 fragments:
+    - `snake_case_name` is read as emphasis and loses its underscores ("underscores inside a word"). A search for `snake_case` finds nothing.
+    - `2 * 3 * 4` loses its asterisks ("asterisks with spaces around them").
+    - `***x***` keeps an asterisk on each side ("triple delimiter").
+    - A double-backtick code span is cut at the first backtick inside it ("double-backtick code span").
+    - A backslash escape keeps its backslash and the escaped character is treated as markup ("backslash escapes").
+    - An entity is counted as written, `&amp;` for `&` ("entities").
+    - A backslash hard break keeps its backslash ("hard break from a backslash").
+  - Blocks, 9 fragments:
+    - A heading's closing `##` is counted as text ("ATX heading with a closing sequence").
+    - Only the first line of a multi-line setext heading is counted ("setext heading over two lines").
+    - Whatever a block quote holds is counted with its markers — a heading's `#`, a list's `-`, a fence, a nested `>` — and two paragraphs get a newline between them that the page does not have ("block quote holding a heading", "… a list", "… fenced code", "nested block quote", "block quote with two paragraphs").
+    - A fence with no closing line loses its last line ("fenced code with no closing fence").
+    - An escaped pipe splits the cell ("table with an escaped pipe in a cell").
+  - Failing tests, each by fragment name: `MarkdownFeatureOffsetMappingTests` (`sourceMappingShowsWhatTheRenderedBlockShows`, `wordsRoundTripBetweenSourceAndDisplayText`, `wordsRoundTripBetweenSourceAndTheRenderedBlock`), `WebKitTextNodeAlignmentTests/aSourceSelectionReachesThePageAndComesBackForEachFeature`, and 11 cases of `MarkdownSearchFeatureTests/searchFindsWhatTheReaderSees`.
+  - The search index uses the same builder (`MarkdownTextOffsetMapping`), so file-list search has the same misses.
+
+### Find and selection: text in a `1)` list is invisible.
+  - `MarkdownDisplayBuilder.listItemContentRange` accepts a number followed by `.` only, so an item written `1) Alpha` contributes no text at all: a search for it finds nothing, and a selection in it reflects to nothing. The renderer accepts both delimiters.
+  - Failing tests: the "numbered list with parentheses" fragment in `MarkdownFeatureOffsetMappingTests` and `WebKitTextNodeAlignmentTests`, and "numbered item with a parenthesis" in `MarkdownSearchFeatureTests`.
+
+### Find and selection: the page drops a space or line break between two styled runs.
+  - `acceptedTextNodesInBlock` (`MarkdownPreview/Web/selection.js`) rejects any text node that is only whitespace, unless it is inside `pre` or `code`. That is right between block elements and wrong between inline ones: the space in `*Alpha* **beta**`, and the line break before a line that starts with bold text or a link, are characters the reader sees and the source mapping counts. Every offset after one is short by one.
+  - Seen as: in `**Name:** Alpha` / `**Place:** beta`, a match on "Place" highlights "lace:", and one on "beta" highlights nothing.
+  - Failing tests: `text-nodes.test.mjs` ("a space between two inline elements is text", "a line break followed by an inline element is still a line break"); `WebKitTextNodeAlignmentTests/webKitShowsTheExpectedTextForEachFeature` and `aSourceSelectionReachesThePageAndComesBackForEachFeature`, for the fragments "emphasised words with only a space between them", "line break before bold text" and "link text with markup".
+  - The existing test "whitespace between elements is formatting, not text" still has to pass, so the rule turns on what the node sits between, not on whitespace alone.
+
+### Windows line endings: a CRLF file parses as one line.
+  - `MarkdownBlockParser.parse` splits the source on `"\n"` as a `Character`. In Swift `"\r\n"` is a single `Character` that is not equal to `"\n"`, so a file saved with CRLF endings never splits and the whole document becomes one block. `MarkdownSourceLineTable` counts UTF-16 newlines and does see the lines, so the block's source range covers only the first of them. Nothing normalizes line endings when a file is loaded.
+  - Failing tests: `ParagraphTests/windowsLineEndingsAreLineEndings`; the "Windows line endings" fragment in every `MarkdownFeatureOffsetMappingTests` case and in `WebKitTextNodeAlignmentTests/aSourceSelectionReachesThePageAndComesBackForEachFeature`.
+
+### Lists: an item holds one line only.
+  - A list item is its marker line and nothing else. A second line of the same item — indented, or not ("lazy continuation") — becomes a separate paragraph after the list, and an item cannot hold a second paragraph, a fenced block or a quote. Hard-wrapped lists are the common case.
+  - Block quotes have the same gap for a continuation line written without its `>`.
+  - Failing tests: `ListTests/itemTextContinuesOnAnIndentedLine`, `lazyContinuationLineStaysInTheItem`, `itemsMayHoldSeveralParagraphs`, `itemsContainOtherBlocks`; `BlockQuoteTests/lazyContinuationLineStaysInTheQuote`.
+
+### Links: parentheses in the destination, brackets in the text, and an image inside a link.
+  - `parseLink` and `parseImage` end the text at the first `]` and the destination at the first `)`.
+    - `[foo](/wiki/Foo_(bar))` loses its last parenthesis from the link — every Wikipedia disambiguation URL.
+    - `[foo [bar]](/url)` is not a link at all.
+    - `[![alt](/img.png)](/url)`, a badge, becomes a link to the image with `![alt` as its text.
+  - Failing tests: `LinkTests/balancedParenthesesInTheDestination`, `bracketsInTheLinkText`, `imageInsideALink`.
+
+### Tables: a cell loses every backslash.
+  - `parseTableRow` drops the backslash from any escaped character, where only `\|` belongs to the table. `\*x\*` in a cell renders as emphasis, and `` `C:\dir` `` as `C:dir`. The `replacingOccurrences(of: "\\|", …)` at the end of the function can no longer match anything.
+  - Failing tests: `TableTests/otherBackslashEscapesReachTheCellIntact`, `backslashInsideACodeSpanIsKept`.
+
+### Lists: marker edge cases.
+  - An empty item (`-` on a line of its own) ends the list and becomes a paragraph. `ListTests/emptyItemIsAllowed`.
+  - A tab after the marker is not accepted. `ListTests/aTabMayFollowTheMarker`.
+  - Changing the bullet character, or the number's delimiter, should start a new list and does not. `ListTests/changingBulletCharacterStartsANewList`, `changingNumberDelimiterStartsANewList`.
+  - A wrapped line that begins with a number and a period, such as `14.  The number of doors is 6.`, turns into a list; only a list starting at 1 may interrupt a paragraph. `ListTests/onlyANumberedListStartingAtOneCanInterruptAParagraph`.
+
+### Smaller CommonMark deviations.
+  - Content inside an indented fence keeps the fence's indentation, which matters for a fenced block under a list item. `FencedCodeTests/contentIndentedLikeTheFenceLosesThatIndentation`.
+  - A line ending inside a code span stays a line ending, where it should become a space. `CodeSpanTests/lineEndingInsideIsASpace`.
+  - `*foo**bar**baz*` pairs the outer `*` with the inner `**` (the spec's "multiple of three" rule). `EmphasisTests/strongInsideEmphasisInsideAWord`.
+
+### CommonMark constructs the renderer does not implement.
+  - Asserted in the conformance suite because its expectations come from the spec; each fails until it is built. All three are in scope (Syd, 2026-10-04).
+  - Indented code blocks (spec 4.4): four spaces or a tab. `IndentedCodeTests`, 4 failing.
+  - Autolinks (spec 6.5): `<https://example.com>` and `<foo@example.com>`. `AutolinkTests`, 2 failing.
+  - Link reference definitions (spec 4.7): `[foo][bar]`, `[foo][]`, `[foo]` with `[bar]: /url` elsewhere, and the image form. `ReferenceLinkTests`, 5 failing.
+
+### Possible crash at launch: two saved documents that resolve to one file. (not reproduced)
+  - Found 2026-10-04 by reading the code, during the audit under "Audit the test suites and cover every markdown feature". It has not been reproduced, and no test exposes it.
+  - `DocumentSearchIndex.rebuild` builds its table with `Dictionary(uniqueKeysWithValues:)`, which traps on a repeated key. `DocumentSessionStore.restoreMigration` keys each restored document by the path its bookmark resolves to and does not remove repeats. So two persisted entries that resolve to one file would trap on the next restore — and on every launch after, because nothing is persisted before the trap.
+  - How the list might get there: open a file, move it, and open it again from the new place. The first entry's bookmark follows the file, so both now resolve to the new path. Whether the polling removes the first entry before it is persisted is the part not checked.
+  - First step: try to reproduce it. A test that restores two entries with the same resolved path would trap and take the rest of the run down with it, so the fix and its test want to land together.
+
 ## Features
 
 ### Investigate using Liquid Glass controls.
@@ -162,14 +234,51 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Hardening for production use.
   - Improve handling/performance for very large markdown files.
-    - Profile and handle really large files end to end: parsing/rendering, the offset mappings (`MarkdownTextOffsetMapping`/`HTMLTextOffsetMapping` currently rebuild over the whole document), in-document search, and WKWebView load/selection. Expect this to be significant work.
+    - Profile and handle really large files end to end: parsing/rendering, the offset mappings (`MarkdownTextOffsetMapping` currently rebuilds over the whole document), in-document search, and WKWebView load/selection. Expect this to be significant work.
     - Consider incremental/virtualized rendering or chunking so opening, scrolling, and searching stay responsive; guard against pathological inputs (huge single lines/tables, deeply nested structures).
     - Relates to the search-field performance work under "Expand search and indexing."
   - Add robustness for markdown edge cases and malformed input across parser/renderer paths.
   - See "Audit the test suites and cover every markdown feature" for the parser/renderer test work this depends on.
 
 ### Audit the test suites and cover every markdown feature.
-  - Done 2026-07-19 for the renderer: `MarkdownCore/Tests/MarkdownCoreConformanceTests` covers the block and inline features against CommonMark 0.31.2, runs headlessly via `swift test`, and passes. It exposed 44 failing cases when it landed; all are now fixed. Still to do: the offset-mapping round trips below, and the audit of the remaining Xcode-hosted suites.
+  - Done 2026-07-19 for the renderer: `MarkdownCore/Tests/MarkdownCoreConformanceTests` covers the block and inline features against CommonMark 0.31.2 and runs headlessly via `swift test`. It exposed 44 failing cases when it landed; all were fixed.
+  - Done 2026-10-04 for the rest of the test work. The suites are landed and the run is red: each failure is filed under "Bugs", and the suites go green as those are fixed.
+    - The conformance suite grew from 92 cases to 206, and 30 of them fail.
+    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 60 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. 85 cases fail across these.
+    - The no-whitespace-between-tags check covers every block type, and passes.
+    - Not covered, because there is nothing to assert yet: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.
+  - Audit of the other suites, 2026-10-04: what the suites outside the renderer and the offset mappings cover, and what they do not. Done by reading the tests against the sources; nothing was run to produce it. "No test" means the name appears nowhere in either test directory, which was checked by search. Anything said about behavior is from reading the code and is marked so.
+    - A possible crash at launch came out of this audit; it has its own entry under "Bugs".
+    - Files with no tests at all:
+      - `DirectoryAccessStore` — the format-version discard, restoring and pruning bookmarks, granting. It takes a `UserDefaults`, so it can be tested the way `DocumentSessionStore` is.
+      - `MarkdownFile` — the UTF-16 fallback and the undecodable-bytes error; only the UTF-8 path is reached, through other suites.
+      - `MarkdownImageSchemeHandler` — the refuse / unreadable / not-an-image chain. `WKURLSchemeTask` is a protocol, so a stand-in works; the hard-wired `DirectoryAccessStore.shared` is what is in the way.
+      - `MarkdownSourceLineTable` and `MarkdownSelectionRange` — every offset in the app goes through them. Tests use them as helpers; none is about them.
+      - `PreviewSelectionSynchronizer` and the none / missing / unreadable image decision, both in `MarkdownPreviewView.swift`.
+    - Untested logic in files that do have tests:
+      - `DocumentSessionStore`: `checkAllDocumentsForChanges`, `acknowledgeMissingActiveDocument`, `handleMissingDocument`, `hasPersistedDocumentList` (the gate for seeding the welcome document), and removal at compact width.
+      - `ContentViewModel`: `handleFindCommand`, `focusDetailSearch`, `navigateDetailSearch`, `cancelFocusedSearch`, `decreaseSelectedTextSize`, `filteredGroupedDocumentsByParentDirectory` (what the Mac sidebar shows), and every single-column branch — no test sets `usesSingleColumnNavigation`.
+      - `MarkdownAppCommandCenter`: six of the nine `perform…` methods are never called (project find, use selection, find next, find previous, larger and smaller text), and `ContentView.syncCommandCenter`, which binds each command to a view-model method, has no test. A transposed argument there would pass everything.
+      - `MarkdownSearchSession`: no test moves backward, so Find Previous, its wrap, and reversing direction mid-wrap are untested; so is `refresh` when the matches shrink.
+      - `SearchViewModel`: `detailSearchSuggestions` and `seedFromPasteboardIfEmpty`. The suggestion rules in `DocumentSearchIndex` and `MarkdownSearch` (minimum length, limit, folding, no repeats) rest on one `contains` assertion.
+      - `SelectableSourceTextView`: the tested `SourceSelectionUpdate.resolve` is called only from the iOS view. The Mac view clamps the selection inline, and that has no test.
+      - `MarkdownSelectionClipboard`: `writeSelection` and `writePlainText`.
+      - `MarkdownImageURL`: an image source with a folder in it (`images/x.png`, `../x.png`), and an upper-case extension, which the bundled sample's `lilsyd.JPG` has.
+      - `MarkdownBlockCopyText`: tab and mixed indentation, a fence indented up to three spaces, a quote's continuation line without its `>`.
+    - The seam between Swift and the page's scripts. Each side is tested alone, so a rename or a reordered argument on one side passes every suite and the preview fails without an error.
+      - The message-handler names `copyBlock`, `previewSelectionChanged` and `previewScrollChanged` are private to `MarkdownPreviewWebView.swift`; only `requestImageAccess` is checked end to end.
+      - `MarkdownCopyWebView.selectionInvocation`, which writes the six arguments of `applySelection`, is private and untested. The per-feature WebKit test added the same day writes those arguments itself, so it covers the script and `PreviewScriptCall.applySelection`, not that function.
+      - The link policy is inline in the navigation delegate, with no function to test.
+    - Tests that do not test what their name says:
+      - `MarkdownImageURLTests/refusesDisallowedExtensionsWhenServing` passes a URL with no key, so it is refused at the key check and never reaches the extension check it is named for. No test presents the right key with a disallowed extension.
+      - `SearchViewModelTests/findQueryIsAdoptedOnceAFieldIsFocused` and `findQueryPresentBeforeLaunchIsAdoptedOnFirstFocus` have the same body; the "present before launch" case is never set up.
+      - `DocumentSessionStoreTests/restoreKeepsPersistedSelectionOnCompactWidth`: the restore ignores its `isCompactWidth` argument, so compact width is not what is tested.
+      - `MarkdownPreviewWebViewTests`' one test of `contiguousSelectionRanges` asserts that there is one range, not which.
+    - Code with no callers in the app:
+      - `MarkdownBlockQuoteView`, and `DetailPreviewPane` — each is referenced only from `#Preview` blocks.
+      - `DirectoryContainment.directory(containing:from:)` and `directory(_:contains:)`: nine of that suite's thirteen tests are of functions the app never calls. `MarkdownImageURL.mimeType(forPathExtension:)` is the same.
+      - `DirectoryAccessStore.hasAccess` is used only inside a log message.
+    - The scripts' tests have the smallest gaps: a selection whose ends are elements, not text nodes (select-all, triple-click); `preventDefault` and `stopPropagation` in the two button handlers; the `touchend` and `pointerup` listeners.
   - Audit what the existing suites actually cover. The gaps found so far were large: before the nested-list work there were no tests at all for list parsing or list HTML, despite lists being a core feature. Assume other features are in the same state until checked, and write down what is covered and what is not.
   - Add a unit test per individual markdown feature: generate a small `.md` fragment exercising exactly that feature, render it, and assert the generated HTML is correct.
     - Cover at least: headings (ATX and setext), paragraphs, bulleted lists, numbered lists, nested and mixed lists, checklists, blockquotes, fenced code, inline code, emphasis and strong, links, images, horizontal rules, and tables (including alignment, inline code in cells, and explicit line breaks).

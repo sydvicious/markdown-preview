@@ -5,6 +5,8 @@
 
 ## 0.10
 
+- Removed `HTMLTextOffsetMapping`, which nothing in the app used.
+- Tests for every markdown feature, each from a small fragment of its own. The conformance suite grows from 92 cases to 206, and now covers indented code, autolinks, link reference definitions, raw HTML and Windows line endings. New suites check find and selection one feature at a time: the source mapping's text against the rendered block's, the same text as WebKit reports it, a selection carried from the source to the page and back, and what a search finds. All are written against correct behavior, so the cases that expose a bug fail, and stay failing until it is fixed.
 - The preview's page template, stylesheet and scripts are now files, in `MarkdownPreview/Web`, where they were string literals in Swift. The pages they produce are unchanged. The scripts have their own tests, written in JavaScript: `npm install` once, then `npm test`.
 - (iOS/iPadOS) A document whose security scope the system refuses is asked for it once per launch, not on every polling tick. The repeated request logged `sandbox_extension_consume failed: 22 (Invalid argument)` to the console once a second.
 - An image the app is not permitted to read is replaced in the preview by an Allow… button that opens the folder picker, in place of a broken image. The bar above the preview that offers the same thing was easy to miss. An image that is simply missing still shows as broken.

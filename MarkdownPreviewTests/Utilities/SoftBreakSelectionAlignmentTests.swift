@@ -20,11 +20,6 @@ import MarkdownCore
 /// These tests stand in for the DOM with `blockTextNodes`, so the agreement can
 /// be checked headlessly rather than by selecting text in a running app.
 ///
-/// Note that `HTMLTextOffsetMapping` is deliberately *not* used here. It
-/// substitutes a newline for `<br />` on top of the literal newline the builder
-/// already emits after it, so it reports two line breaks where the DOM has one.
-/// It is a tag stripper, not a model of text nodes.
-///
 /// What this cannot prove: `blockTextNodes` is still a model. If it and WebKit
 /// disagree about whitespace around `<br>`, these tests pass and the app is
 /// wrong. That single question is all the runtime check still owes.
