@@ -693,22 +693,107 @@ public enum MarkdownHTMLBuilder {
         return (character, end)
     }
 
+    /// The `]` that closes the bracket at `open`, which is where a link's text
+    /// or an image's description ends.
+    ///
+    /// Brackets inside pair up, so `[foo [bar]](/url)` and a badge —
+    /// `[![alt](image)](/url)` — end where they should. A backslash escape and
+    /// a code span are skipped whole, so a bracket inside either is not counted.
+    private static func closingBracket(in text: Substring, forBracketAt open: String.Index) -> String.Index? {
+        var depth = 0
+        var index = text.index(after: open)
+
+        while index < text.endIndex {
+            switch text[index] {
+            case "\\":
+                let next = text.index(after: index)
+                if next < text.endIndex, isASCIIPunctuation(text[next]) {
+                    index = next
+                }
+            case "`":
+                if let code = parseCodeSpan(in: text, from: index) {
+                    index = code.endIndex
+                    continue
+                }
+            case "[":
+                depth += 1
+            case "]":
+                if depth == 0 { return index }
+                depth -= 1
+            default:
+                break
+            }
+            index = text.index(after: index)
+        }
+
+        return nil
+    }
+
+    /// The `)` that ends a link's destination and title, which start at `start`.
+    ///
+    /// Parentheses in the destination pair up, so `/wiki/Foo_(bar)` is one
+    /// destination. A destination in angle brackets and a quoted title are
+    /// skipped whole, so a parenthesis inside either is not counted.
+    private static func closingParenthesis(in text: Substring, from start: String.Index) -> String.Index? {
+        var index = start
+        while index < text.endIndex, text[index].isWhitespace {
+            index = text.index(after: index)
+        }
+
+        if index < text.endIndex, text[index] == "<" {
+            guard let close = text[index...].firstIndex(of: ">") else { return nil }
+            index = text.index(after: close)
+        }
+
+        var depth = 0
+        while index < text.endIndex {
+            let character = text[index]
+            switch character {
+            case "\\":
+                let next = text.index(after: index)
+                if next < text.endIndex, isASCIIPunctuation(text[next]) {
+                    index = next
+                }
+            case "\"", "'":
+                // A quote after whitespace opens a title, if another closes it.
+                let afterQuote = text.index(after: index)
+                if index > start, text[text.index(before: index)].isWhitespace,
+                   let close = text[afterQuote...].firstIndex(of: character) {
+                    index = close
+                }
+            case "(":
+                depth += 1
+            case ")":
+                if depth == 0 { return index }
+                depth -= 1
+            default:
+                break
+            }
+            index = text.index(after: index)
+        }
+
+        return nil
+    }
+
     private static func parseLink(
         in text: Substring,
         from start: String.Index
     ) -> (html: String, runs: [MarkdownInlineRun], endIndex: String.Index)? {
         guard text[start] == "[" else { return nil }
-        guard let closeBracket = text[start...].firstIndex(of: "]") else { return nil }
+        guard let closeBracket = closingBracket(in: text, forBracketAt: start) else { return nil }
         let afterBracket = text.index(after: closeBracket)
         guard afterBracket < text.endIndex, text[afterBracket] == "(" else { return nil }
         let urlStart = text.index(after: afterBracket)
-        guard let closeParen = text[urlStart...].firstIndex(of: ")") else { return nil }
+        guard let closeParen = closingParenthesis(in: text, from: urlStart) else { return nil }
 
         let label = text[text.index(after: start)..<closeBracket]
         guard let target = parseLinkTarget(text[urlStart..<closeParen]) else { return nil }
 
         // What the reader sees of a link is its text, rendered.
         let rendered = renderInline(label)
+        // Links do not nest. If the text holds a link of its own, that one is
+        // the link, and these brackets are text around it.
+        guard !rendered.html.contains("<a href=\"") else { return nil }
         let titleAttribute = target.title.map { " title=\"\(escapeHTMLAttribute($0))\"" } ?? ""
         let html = "<a href=\"\(escapeHTMLAttribute(target.destination))\"\(titleAttribute)>"
             + "\(rendered.html)</a>"
@@ -781,11 +866,11 @@ public enum MarkdownHTMLBuilder {
         guard text[start] == "!" else { return nil }
         let labelStart = text.index(after: start)
         guard labelStart < text.endIndex, text[labelStart] == "[" else { return nil }
-        guard let closeBracket = text[labelStart...].firstIndex(of: "]") else { return nil }
+        guard let closeBracket = closingBracket(in: text, forBracketAt: labelStart) else { return nil }
         let afterBracket = text.index(after: closeBracket)
         guard afterBracket < text.endIndex, text[afterBracket] == "(" else { return nil }
         let urlStart = text.index(after: afterBracket)
-        guard let closeParen = text[urlStart...].firstIndex(of: ")") else { return nil }
+        guard let closeParen = closingParenthesis(in: text, from: urlStart) else { return nil }
 
         let description = text[text.index(after: labelStart)..<closeBracket]
         guard let target = parseLinkTarget(text[urlStart..<closeParen]) else { return nil }

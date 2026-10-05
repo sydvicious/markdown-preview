@@ -164,6 +164,24 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
         ),
         .init("unclosed link", "[Alpha](/url", visible: "[Alpha](/url", words: ["Alpha"]),
         .init(
+            "link with parentheses in its destination",
+            "See [Alpha](/wiki/Alpha_(letter)) now",
+            visible: "See Alpha now",
+            words: ["Alpha", "now"]
+        ),
+        .init(
+            "link text with brackets in it",
+            "[Alpha [beta]](/url) gamma",
+            visible: "Alpha [beta] gamma",
+            words: ["Alpha", "beta", "gamma"]
+        ),
+        .init(
+            "image inside a link",
+            "[![Alt](pic.png)](/url) after",
+            visible: " after",
+            words: ["after"]
+        ),
+        .init(
             "image",
             "before ![Alt](pic.png) after",
             visible: "before  after",
@@ -326,6 +344,12 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
             "| Alpha | Beta |\n| --- | --- |\n|  | gamma |",
             visible: "AlphaBetagamma",
             words: ["Alpha", "Beta", "gamma"]
+        ),
+        .init(
+            "table cells with other backslash escapes",
+            "| \\*Alpha\\* | `C:\\beta` |\n| --- | --- |\n| 1 | 2 |",
+            visible: "*Alpha*C:\\beta12",
+            words: ["Alpha", "beta"]
         ),
         .init(
             "table with an escaped pipe in a cell",

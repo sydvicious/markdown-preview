@@ -609,19 +609,26 @@ public struct MarkdownBlockParser {
         return cells
     }
 
-    /// A cell's text as the renderer is given it: the cell without the
-    /// backslashes that escape something.
+    /// A cell's text as the renderer is given it. `\|` is a pipe: that escape is
+    /// the table's, there so a cell can hold one. Every other backslash is the
+    /// cell's own content and is left for the inline pass, so `\*` is still an
+    /// escaped asterisk and a backslash in a code span is still a backslash.
     private static func tableCellText(_ cell: Substring) -> String {
         var text = ""
-        var isEscaped = false
-        for ch in cell {
-            if isEscaped {
-                text.append(ch)
-                isEscaped = false
-            } else if ch == "\\" {
-                isEscaped = true
+        var index = cell.startIndex
+
+        while index < cell.endIndex {
+            let ch = cell[index]
+            let next = cell.index(after: index)
+            if ch == "\\", next < cell.endIndex {
+                if cell[next] != "|" {
+                    text.append(ch)
+                }
+                text.append(cell[next])
+                index = cell.index(after: next)
             } else {
                 text.append(ch)
+                index = next
             }
         }
         return text.trimmingCharacters(in: .whitespaces)

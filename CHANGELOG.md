@@ -5,6 +5,8 @@
 
 ## 0.10
 
+- Links and images: a destination may hold balanced parentheses, as Wikipedia addresses do; link text may hold brackets; and an image may be a link's text, which is how a badge is written. Each used to end at the first `]` or `)`. A title may hold a parenthesis or be written in parentheses, and a link inside another link's text is now the link, with the outer brackets left as text.
+- Tables: a backslash in a cell is kept unless it escapes a pipe. `\*` in a cell is an escaped asterisk again, and a path such as `C:\dir` in a code span keeps its backslash.
 - Find and selection now read markdown exactly as the preview renders it, where they used to have a parser of their own that disagreed with it. Fixed by this: a match landing on the wrong characters, or nowhere, after `snake_case` names, backslash escapes, entities such as `&amp;`, spaced asterisks, or a heading's closing `##`; text that could not be found at all in `1)` lists, in the later lines of a setext heading, or in the last line of an unclosed code block; and anything inside a block quote — a heading, a list, code, a nested quote — being counted with its markers.
 - The engine has a new type, `MarkdownVisibleText`, that gives a document's visible text and the source each part of it came from. It is built from the parser's own line rules and from the pass that writes the HTML, and is tested from the command line.
 - Files with Windows (CRLF) or classic Mac (CR) line endings, or a mixture of line endings, now render, search and select as they should. A Windows file used to be read as one long line.

@@ -21,3 +21,4 @@ These instructions apply to the entire directory tree under this folder.
 
 - This is an Xcode/macOS app project.
 - The main app code lives under `MarkdownPreview/`.
+- The markdown engine — parser, HTML builder, and the visible-text mapping find and selection use — is the `MarkdownCore` Swift package, under `MarkdownCore/`. It builds and tests from the command line with `swift test`, and stays free of SwiftUI, UIKit and AppKit.

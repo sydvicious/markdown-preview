@@ -10,8 +10,8 @@
 //  Keep this target free of SwiftUI, UIKit, and AppKit. A UI-framework import
 //  here is what would push these tests back into an app host.
 //
-//  `Sources/MarkdownCore` is also compiled into the MarkdownPreview app target
-//  by the Xcode project, so the app and this package build the same files.
+//  The MarkdownPreview app links this library and imports it as a module, so
+//  the app and these tests run the same build of the engine.
 //
 
 import PackageDescription

@@ -895,6 +895,31 @@ struct LinkTests {
         #expect(blockHTML("[foo [bar]](/url)") == "<p><a href=\"/url\">foo [bar]</a></p>")
     }
 
+    @Test func parenthesizedTitle() async throws {
+        #expect(blockHTML("[foo](/url (title))") == "<p><a href=\"/url\" title=\"title\">foo</a></p>")
+    }
+
+    @Test func titleMayContainAParenthesis() async throws {
+        #expect(blockHTML("[foo](/url \"a) b\")") == "<p><a href=\"/url\" title=\"a) b\">foo</a></p>")
+    }
+
+    @Test func unbalancedParenthesisInTheDestinationIsNotALink() async throws {
+        #expect(blockHTML("[foo](/url(x)") == "<p>[foo](/url(x)</p>")
+    }
+
+    @Test func escapedBracketInTheLinkText() async throws {
+        #expect(blockHTML("[foo\\]](/url)") == "<p><a href=\"/url\">foo]</a></p>")
+    }
+
+    @Test func codeSpanOutranksTheLinkTextsBrackets() async throws {
+        #expect(blockHTML("[not a `link](/foo`)") == "<p>[not a <code>link](/foo</code>)</p>")
+    }
+
+    @Test func linksDoNotNest() async throws {
+        // The inner link is the link; the brackets around it are text.
+        #expect(blockHTML("[foo [bar](/a)](/b)") == "<p>[foo <a href=\"/a\">bar</a>](/b)</p>")
+    }
+
     @Test func imageInsideALink() async throws {
         // A badge: an image that is itself the link's text.
         #expect(
@@ -995,6 +1020,13 @@ struct ImageTests {
 
     @Test func sourceIsAttributeEscaped() async throws {
         #expect(blockHTML("![x](/a\"b)") == "<p><img src=\"/a&quot;b\" alt=\"x\" /></p>")
+    }
+
+    @Test func descriptionAndSourceMayHoldBracketsAndParentheses() async throws {
+        #expect(
+            blockHTML("![a [b]](/img_(1).png)")
+                == "<p><img src=\"/img_(1).png\" alt=\"a [b]\" /></p>"
+        )
     }
 
     @Test func angleBracketSourceMayContainSpaces() async throws {
