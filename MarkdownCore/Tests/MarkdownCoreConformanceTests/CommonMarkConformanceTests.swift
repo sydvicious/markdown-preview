@@ -481,6 +481,25 @@ struct BlockQuoteTests {
         #expect(allBlockHTML("> foo\nbar") == ["<blockquote><p>foo\nbar</p></blockquote>"])
     }
 
+    @Test func aLazyLineAfterSeveralQuotedOnes() async throws {
+        #expect(allBlockHTML("> foo\n> bar\nbaz") == ["<blockquote><p>foo\nbar\nbaz</p></blockquote>"])
+    }
+
+    @Test func aLazyLineContinuesAListInsideTheQuote() async throws {
+        #expect(allBlockHTML("> - a\nb") == ["<blockquote><ul><li>a\nb</li></ul></blockquote>"])
+    }
+
+    @Test func onlyAParagraphCanBeContinuedLazily() async throws {
+        #expect(allBlockHTML("> # foo\nbar") == ["<blockquote><h1>foo</h1></blockquote>", "<p>bar</p>"])
+        #expect(allBlockHTML("> ```\n> code\n> ```\nbar") == ["<blockquote><pre><code>code</code></pre></blockquote>", "<p>bar</p>"])
+    }
+
+    @Test func aLineThatStartsABlockIsNotALazyLine() async throws {
+        #expect(allBlockHTML("> foo\n- bar") == ["<blockquote><p>foo</p></blockquote>", "<ul><li>bar</li></ul>"])
+        #expect(allBlockHTML("> foo\n---") == ["<blockquote><p>foo</p></blockquote>", "<hr />"])
+        #expect(allBlockHTML("> foo\n# bar") == ["<blockquote><p>foo</p></blockquote>", "<h1>bar</h1>"])
+    }
+
     @Test func blankLineSeparatesQuotes() async throws {
         #expect(
             allBlockHTML("> foo\n\n> bar")
@@ -662,6 +681,64 @@ struct ListTests {
         )
     }
 
+    @Test func aHardBreakInsideAnItem() async throws {
+        #expect(allBlockHTML("- foo  \n  bar") == ["<ul><li>foo<br />\nbar</li></ul>"])
+    }
+
+    @Test func aContinuationLineInANestedItem() async throws {
+        #expect(allBlockHTML("- a\n  - b\n    c\n- d") == ["<ul><li>a<ul><li>b\nc</li></ul></li><li>d</li></ul>"])
+    }
+
+    @Test func aLazyLineContinuesTheInnermostItem() async throws {
+        #expect(allBlockHTML("- a\n  - b\nc") == ["<ul><li>a<ul><li>b\nc</li></ul></li></ul>"])
+    }
+
+    @Test func aMarkerLineIsNeverALazyLine() async throws {
+        // Indented into the item, "2." is under the item's paragraph, which it
+        // may not interrupt, so it is that paragraph's next line.
+        #expect(allBlockHTML("- a\n  2. b") == ["<ul><li>a\n2. b</li></ul>"])
+        // Not indented, it is outside the item, where there is no paragraph to
+        // interrupt, and it starts a list.
+        #expect(allBlockHTML("- a\n2. b") == ["<ul><li>a</li></ul>", "<ol><li value=\"2\">b</li></ol>"])
+        #expect(allBlockHTML("> a\n2. b") == ["<blockquote><p>a</p></blockquote>", "<ol><li value=\"2\">b</li></ol>"])
+    }
+
+    @Test func aBlockAfterABlankLineMakesTheItemLoose() async throws {
+        #expect(
+            allBlockHTML("- foo\n\n  ```\n  bar\n  ```")
+                == ["<ul><li><p>foo</p><pre><code>bar</code></pre></li></ul>"]
+        )
+    }
+
+    @Test func aNestedListIsLooseOrTightOnItsOwn() async throws {
+        #expect(
+            allBlockHTML("- a\n  - b\n\n  - c\n- d")
+                == ["<ul><li>a<ul><li><p>b</p></li><li><p>c</p></li></ul></li><li>d</li></ul>"]
+        )
+    }
+
+    @Test func anItemMayStartWithOneBlankLine() async throws {
+        #expect(allBlockHTML("-\n  foo") == ["<ul><li>foo</li></ul>"])
+        // Two, and the item is empty and the text is not part of it.
+        #expect(allBlockHTML("-\n\n  foo") == ["<ul><li></li></ul>", "<p>foo</p>"])
+    }
+
+    @Test func whereAnItemsTextStartsSetsHowFarItsContentIsIndented() async throws {
+        #expect(allBlockHTML("-   foo\n\n    bar") == ["<ul><li><p>foo</p><p>bar</p></li></ul>"])
+        // Three columns is short of the four "1.  " takes up, so the bullet is
+        // not inside the numbered item.
+        #expect(
+            allBlockHTML("1.  foo\n   - bar")
+                == ["<ol><li value=\"1\">foo</li></ol>", "<ul><li>bar</li></ul>"]
+        )
+    }
+
+    @Test func anItemMayBeginWithAnotherBlock() async throws {
+        #expect(blockHTML("- # foo") == "<ul><li><h1>foo</h1></li></ul>")
+        #expect(blockHTML("- - foo") == "<ul><li><ul><li>foo</li></ul></li></ul>")
+        #expect(blockHTML("1. > foo") == "<ol><li value=\"1\"><blockquote><p>foo</p></blockquote></li></ol>")
+    }
+
     @Test func changingBulletCharacterStartsANewList() async throws {
         #expect(allBlockHTML("- foo\n+ bar") == ["<ul><li>foo</li></ul>", "<ul><li>bar</li></ul>"])
     }
@@ -726,6 +803,13 @@ struct TaskListTests {
         #expect(
             blockHTML("- [x] foo\n- bar")
                 == "<ul><li class=\"task\"><label><input type=\"checkbox\" disabled checked /><span>foo</span></label></li><li>bar</li></ul>"
+        )
+    }
+
+    @Test func aTaskItemMayContinueOnTheNextLine() async throws {
+        #expect(
+            blockHTML("- [ ] foo\n  bar")
+                == "<ul><li class=\"task\"><label><input type=\"checkbox\" disabled /><span>foo\nbar</span></label></li></ul>"
         )
     }
 

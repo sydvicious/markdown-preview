@@ -105,6 +105,8 @@ struct MarkdownSearchFeatureTests {
         .init("numbered item", in: "1. Alpha\n2. Beta", find: "beta", ["Beta"]),
         .init("numbered item with a parenthesis", in: "1) Alpha\n2) Beta", find: "beta", ["Beta"]),
         .init("task item", in: "- [x] Alpha", find: "alpha", ["Alpha"]),
+        .init("second line of a list item", in: "- Alpha\n  beta\n- gamma", find: "beta", ["beta"]),
+        .init("code inside a list item", in: "- Alpha\n  ```\n  let beta = 1\n  ```", find: "let beta", ["let beta"]),
         .init("task box is not text", in: "- [x] Alpha", find: "[x]", []),
         .init("block quote", in: "> Alpha\n> beta", find: "beta", ["beta"]),
         .init("heading inside a block quote", in: "> # Alpha", find: "alpha", ["Alpha"]),

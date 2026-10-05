@@ -5,6 +5,9 @@
 
 ## 0.10
 
+- List items can hold more than one line. An item's text may run on to following lines, indented or not; an item may hold a second paragraph, a block quote, a fenced code block or a table; and an item may begin with one, so `- # Heading` is a heading in a list. A hard-wrapped list item used to end at its first line, with the rest shown as a paragraph after the list. Block quotes gained the same thing for a line written without its `>`.
+- Each list is loose or tight on its own, so a blank line inside a nested list no longer spaces out the list around it.
+- An item's content is indented to where its text starts, as CommonMark has it. After `1.` and two spaces that is four columns, so a line indented three is not inside the item.
 - Reference-style links and images: `[text][label]`, `[text][]` and `[label]`, with `[label]: destination "title"` anywhere in the document, a block quote included. A definition renders as nothing and is not found by a search. Find, selection and rich-text copy all follow a reference to its definition, wherever in the document that is.
 - Security: a link whose destination is `javascript:` is no longer a link. Clicking one ran its script in the preview's page, without the app's link handling being asked, where it could read the key that guards image URLs and post to the app's message handlers. The renderer now writes such a link, or autolink, without its `href`; the text still shows.
 - Autolinks: an address in angle brackets, `<https://example.com>` or `<name@example.com>`, is a link.

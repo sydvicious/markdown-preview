@@ -143,6 +143,26 @@ struct MarkdownVisibleTextTests {
         #expect(text(of: list, elementSeparator: "") == "onetwothreefour")
     }
 
+    @Test func aListItemsLaterLinesAreItsText() {
+        #expect(
+            pieces(of: "- one\n  two\n- three")
+                == [["one", "one"], ["\n  ", "\n"], ["two", "two"], ["\n- ", "\n"], ["three", "three"]]
+        )
+        // A lazy line, which is not indented at all.
+        #expect(pieces(of: "- one\ntwo") == [["one", "one"], ["\n", "\n"], ["two", "two"]])
+    }
+
+    @Test func whatAListItemHoldsIsReadAsADocumentOfItsOwn() {
+        let list = "- one\n\n  two\n  > three\n  ```\n  four\n  ```\n  - five\n- [x] six\n  seven"
+
+        #expect(text(of: list) == "one\ntwo\nthree\nfour\nfive\nsix\nseven")
+        #expect(text(of: list, elementSeparator: "") == "onetwothreefourfivesix\nseven")
+    }
+
+    @Test func aLazyLineIsPartOfAQuote() {
+        #expect(pieces(of: "> one\ntwo") == [["one", "one"], ["\n", "\n"], ["two", "two"]])
+    }
+
     @Test func whatAQuoteHoldsIsReadAsADocumentOfItsOwn() {
         let quote = "> # One\n> two\n> three\n>\n> - four\n> > five\n> ```\n> six\n> ```"
 

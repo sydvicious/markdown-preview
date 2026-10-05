@@ -195,17 +195,25 @@ private struct Builder {
     }
 
     private mutating func appendList(_ lines: ArraySlice<Substring>) {
+        guard let list = MarkdownBlockParser.listLines(startingAt: 0, in: Array(lines)) else { return }
         var previousEnd: Int?
 
-        for line in lines {
-            // A blank line in a loose list is not an item.
-            guard let content = MarkdownBlockParser.listItemContent(in: line) else { continue }
+        // What an item holds is a document of its own, as with a quote: its
+        // lines without the marker and indentation that put them in the item.
+        // That is how the parser reads it, and each of those lines is still a
+        // stretch of the source.
+        for item in list.items {
+            guard let first = item.lines.first, let last = item.lines.last else { continue }
 
             if let previousEnd {
-                append(elementSeparator, from: previousEnd..<offset(of: content.startIndex))
+                append(elementSeparator, from: previousEnd..<offset(of: first.startIndex))
             }
-            appendInline([.source(content)])
-            previousEnd = offset(of: line.endIndex)
+            appendBlocks(
+                MarkdownBlockParser.parse(item.lines.joined(separator: "\n")),
+                lines: item.lines,
+                separator: elementSeparator
+            )
+            previousEnd = offset(of: last.endIndex)
         }
     }
 
@@ -258,9 +266,9 @@ private struct Builder {
     private mutating func appendBlockquote(_ lines: ArraySlice<Substring>) {
         // What a quote holds is a document of its own: its lines without their
         // markers. That is how the parser reads it, and each of those lines is
-        // still a stretch of the source.
-        let quoted = lines.compactMap(MarkdownBlockParser.blockquoteContent)
-        guard quoted.count == lines.count else { return }
+        // still a stretch of the source. A line with no marker is a lazy line,
+        // which carries on the quote's last paragraph and is taken whole.
+        let quoted = lines.map { MarkdownBlockParser.blockquoteContent(in: $0) ?? $0 }
 
         appendBlocks(
             MarkdownBlockParser.parse(quoted.joined(separator: "\n")),

@@ -238,6 +238,8 @@ struct MarkdownHTMLBuilderTests {
         "1. one\n   1. nested\n2. two",
         "- one\n\n- two",
         "- [ ] task\n  - [x] nested task\n- plain",
+        "- first line\n  second line\n\n  second paragraph\n- next",
+        "1. item\n   > quoted\n   ```\n   code\n   ```\n   - nested\n2. next",
         "> quoted",
         "> first paragraph\n>\n> second paragraph",
         "> > nested quote",

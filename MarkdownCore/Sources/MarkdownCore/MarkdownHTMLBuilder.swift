@@ -135,6 +135,14 @@ public enum MarkdownHTMLBuilder {
         return content
     }
 
+    /// Emits a list. Each item is a container: what it holds is rendered the
+    /// way any other block is, so a nested list, a quote or a code block lands
+    /// inside the `<li>` it belongs to.
+    ///
+    /// The markup is deliberately emitted without any whitespace between tags:
+    /// the preview's text walker accumulates display offsets over text nodes, so
+    /// pretty-printing here would introduce whitespace nodes and shift every
+    /// offset after the list.
     private static func renderList(
         _ items: [MarkdownListItem],
         ordered: Bool,
@@ -142,72 +150,24 @@ public enum MarkdownHTMLBuilder {
         softBreak: SoftBreak,
         definitions: MarkdownLinkDefinitions
     ) -> String {
-        var index = 0
-        var lists = ""
-        // One list, unless the top-level items change marker part way, which the
-        // parser does not hand over in a single block.
-        while index < items.count {
-            lists += renderListLevel(
-                items,
-                index: &index,
-                depth: 0,
-                ordered: index == 0 ? ordered : items[index].isOrdered,
-                isLoose: isLoose,
-                softBreak: softBreak,
-                definitions: definitions
-            )
-        }
-        return lists
-    }
-
-    /// Emits one nesting level, recursing into deeper items so they land inside
-    /// the `<li>` they belong to.
-    ///
-    /// The markup is deliberately emitted without any whitespace between tags:
-    /// the preview's text walker accumulates display offsets over text nodes, so
-    /// pretty-printing here would introduce whitespace nodes and shift every
-    /// offset after the list.
-    private static func renderListLevel(
-        _ items: [MarkdownListItem],
-        index: inout Int,
-        depth: Int,
-        ordered: Bool,
-        isLoose: Bool,
-        softBreak: SoftBreak,
-        definitions: MarkdownLinkDefinitions
-    ) -> String {
         let tag = ordered ? "ol" : "ul"
-        let marker = index < items.count ? items[index].marker : nil
         var rows = ""
 
-        while index < items.count, items[index].indent >= depth {
-            // An item beside these with a different marker starts a list of its
-            // own, which the caller picks up.
-            if !rows.isEmpty, items[index].indent == depth, items[index].marker != marker {
-                break
-            }
-
-            let item = items[index]
-            index += 1
-
-            // Anything deeper that follows belongs inside this item, as one
-            // list or as several.
-            var nested = ""
-            while index < items.count, items[index].indent > depth {
-                nested += renderListLevel(
-                    items,
-                    index: &index,
-                    depth: items[index].indent,
-                    ordered: items[index].isOrdered,
-                    isLoose: isLoose,
-                    softBreak: softBreak,
-                    definitions: definitions
-                )
-            }
-
+        for item in items {
             if let checked = item.checkbox {
+                // The task's text is its first paragraph, which the label wraps
+                // so that it sits beside the box. Anything else the item holds
+                // follows the label.
+                var rest = item.children[...]
+                var text = ""
+                if case .paragraph(let paragraph)? = rest.first?.kind {
+                    text = renderInlineMarkdownHTML(paragraph, softBreak: softBreak, definitions: definitions)
+                    rest = rest.dropFirst()
+                }
                 let checkedAttribute = checked ? " checked" : ""
-                rows += "<li class=\"task\"><label><input type=\"checkbox\" disabled\(checkedAttribute) /><span>\(renderInlineMarkdownHTML(item.text, softBreak: softBreak, definitions: definitions))</span></label>\(nested)</li>"
+                rows += "<li class=\"task\"><label><input type=\"checkbox\" disabled\(checkedAttribute) /><span>\(text)</span></label>"
+                    + rest.map { blockContent($0, softBreak: softBreak, definitions: definitions) }.joined()
+                    + "</li>"
                 continue
             }
 
@@ -218,9 +178,16 @@ public enum MarkdownHTMLBuilder {
                 valueAttribute = ""
             }
 
-            let text = renderInlineMarkdownHTML(item.text, softBreak: softBreak, definitions: definitions)
-            let body = isLoose ? "<p>\(text)</p>" : text
-            rows += "<li\(valueAttribute)>\(body)\(nested)</li>"
+            // In a tight list a paragraph is written without its <p>, so the
+            // item's text sits directly in the <li>. Whatever else the item
+            // holds is written as it would be anywhere.
+            let body = item.children.map { child -> String in
+                if !isLoose, case .paragraph(let paragraph) = child.kind {
+                    return renderInlineMarkdownHTML(paragraph, softBreak: softBreak, definitions: definitions)
+                }
+                return blockContent(child, softBreak: softBreak, definitions: definitions)
+            }.joined()
+            rows += "<li\(valueAttribute)>\(body)</li>"
         }
 
         return "<\(tag)>\(rows)</\(tag)>"

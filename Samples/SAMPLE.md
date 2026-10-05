@@ -183,6 +183,23 @@ Ordered lists may use a parenthesis instead of a period:
 1) First
 2) Second
 
+An item is not limited to one line. Its text can run on to the next line,
+and it can hold more than text, as long as what it holds is indented to line up
+with it:
+
+- This item is written on two lines in the source,
+  the second indented under the first.
+- This one holds a second paragraph, a quote and some code.
+
+  The second paragraph, after a blank line.
+
+  > A quote inside the item.
+
+  ```
+  and a code block inside it
+  ```
+- And the list carries on afterwards.
+
 ## Block quotes
 
 > Block quotes hold real block structure rather than plain text.

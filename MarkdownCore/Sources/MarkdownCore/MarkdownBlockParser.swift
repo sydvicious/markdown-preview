@@ -42,11 +42,10 @@ public struct MarkdownBlock: Identifiable {
 
 public struct MarkdownListItem: Identifiable {
     public let id = UUID()
-    public let text: String
-    /// Nesting depth, 0 for a top-level item. Derived from how far the item is
-    /// indented relative to its parent's content column, not from an absolute
-    /// space count, so two spaces, four spaces, or a tab all nest one level.
-    public let indent: Int
+    /// What the item holds: usually one paragraph, but an item is a container,
+    /// like a block quote, and may hold several, or a nested list, a quote, or
+    /// a code block.
+    public let children: [MarkdownBlock]
     public let checkbox: Bool?
     public let order: Int?
     public let isOrdered: Bool
@@ -54,15 +53,16 @@ public struct MarkdownListItem: Identifiable {
     /// delimiter after the number. Items side by side with different markers
     /// are in different lists.
     public let marker: Character
+    /// Which lines of its list the item takes up, counting from the list's
+    /// first. The children's own line ranges count from the start of this.
+    public let lineRange: Range<Int>
 }
 
-/// A list item as it appears on one source line, before its nesting depth is
-/// known. Depth depends on the surrounding lines, so the parser resolves it
-/// while walking the list.
+/// A list item's marker line: what kind of item it starts, and where its
+/// content begins.
 private struct ParsedListItem {
-    /// The item's text, as a stretch of the line it was parsed from.
+    /// The item's text on this line, as a stretch of the line.
     let content: Substring
-    var text: String { String(content) }
     let checkbox: Bool?
     let order: Int?
     let isOrdered: Bool
@@ -70,11 +70,17 @@ private struct ParsedListItem {
     let marker: Character
     /// An item with nothing after its marker.
     var isEmpty: Bool { content.isEmpty && checkbox == nil }
-    /// Column the list marker starts at.
-    let markerColumn: Int
-    /// Column the item's text starts at; a following line indented at least
-    /// this far is a child of this item.
+    /// Column the item's content starts at. A following line indented at least
+    /// this far belongs to the item.
     let contentColumn: Int
+
+    /// Whether a line like this may start a list in the middle of a paragraph:
+    /// an empty item may not, and a numbered one only if it starts at 1.
+    /// Otherwise a wrapped sentence whose next line happens to begin "14."
+    /// would turn into a list.
+    var canInterruptAParagraph: Bool {
+        !isEmpty && (!isOrdered || order == 1)
+    }
 }
 
 public struct MarkdownBlockParser {
@@ -96,19 +102,10 @@ public struct MarkdownBlockParser {
 
     private static func parse(_ source: String, definitions: inout MarkdownLinkDefinitions) -> [MarkdownBlock] {
         let lines = source.markdownLines
+        let lineSlices = lines.map { $0[...] }
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
         var paragraphStartLine: Int?
-        var listItems: [MarkdownListItem] = []
-        var listStartLine: Int?
-        // Content/marker columns of each currently open nesting level, used to
-        // resolve each item's depth relative to its parent rather than from an
-        // absolute indent width.
-        var openLevels: [(markerColumn: Int, contentColumn: Int)] = []
-        var listIsLoose = false
-        // A blank line has gone by since the last item. Whether that makes the
-        // list loose depends on whether the next item is another of its own.
-        var blankLineSinceLastItem = false
         var quoteLines: [String] = []
         var quoteStartLine: Int?
         var code: [String] = []
@@ -150,73 +147,6 @@ public struct MarkdownBlockParser {
             paragraphStartLine = nil
         }
 
-        func flushList(currentLine: Int) {
-            guard !listItems.isEmpty, let start = listStartLine else { return }
-            // A list block takes its type from its first item; nested items of
-            // the other type are rendered as their own sub-list.
-            let kind: MarkdownBlock.Kind = listItems[0].isOrdered
-                ? .orderedList(listItems, isLoose: listIsLoose)
-                : .list(listItems, isLoose: listIsLoose)
-            blocks.append(.init(kind: kind, lineRange: start..<currentLine))
-            listItems.removeAll()
-            listStartLine = nil
-            openLevels.removeAll()
-            listIsLoose = false
-            blankLineSinceLastItem = false
-        }
-
-        /// Resolves `parsed` against the open nesting levels and appends it,
-        /// starting a new list block when a top-level item switches marker type.
-        func appendListItem(_ parsed: ParsedListItem, at index: Int) {
-            // Dedent out of any levels the item has moved back past.
-            while openLevels.count > 1, parsed.markerColumn < openLevels[openLevels.count - 1].markerColumn {
-                openLevels.removeLast()
-            }
-
-            if let current = openLevels.last {
-                if parsed.markerColumn >= current.contentColumn {
-                    openLevels.append((parsed.markerColumn, parsed.contentColumn))
-                } else {
-                    openLevels[openLevels.count - 1] = (parsed.markerColumn, parsed.contentColumn)
-                }
-            } else {
-                openLevels.append((parsed.markerColumn, parsed.contentColumn))
-            }
-
-            let depth = openLevels.count - 1
-
-            // A different marker at the top level starts a separate list: a
-            // numbered item after bulleted ones, but also `+` after `-`, or `2)`
-            // after `1.`. Deeper down the items stay in this block, and the
-            // renderer splits them into lists by their markers.
-            if depth == 0, let first = listItems.first, first.marker != parsed.marker {
-                flushList(currentLine: index)
-                openLevels = [(parsed.markerColumn, parsed.contentColumn)]
-            }
-
-            // A blank line between two items of one list makes it loose. One
-            // between the end of a list and the start of the next does not.
-            if blankLineSinceLastItem, !listItems.isEmpty {
-                listIsLoose = true
-            }
-            blankLineSinceLastItem = false
-
-            if listStartLine == nil {
-                listStartLine = index
-            }
-
-            listItems.append(
-                MarkdownListItem(
-                    text: parsed.text,
-                    indent: depth,
-                    checkbox: parsed.checkbox,
-                    order: parsed.order,
-                    isOrdered: parsed.isOrdered,
-                    marker: parsed.marker
-                )
-            )
-        }
-
         func flushQuote(currentLine: Int) {
             guard !quoteLines.isEmpty, let start = quoteStartLine else { return }
             blocks.append(
@@ -233,8 +163,13 @@ public struct MarkdownBlockParser {
 
         func flushAll(currentLine: Int) {
             flushParagraph(currentLine: currentLine)
-            flushList(currentLine: currentLine)
             flushQuote(currentLine: currentLine)
+        }
+
+        /// Whether the quote being gathered ends in a paragraph that a line
+        /// without a `>` could carry on.
+        func quoteEndsInAnOpenParagraph() -> Bool {
+            !quoteLines.isEmpty && endsInAnOpenParagraph(quoteLines.map { $0[...] })
         }
 
         var index = 0
@@ -281,17 +216,7 @@ public struct MarkdownBlockParser {
                 continue
             }
 
-            if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                // A blank line inside a list does not end it if another item
-                // follows. If that item turns out to be one of this list's own,
-                // the list is loose, and every item's content is then wrapped
-                // in a paragraph.
-                if !listItems.isEmpty, nextNonBlankLineContinuesList(lines, after: index) {
-                    blankLineSinceLastItem = true
-                    index += 1
-                    continue
-                }
-
+            if isBlank(line[...]) {
                 flushAll(currentLine: index)
                 index += 1
                 continue
@@ -354,22 +279,43 @@ public struct MarkdownBlockParser {
                 continue
             }
 
-            // Not everything that looks like an item may interrupt a paragraph:
-            // an empty item may not, and a numbered one only if it starts at 1.
-            // Otherwise a wrapped sentence whose next line happens to begin
-            // "14." would turn into a list.
-            if let item = parseListItem(line[...]) ?? parseOrderedListItem(line[...]),
-               paragraph.isEmpty || (!item.isEmpty && (!item.isOrdered || item.order == 1)) {
-                flushParagraph(currentLine: index)
-                flushQuote(currentLine: index)
-                appendListItem(item, at: index)
-                index += 1
+            // A list. Not every marker line may start one in the middle of a
+            // paragraph.
+            if let item = parseItem(line[...]),
+               item.canInterruptAParagraph || paragraph.isEmpty,
+               let list = listLines(startingAt: index, in: lineSlices) {
+                flushAll(currentLine: index)
+
+                // What an item holds is a document of its own, as with a quote:
+                // its lines, without the indentation that puts them in the item.
+                let items = list.items.map { item in
+                    MarkdownListItem(
+                        children: parse(item.lines.joined(separator: "\n"), definitions: &definitions),
+                        checkbox: item.checkbox,
+                        order: item.order,
+                        isOrdered: item.isOrdered,
+                        marker: item.marker,
+                        lineRange: item.lineRange
+                    )
+                }
+                // Loose if a blank line separates two items, or two blocks that
+                // one item holds directly. A blank line further in, inside a
+                // nested list, is that list's business.
+                let isLoose = list.hasBlankLineBetweenItems || items.contains { item in
+                    zip(item.children, item.children.dropFirst()).contains { $0.lineRange.upperBound < $1.lineRange.lowerBound }
+                }
+                blocks.append(
+                    .init(
+                        kind: item.isOrdered ? .orderedList(items, isLoose: isLoose) : .list(items, isLoose: isLoose),
+                        lineRange: index..<(index + list.lineCount)
+                    )
+                )
+                index += list.lineCount
                 continue
             }
 
             if let quote = blockquoteContent(in: line[...]) {
                 flushParagraph(currentLine: index)
-                flushList(currentLine: index)
                 if quoteStartLine == nil {
                     quoteStartLine = index
                 }
@@ -378,14 +324,18 @@ public struct MarkdownBlockParser {
                 continue
             }
 
-            flushList(currentLine: index)
+            // Text. If the quote above ends in a paragraph, this line carries
+            // it on, though it has no `>` of its own: a "lazy" line.
+            if quoteEndsInAnOpenParagraph() {
+                quoteLines.append(line)
+                index += 1
+                continue
+            }
+
             flushQuote(currentLine: index)
             if paragraphStartLine == nil {
                 paragraphStartLine = index
             }
-            // Leading whitespace is dropped, but trailing whitespace is kept:
-            // two trailing spaces are a hard line break and the renderer needs
-            // to see them.
             paragraph.append(String(paragraphLineContent(in: line[...])))
             index += 1
         }
@@ -401,6 +351,201 @@ public struct MarkdownBlockParser {
         }
         return blocks
     }
+
+    // MARK: - Lists
+
+    /// One item of a list, as the lines it is made of.
+    struct ListItemLines {
+        let checkbox: Bool?
+        let order: Int?
+        let isOrdered: Bool
+        let marker: Character
+        /// The item's content, a line at a time: each a stretch of one of the
+        /// list's lines, without the marker or the indentation that puts it in
+        /// the item. Together they are a document of their own.
+        var lines: [Substring]
+        /// Which of the list's lines these are, counting from its first.
+        var lineRange: Range<Int>
+    }
+
+    /// A list, as the lines its items are made of.
+    struct ListLines {
+        var items: [ListItemLines]
+        /// How many lines the list takes up, from its first item's marker line.
+        var lineCount: Int
+        var hasBlankLineBetweenItems: Bool
+    }
+
+    /// Splits the list that starts at `lines[start]` into its items, or returns
+    /// nil if that line is not a list item.
+    ///
+    /// After an item's marker line, a line belongs to the item if it is
+    /// indented as far as the item's content; a blank line does if such a line
+    /// follows it. A line with the same kind of marker starts the next item.
+    /// Any other line ends the list — unless the item ends in a paragraph and
+    /// the line is plain text, in which case it carries the paragraph on (a
+    /// "lazy" line).
+    ///
+    /// Both the parser and `MarkdownVisibleText` split lists with this, so they
+    /// agree about which characters are an item's content.
+    static func listLines(startingAt start: Int, in lines: [Substring]) -> ListLines? {
+        guard start < lines.count, let first = parseItem(lines[start]) else { return nil }
+
+        var items: [ListItemLines] = []
+        var hasBlankLineBetweenItems = false
+        var index = start
+        var parsed = first
+
+        while true {
+            let markerLine = lines[index]
+            var item = ListItemLines(
+                checkbox: parsed.checkbox,
+                order: parsed.order,
+                isOrdered: parsed.isOrdered,
+                marker: parsed.marker,
+                // To the end of the line, so trailing spaces — a hard break —
+                // are still there for the paragraph to see.
+                lines: [markerLine[parsed.content.startIndex...]],
+                lineRange: (index - start)..<(index - start + 1)
+            )
+            let contentColumn = parsed.contentColumn
+            index += 1
+
+            var blankLines = 0
+            var nextItem: ParsedListItem?
+            while index < lines.count {
+                let line = lines[index]
+                if isBlank(line) {
+                    blankLines += 1
+                    index += 1
+                    continue
+                }
+
+                // An item may start with one blank line; a second one after
+                // that leaves it empty, and what follows is not part of it.
+                let isEmptyAndClosed = item.lines.count == 1 && isBlank(item.lines[0]) && blankLines > 0
+                if indentColumns(in: line) >= contentColumn, !isEmptyAndClosed {
+                    item.lines.append(contentsOf: lines[(index - blankLines)..<index])
+                    blankLines = 0
+                    item.lines.append(droppingColumns(contentColumn, from: line))
+                    index += 1
+                    continue
+                }
+
+                if let sibling = parseItem(line), sibling.marker == first.marker {
+                    nextItem = sibling
+                    break
+                }
+
+                if blankLines == 0, !startsABlock(at: index, in: lines), endsInAnOpenParagraph(item.lines) {
+                    item.lines.append(line)
+                    index += 1
+                    continue
+                }
+
+                break
+            }
+
+            item.lineRange = item.lineRange.lowerBound..<(item.lineRange.lowerBound + item.lines.count)
+            items.append(item)
+
+            guard let nextItem else {
+                // Blank lines after the last item are not part of the list.
+                index -= blankLines
+                break
+            }
+            if blankLines > 0 {
+                hasBlankLineBetweenItems = true
+            }
+            parsed = nextItem
+        }
+
+        return ListLines(items: items, lineCount: index - start, hasBlankLineBetweenItems: hasBlankLineBetweenItems)
+    }
+
+    private static func parseItem(_ line: Substring) -> ParsedListItem? {
+        parseListItem(line) ?? parseOrderedListItem(line)
+    }
+
+    private static func isBlank(_ line: Substring) -> Bool {
+        line.allSatisfy(\.isMarkdownWhitespace)
+    }
+
+    /// Whether the line at `index` starts a block of its own, and so cannot be
+    /// the next line of a paragraph above it.
+    private static func startsABlock(at index: Int, in lines: [Substring]) -> Bool {
+        let line = lines[index]
+        if parseCodeFence(line) != nil || headingContent(in: line) != nil || blockquoteContent(in: line) != nil {
+            return true
+        }
+        if parseRule(String(line)) {
+            return true
+        }
+        // Any marker line, even one that could not interrupt a paragraph it sat
+        // directly under: a line outside its container is being asked whether
+        // it starts something out there, where there is no paragraph to
+        // interrupt.
+        if parseItem(line) != nil {
+            return true
+        }
+        return parseTable(from: lines[index...].prefix(3).map(String.init), startIndex: 0) != nil
+    }
+
+    /// Whether these lines, read as a document, end in a paragraph that the
+    /// next line could carry on — directly, or inside the last item of a list
+    /// or the quote they end with.
+    private static func endsInAnOpenParagraph(_ lines: [Substring]) -> Bool {
+        var unused = MarkdownLinkDefinitions()
+        return endsInAnOpenParagraph(parse(lines.joined(separator: "\n"), definitions: &unused), lineCount: lines.count)
+    }
+
+    private static func endsInAnOpenParagraph(_ blocks: [MarkdownBlock], lineCount: Int) -> Bool {
+        // A block that stops short of the last line was closed by a blank one.
+        guard let last = blocks.last, last.lineRange.upperBound == lineCount else { return false }
+
+        switch last.kind {
+        case .paragraph:
+            return true
+        case .blockquote(let children):
+            return endsInAnOpenParagraph(children, lineCount: last.lineRange.count)
+        case .list(let items, _), .orderedList(let items, _):
+            guard let item = items.last else { return false }
+            return endsInAnOpenParagraph(item.children, lineCount: item.lineRange.count)
+        default:
+            return false
+        }
+    }
+
+    /// `line` without its first `columns` columns of indentation. A tab that
+    /// straddles the boundary goes whole.
+    private static func droppingColumns(_ columns: Int, from line: Substring) -> Substring {
+        var remaining = line
+        var column = 0
+        while column < columns, let first = remaining.first {
+            if first == " " {
+                column += 1
+            } else if first == "\t" {
+                column += 4 - (column % 4)
+            } else {
+                break
+            }
+            remaining = remaining.dropFirst()
+        }
+        return remaining
+    }
+
+    /// The column a list item's content starts at, given the line up to where
+    /// its text begins: marker, and the spaces after it. With more than four
+    /// spaces, or with no text on the line, content starts one column after the
+    /// marker.
+    private static func contentColumn(markerEnd: Int, spaceAfterMarker: Substring, hasText: Bool) -> Int {
+        var width = 0
+        for character in spaceAfterMarker {
+            width += character == "\t" ? 4 - ((markerEnd + width) % 4) : 1
+        }
+        return hasText && (1...4).contains(width) ? markerEnd + width : markerEnd + 1
+    }
+
 
     /// A link reference definition at the start of a paragraph's lines:
     /// `[label]: destination`, with an optional title in quotes or parentheses.
@@ -556,12 +701,6 @@ public struct MarkdownBlockParser {
         line.drop { $0 == " " || $0 == "\t" }
     }
 
-    /// The text of a list item line — after its marker and any task box — or
-    /// nil if the line is not a list item.
-    static func listItemContent(in line: Substring) -> Substring? {
-        (parseListItem(line) ?? parseOrderedListItem(line))?.content
-    }
-
     /// How many spaces the opening line of a fenced code block is indented by.
     static func fenceIndent(of opening: Substring) -> Int {
         opening.prefix { $0 == " " }.count
@@ -586,18 +725,6 @@ public struct MarkdownBlockParser {
     static func fence(_ opening: Substring, isClosedBy closing: Substring) -> Bool {
         guard let open = parseCodeFence(opening), let close = parseCodeFence(closing) else { return false }
         return close.marker == open.marker && close.length >= open.length && close.info.isEmpty
-    }
-
-    /// Whether the next non-blank line after `index` is another list item,
-    /// which is what distinguishes a blank line inside a loose list from one
-    /// that ends the list.
-    private static func nextNonBlankLineContinuesList(_ lines: [String], after index: Int) -> Bool {
-        var probe = index + 1
-        while probe < lines.count, lines[probe].trimmingCharacters(in: .whitespaces).isEmpty {
-            probe += 1
-        }
-        guard probe < lines.count else { return false }
-        return listItemContent(in: lines[probe][...]) != nil
     }
 
     /// Recognises a code fence: a run of at least three backticks or tildes,
@@ -644,15 +771,19 @@ public struct MarkdownBlockParser {
         // which is an empty item.
         let afterMarker = trimmed.dropFirst()
         guard afterMarker.isEmpty || afterMarker.first == " " || afterMarker.first == "\t" else { return nil }
-        let (content, checkbox) = parseCheckbox(afterMarker.trimmingMarkdownWhitespace())
+        let text = afterMarker.trimmingMarkdownWhitespace()
+        let (content, checkbox) = parseCheckbox(text)
         return ParsedListItem(
             content: content,
             checkbox: checkbox,
             order: nil,
             isOrdered: false,
             marker: marker,
-            markerColumn: markerColumn,
-            contentColumn: markerColumn + 2
+            contentColumn: contentColumn(
+                markerEnd: markerColumn + 1,
+                spaceAfterMarker: afterMarker[..<text.startIndex],
+                hasText: !text.isEmpty
+            )
         )
     }
 
@@ -667,16 +798,20 @@ public struct MarkdownBlockParser {
         guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
         let afterDot = trimmed[trimmed.index(after: delimiterIndex)...]
         guard afterDot.isEmpty || afterDot.first == " " || afterDot.first == "\t" else { return nil }
-        let (content, checkbox) = parseCheckbox(afterDot.trimmingMarkdownWhitespace())
+        let text = afterDot.trimmingMarkdownWhitespace()
+        let (content, checkbox) = parseCheckbox(text)
         return ParsedListItem(
             content: content,
             checkbox: checkbox,
             order: Int(number),
             isOrdered: true,
             marker: trimmed[delimiterIndex],
-            markerColumn: markerColumn,
             // "12. " is a wider marker than "1. ", so children line up further in.
-            contentColumn: markerColumn + number.count + 2
+            contentColumn: contentColumn(
+                markerEnd: markerColumn + number.count + 1,
+                spaceAfterMarker: afterDot[..<text.startIndex],
+                hasText: !text.isEmpty
+            )
         )
     }
 

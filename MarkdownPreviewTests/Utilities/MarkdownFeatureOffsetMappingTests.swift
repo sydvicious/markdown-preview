@@ -293,6 +293,31 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
             words: ["Alpha", "Beta", "Gamma", "Delta"]
         ),
         .init(
+            "list item over two lines",
+            "- Alpha\n  beta\n- Gamma",
+            visible: "Alpha\nbetaGamma",
+            words: ["Alpha", "beta", "Gamma"]
+        ),
+        .init("list item with a lazy line", "- Alpha\nbeta", visible: "Alpha\nbeta", words: ["Alpha", "beta"]),
+        .init(
+            "list item with two paragraphs",
+            "- Alpha\n\n  Beta\n- Gamma",
+            visible: "AlphaBetaGamma",
+            words: ["Alpha", "Beta", "Gamma"]
+        ),
+        .init(
+            "list item holding a quote and code",
+            "- Alpha\n  > Beta\n  ```\n  let gamma = 1\n  ```\n- Delta",
+            visible: "AlphaBetalet gamma = 1Delta",
+            words: ["Alpha", "Beta", "gamma", "Delta"]
+        ),
+        .init(
+            "task item over two lines",
+            "- [x] Alpha\n  beta\n- [ ] Gamma",
+            visible: "Alpha\nbetaGamma",
+            words: ["Alpha", "beta", "Gamma"]
+        ),
+        .init(
             "list with extra space after the marker",
             "-   Alpha\n-   Beta",
             visible: "AlphaBeta",
@@ -309,6 +334,7 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
             visible: "Alpha and beta",
             words: ["Alpha", "beta"]
         ),
+        .init("block quote with a lazy line", "> Alpha\nbeta", visible: "Alpha\nbeta", words: ["Alpha", "beta"]),
         .init(
             "block quote with two paragraphs",
             "> Alpha\n>\n> Beta",
