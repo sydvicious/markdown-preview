@@ -95,11 +95,20 @@ This document tracks planned work for MarkdownPreviewApp.
   - Autolinks (spec 6.5): `<https://example.com>` and `<foo@example.com>`. `AutolinkTests`, 2 failing.
   - Link reference definitions (spec 4.7): `[foo][bar]`, `[foo][]`, `[foo]` with `[bar]: /url` elsewhere, and the image form. `ReferenceLinkTests`, 5 failing.
 
-### Possible crash at launch: two saved documents that resolve to one file. (not reproduced)
-  - Found 2026-10-04 by reading the code, during the audit under "Audit the test suites and cover every markdown feature". It has not been reproduced, and no test exposes it.
-  - `DocumentSearchIndex.rebuild` builds its table with `Dictionary(uniqueKeysWithValues:)`, which traps on a repeated key. `DocumentSessionStore.restoreMigration` keys each restored document by the path its bookmark resolves to and does not remove repeats. So two persisted entries that resolve to one file would trap on the next restore — and on every launch after, because nothing is persisted before the trap.
-  - How the list might get there: open a file, move it, and open it again from the new place. The first entry's bookmark follows the file, so both now resolve to the new path. Whether the polling removes the first entry before it is persisted is the part not checked.
-  - First step: try to reproduce it. A test that restores two entries with the same resolved path would trap and take the rest of the run down with it, so the fix and its test want to land together.
+### Crash at launch: two saved documents that resolve to one file. (fixed 2026-10-04; see what is left)
+  - Found 2026-10-04 by reading the code, during the audit under "Audit the test suites and cover every markdown feature", then reproduced the same day in `DocumentSessionStore` on macOS, in a test, not by launching the app.
+  - To reproduce: open `first/notes.md`; move the file to `second/notes.md`; open it again from there. The first entry is not removed by polling, because its bookmark follows the file, so the list holds the document twice, once under each path, and both are saved. On the next restore both resolved to `second/notes.md`, and `DocumentSearchIndex.rebuild` trapped in `Dictionary(uniqueKeysWithValues:)` — at every launch, because the saved list was still the same.
+  - Fixed: `DocumentSessionStore.restoreMigration` keeps one entry for each resolved path, the one opened last, and `DocumentSearchIndex.rebuild` no longer traps on a repeat. Tests: `DocumentSessionStoreTests/twoSavedEntriesForOneFileRestoreAsOne` and `DocumentSearchIndexTests/aDocumentListedTwiceIsIndexedOnce`. On macOS each runs the step that used to trap in a child process (a Swift Testing exit test), so a regression fails the test and not the whole run; exit tests do not exist on iOS, where the same checks run in the test process.
+  - Left:
+    - Until the next launch the document is still listed twice after it is moved and opened again. The entry under the old path keeps that path as its ID.
+    - iOS gets into the same state: checked 2026-10-04 with a temporary test Syd ran from Xcode on an iOS simulator. After the move the first entry stayed in the list, opening the file again added a second, and the first entry's saved bookmark resolved to the new path (and reported itself stale). So before the fix iOS would have crashed the same way; with the fix the restore came back with one entry.
+    - Not checked in the signed, sandboxed Mac app. The macOS reproduction ran in the unsigned test host.
+
+### (iOS) `anEditedDocumentIsPutBackAtTheSameOffset` fails now and then in a full test run.
+  - Seen 2026-10-04: `WebKitTextNodeAlignmentTests/anEditedDocumentIsPutBackAtTheSameOffset()` failed once in a full run on the iPhone 17 simulator (iOS 27.0), at its last check — after the restore script the page was not at offset 900. Run on its own straight afterwards, it passed. It passes on the Mac in full runs.
+  - Suspected, not confirmed: the restore script ran before the reloaded page had been laid out to its full height, so the offset it asked for was cut short. That is more likely while the other WebKit tests are running alongside.
+  - The test now says where the page ended up and how far it could have scrolled. At the next failure, a maximum below 900 means the layout race; anything else means look again.
+  - If it is the race, the open question is whether the app can lose it too, since it restores as soon as the page finishes loading. Not looked into.
 
 ## Features
 

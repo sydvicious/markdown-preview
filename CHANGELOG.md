@@ -5,6 +5,7 @@
 
 ## 0.10
 
+- Fixed a crash at every launch after a document was opened, moved, and opened again from its new place. The saved list then named the file twice; it is now restored once.
 - Removed `HTMLTextOffsetMapping`, which nothing in the app used.
 - Tests for every markdown feature, each from a small fragment of its own. The conformance suite grows from 92 cases to 206, and now covers indented code, autolinks, link reference definitions, raw HTML and Windows line endings. New suites check find and selection one feature at a time: the source mapping's text against the rendered block's, the same text as WebKit reports it, a selection carried from the source to the page and back, and what a search finds. All are written against correct behavior, so the cases that expose a bug fail, and stay failing until it is fixed.
 - The preview's page template, stylesheet and scripts are now files, in `MarkdownPreview/Web`, where they were string literals in Swift. The pages they produce are unchanged. The scripts have their own tests, written in JavaScript: `npm install` once, then `npm test`.

@@ -485,7 +485,11 @@ struct WebKitTextNodeAlignmentTests {
 
         _ = try await reloaded.evaluateJavaScript(try #require(restoration.script) + " true")
 
-        #expect(try await scrollPosition(in: reloaded).y == 900)
+        // Read into a value so a failure says where the page ended up, and how
+        // far it could have scrolled: short of 900 with a maximum below 900
+        // means the page had not been laid out to its full height yet.
+        let restored = try await scrollPosition(in: reloaded)
+        #expect(restored.y == 900, "restored to \(restored.y), of a possible \(restored.maxY)")
     }
 
     @Test(.timeLimit(.minutes(1)))

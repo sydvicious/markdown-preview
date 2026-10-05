@@ -33,4 +33,25 @@ struct DocumentSearchIndexTests {
 
         #expect(index.containsMatch(in: documentID, query: "repo"))
     }
+
+    // Building the index from a list that names one file twice used to trap.
+    // On the Mac the index is built in a child process, so that if it ever
+    // traps again it fails this test and not the whole run. Exit tests are
+    // macOS only; elsewhere a trap would take the run with it.
+    @Test(.timeLimit(.minutes(1)))
+    func aDocumentListedTwiceIsIndexedOnce() async {
+        #if os(macOS)
+        await #expect(processExitsWith: .success) {
+            exit(DocumentSearchIndexTests.indexesADocumentListedTwice() ? EXIT_SUCCESS : EXIT_FAILURE)
+        }
+        #else
+        #expect(Self.indexesADocumentListedTwice())
+        #endif
+    }
+
+    private static func indexesADocumentListedTwice() -> Bool {
+        let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/example.md"), contents: "Alpha")
+        let index = DocumentSearchIndex(documents: [file, file])
+        return index.containsMatch(in: file.url.standardizedFileURL.path, query: "Alpha")
+    }
 }
