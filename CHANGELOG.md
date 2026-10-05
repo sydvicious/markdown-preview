@@ -5,6 +5,7 @@
 
 ## 0.10
 
+- A search match or selection in the preview no longer lands a character short after a line that starts in bold or with a link, or after two styled words with only a space between them.
 - Fixed a crash at every launch after a document was opened, moved, and opened again from its new place. The saved list then named the file twice; it is now restored once.
 - Removed `HTMLTextOffsetMapping`, which nothing in the app used.
 - Tests for every markdown feature, each from a small fragment of its own. The conformance suite grows from 92 cases to 206, and now covers indented code, autolinks, link reference definitions, raw HTML and Windows line endings. New suites check find and selection one feature at a time: the source mapping's text against the rendered block's, the same text as WebKit reports it, a selection carried from the source to the page and back, and what a search finds. All are written against correct behavior, so the cases that expose a bug fail, and stay failing until it is fixed.

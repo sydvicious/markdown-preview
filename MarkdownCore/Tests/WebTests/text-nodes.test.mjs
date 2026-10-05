@@ -61,6 +61,18 @@ test('whitespace between elements is formatting, not text', () => {
   assert.deepEqual(spans(entries), [[0, 5], [5, 11]]);
 });
 
+test('so is whitespace between the blocks in a quote and the rows of a table', () => {
+  const quote = walk(block(0, 30, '\n<p>First</p>\n<p>Second</p>\n', 'blockquote'));
+  const table = walk(
+    '<div class="md-block" data-source-start="0" data-source-end="30">\n<div class="table-wrap">\n' +
+    '<table>\n<thead>\n<tr>\n<th>Name</th>\n<th>Count</th>\n</tr>\n</thead>\n' +
+    '<tbody>\n<tr>\n<td>apples</td>\n<td>12</td>\n</tr>\n</tbody>\n</table>\n</div>\n</div>'
+  );
+
+  assert.deepEqual(texts(quote), ['First', 'Second']);
+  assert.deepEqual(texts(table), ['Name', 'Count', 'apples', '12']);
+});
+
 // Between two inline elements it is the other way round: the space is a
 // character the reader sees and the source mapping counts.
 test('a space between two inline elements is text', () => {
