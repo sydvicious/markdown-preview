@@ -150,7 +150,7 @@ After this, double-clicking `.md` files should open them in this app.
 - Rendering is intentionally lightweight and block-oriented.
 - It supports common Markdown structures (headings, paragraphs, lists, ordered lists, blockquotes, fenced code, rules, and tables), plus the GitHub task-list and table extensions.
 - Table rendering is HTML/CSS-based via `WKWebView` for fidelity and scrolling behavior.
-- It is not yet a complete CommonMark implementation. [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) is the reference the renderer is measured against. The places it currently falls short are covered by failing tests in `MarkdownCoreConformanceTests` and tracked under "Bugs" in `TODO.md`: a list item of more than one line, indented code blocks, and reference-style links.
+- It is not yet a complete CommonMark implementation. [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) is the reference the renderer is measured against. The places it currently falls short are covered by failing tests in `MarkdownCoreConformanceTests` and tracked under "Bugs" in `TODO.md`: a list item of more than one line, and indented code blocks.
 - Raw HTML in a document is shown as text, not rendered. That is deliberate.
 
 ## Tests

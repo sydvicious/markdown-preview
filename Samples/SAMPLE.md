@@ -217,6 +217,14 @@ on hover. Destinations containing spaces are written in angle brackets, like
 An address in angle brackets is a link all by itself: <https://commonmark.org>,
 or for mail, <support@sydpolk.com>.
 
+A link can also keep its address out of the way, by giving it a name and saying
+elsewhere what the name stands for. [This link][spec] and [this one][] are
+written that way. The two lines that say where they go come straight after this
+paragraph in the source, and render as nothing.
+
+[spec]: https://spec.commonmark.org/0.31.2/ "The CommonMark specification"
+[this one]: https://commonmark.org
+
 Images use the same syntax as links, with a leading exclamation mark. They come
 in two kinds.
 
@@ -294,7 +302,6 @@ Named and numeric HTML entities are decoded: &amp; &lt; &gt; &copy; &mdash;
 
 These are recognized markdown elsewhere but render as literal text here:
 
-- Reference-style links, written as `[text][label]` with a definition elsewhere
 - Bare URLs: an address is a link only in angle brackets or in link syntax
 - Strikethrough, written as `~~text~~`
 - Raw inline or block HTML, which is always escaped and shown as text

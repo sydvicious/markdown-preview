@@ -5,6 +5,7 @@
 
 ## 0.10
 
+- Reference-style links and images: `[text][label]`, `[text][]` and `[label]`, with `[label]: destination "title"` anywhere in the document, a block quote included. A definition renders as nothing and is not found by a search. Find, selection and rich-text copy all follow a reference to its definition, wherever in the document that is.
 - Security: a link whose destination is `javascript:` is no longer a link. Clicking one ran its script in the preview's page, without the app's link handling being asked, where it could read the key that guards image URLs and post to the app's message handlers. The renderer now writes such a link, or autolink, without its `href`; the text still shows.
 - Autolinks: an address in angle brackets, `<https://example.com>` or `<name@example.com>`, is a link.
 - Lists: a marker with nothing after it is an empty item; a tab may follow the marker; and a change of marker — `+` after `-`, `2)` after `1.` — starts a new list, nested ones included. A wrapped line that begins with a number and a period, such as `14.`, no longer turns into a list: only a list starting at 1 may interrupt a paragraph. A blank line between one list and the next no longer makes the first one loose.

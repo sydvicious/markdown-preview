@@ -75,6 +75,26 @@ struct MarkdownVisibleTextTests {
         )
     }
 
+    @Test func aReferenceIsShownAsItsTextAndItsDefinitionIsNotShown() {
+        #expect(
+            pieces(of: "[x]: /url\n\na [*Alpha*][x] b [Beta][] c [x] d\n\n[beta]: /other")
+                == [["a ", "a "], ["Alpha", "Alpha"], [" b ", " b "], ["Beta", "Beta"], [" c ", " c "], ["x", "x"], [" d", " d"]]
+        )
+    }
+
+    @Test func aBlockTakenOnItsOwnNeedsTheDocumentsDefinitions() {
+        // The preview's offsets are worked out a block at a time, and the
+        // definition is somewhere else in the document.
+        let document = "See [Alpha][x] now\n\n[x]: /url"
+        let block = "See [Alpha][x] now"
+
+        #expect(MarkdownVisibleText(source: block).text == "See [Alpha][x] now")
+        #expect(
+            MarkdownVisibleText(source: block, definitions: MarkdownLinkDefinitions(source: document)).text
+                == "See Alpha now"
+        )
+    }
+
     @Test func anImageDescriptionCountsOnlyWhenAsked() {
         #expect(pieces(of: "a ![Alt *text*](p.png) b") == [["a ", "a "], ["Alt ", "Alt "], ["text", "text"], [" b", " b"]])
         #expect(pieces(of: "a ![Alt *text*](p.png) b", includesImageDescriptions: false) == [["a ", "a "], [" b", " b"]])

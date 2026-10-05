@@ -78,7 +78,23 @@ private struct ParsedListItem {
 }
 
 public struct MarkdownBlockParser {
+    /// The blocks of `source`. Its link reference definitions are read and set
+    /// aside; `parseDocument` returns them as well.
     public static func parse(_ source: String) -> [MarkdownBlock] {
+        var definitions = MarkdownLinkDefinitions()
+        return parse(source, definitions: &definitions)
+    }
+
+    /// The blocks of `source`, and the link reference definitions found
+    /// anywhere in it — inside a block quote included — which a reference
+    /// anywhere else in the document may use.
+    public static func parseDocument(_ source: String) -> (blocks: [MarkdownBlock], definitions: MarkdownLinkDefinitions) {
+        var definitions = MarkdownLinkDefinitions()
+        let blocks = parse(source, definitions: &definitions)
+        return (blocks, definitions)
+    }
+
+    private static func parse(_ source: String, definitions: inout MarkdownLinkDefinitions) -> [MarkdownBlock] {
         let lines = source.markdownLines
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
@@ -104,7 +120,22 @@ public struct MarkdownBlockParser {
         var fenceIndent = 0
         var fenceLanguage: String?
 
+        /// Takes any link reference definitions off the front of the open
+        /// paragraph. They are not part of it: they render as nothing, and the
+        /// paragraph, if anything is left, starts on the line after them.
+        func takeLeadingDefinitions() {
+            while let definition = linkDefinition(atStartOf: paragraph[...]) {
+                definitions.define(definition.label, destination: definition.destination, title: definition.title)
+                paragraph.removeFirst(definition.lineCount)
+                paragraphStartLine = paragraphStartLine.map { $0 + definition.lineCount }
+            }
+            if paragraph.isEmpty {
+                paragraphStartLine = nil
+            }
+        }
+
         func flushParagraph(currentLine: Int) {
+            takeLeadingDefinitions()
             guard !paragraph.isEmpty, let start = paragraphStartLine else { return }
             blocks.append(
                 .init(
@@ -192,7 +223,7 @@ public struct MarkdownBlockParser {
                 .init(
                     // Parsed recursively: the stripped content is itself a
                     // document, which is how quotes nest and hold other blocks.
-                    kind: .blockquote(parse(quoteLines.joined(separator: "\n"))),
+                    kind: .blockquote(parse(quoteLines.joined(separator: "\n"), definitions: &definitions)),
                     lineRange: start..<currentLine
                 )
             )
@@ -268,6 +299,11 @@ public struct MarkdownBlockParser {
 
             // A setext underline turns the paragraph above it into a heading, so
             // the heading's content is however many lines that paragraph had.
+            if setextUnderlineLevel(line) != nil, !paragraph.isEmpty {
+                // Definitions come off first. If they were all there was, there
+                // is nothing to underline and this line is ordinary text.
+                takeLeadingDefinitions()
+            }
             if let level = setextUnderlineLevel(line),
                !paragraph.isEmpty,
                let start = paragraphStartLine {
@@ -364,6 +400,117 @@ public struct MarkdownBlockParser {
             )
         }
         return blocks
+    }
+
+    /// A link reference definition at the start of a paragraph's lines:
+    /// `[label]: destination`, with an optional title in quotes or parentheses.
+    ///
+    /// The destination may be on the line after the label, and the title on the
+    /// line after the destination. Anything else after the title means the line
+    /// is not a definition at all; a following line that is not a whole title is
+    /// just the next line of text.
+    private static func linkDefinition(
+        atStartOf lines: ArraySlice<String>
+    ) -> (label: Substring, destination: String, title: String?, lineCount: Int)? {
+        guard let first = lines.first else { return nil }
+        let line = first.drop { $0 == " " || $0 == "\t" }
+        guard line.first == "[" else { return nil }
+
+        // The label runs to the first bracket that is not escaped, and may not
+        // hold one that opens.
+        var index = line.index(after: line.startIndex)
+        let labelStart = index
+        var labelEnd: Substring.Index?
+        while index < line.endIndex {
+            let character = line[index]
+            if character == "\\" {
+                let next = line.index(after: index)
+                index = next < line.endIndex ? line.index(after: next) : next
+                continue
+            }
+            if character == "[" { return nil }
+            if character == "]" {
+                labelEnd = index
+                break
+            }
+            index = line.index(after: index)
+        }
+        guard let labelEnd else { return nil }
+        let label = line[labelStart..<labelEnd]
+        guard MarkdownLinkDefinitions.normalized(label) != nil else { return nil }
+
+        let afterLabel = line.index(after: labelEnd)
+        guard afterLabel < line.endIndex, line[afterLabel] == ":" else { return nil }
+
+        var lineCount = 1
+        var rest = line[line.index(after: afterLabel)...].trimmingMarkdownWhitespace()
+        if rest.isEmpty {
+            guard lines.count > 1 else { return nil }
+            rest = lines[lines.startIndex + 1][...].trimmingMarkdownWhitespace()
+            lineCount = 2
+        }
+
+        let destination: String
+        let afterDestination: Substring
+        if rest.first == "<" {
+            guard let close = rest.dropFirst().firstIndex(where: { $0 == ">" || $0 == "<" }), rest[close] == ">" else {
+                return nil
+            }
+            destination = String(rest[rest.index(after: rest.startIndex)..<close])
+            afterDestination = rest[rest.index(after: close)...]
+        } else {
+            let end = rest.firstIndex(where: \.isMarkdownWhitespace) ?? rest.endIndex
+            destination = String(rest[..<end])
+            afterDestination = rest[end...]
+            guard !destination.isEmpty else { return nil }
+        }
+        let encodedDestination = destination.replacingOccurrences(of: " ", with: "%20")
+
+        let afterWhitespace = afterDestination.trimmingMarkdownWhitespace()
+        if !afterWhitespace.isEmpty {
+            // On the same line, what follows has to be a title and nothing else,
+            // with whitespace before it.
+            guard afterDestination.first?.isMarkdownWhitespace == true,
+                  let title = linkDefinitionTitle(afterWhitespace) else { return nil }
+            return (label, encodedDestination, title, lineCount)
+        }
+
+        if lines.count > lineCount,
+           let title = linkDefinitionTitle(lines[lines.startIndex + lineCount][...].trimmingMarkdownWhitespace()) {
+            return (label, encodedDestination, title, lineCount + 1)
+        }
+        return (label, encodedDestination, nil, lineCount)
+    }
+
+    /// The text of a title, if `text` is one and nothing more: quoted with
+    /// either kind of quote, or in parentheses.
+    private static func linkDefinitionTitle(_ text: Substring) -> String? {
+        guard text.count >= 2, let opening = text.first, let last = text.last else { return nil }
+        let closing: Character
+        switch opening {
+        case "\"": closing = "\""
+        case "'": closing = "'"
+        case "(": closing = ")"
+        default: return nil
+        }
+        guard last == closing else { return nil }
+
+        var title = ""
+        var isEscaped = false
+        for character in text.dropFirst().dropLast() {
+            if isEscaped {
+                title.append(character)
+                isEscaped = false
+            } else if character == "\\" {
+                isEscaped = true
+            } else if character == closing || (opening == "(" && character == "(") {
+                // The title ended before the end of the text.
+                return nil
+            } else {
+                title.append(character)
+            }
+        }
+        return isEscaped ? nil : title
     }
 
     // The functions from here to `tableCellSlices` say where a line's content
@@ -732,5 +879,61 @@ extension Substring {
             trimmed = trimmed.dropLast()
         }
         return trimmed
+    }
+}
+
+/// The link reference definitions of a document: `[label]: destination "title"`
+/// lines, which render as nothing and give `[text][label]`, `[text][]` and
+/// `[label]` somewhere to point.
+public struct MarkdownLinkDefinitions: Sendable {
+    public struct Target: Sendable {
+        public let destination: String
+        public let title: String?
+    }
+
+    private var targets: [String: Target] = [:]
+
+    /// No definitions at all.
+    public static let none = MarkdownLinkDefinitions()
+
+    public init() {}
+
+    /// The definitions in `source`.
+    public init(source: String) {
+        // A definition has to have "]:" in it, and most documents have none, so
+        // most documents are not parsed for this.
+        guard source.contains("]:") else { return }
+        self = MarkdownBlockParser.parseDocument(source).definitions
+    }
+
+    public var isEmpty: Bool { targets.isEmpty }
+
+    /// What `label` refers to. Labels match without regard to case, or to how
+    /// the whitespace inside them is written.
+    public func target(for label: Substring) -> Target? {
+        guard !targets.isEmpty, let key = Self.normalized(label) else { return nil }
+        return targets[key]
+    }
+
+    /// Records a definition. The first one for a label is the one that counts.
+    mutating func define(_ label: Substring, destination: String, title: String?) {
+        guard let key = Self.normalized(label), targets[key] == nil else { return }
+        targets[key] = Target(destination: destination, title: title)
+    }
+
+    /// Adds `other`'s definitions for labels this does not already define.
+    public func merging(_ other: MarkdownLinkDefinitions) -> MarkdownLinkDefinitions {
+        guard !other.targets.isEmpty else { return self }
+        var merged = self
+        merged.targets.merge(other.targets) { mine, _ in mine }
+        return merged
+    }
+
+    /// A label as it is compared: case folded, with each run of whitespace
+    /// inside it as one space and none at its ends. Nil if nothing is left.
+    static func normalized(_ label: Substring) -> String? {
+        let words = label.split(whereSeparator: \.isWhitespace)
+        guard !words.isEmpty, label.count <= 999 else { return nil }
+        return words.joined(separator: " ").folding(options: [.caseInsensitive], locale: nil)
     }
 }

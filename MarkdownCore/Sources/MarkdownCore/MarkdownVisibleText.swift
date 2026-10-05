@@ -56,14 +56,24 @@ public struct MarkdownVisibleText {
     ///     the end of one item and the start of the next are not one word.
     ///   - includesImageDescriptions: Whether an image's description counts as
     ///     text. It is not text in the page.
-    public init(source: String, elementSeparator: String = "\n", includesImageDescriptions: Bool = true) {
+    ///   - definitions: The link reference definitions to read `source` with,
+    ///     when `source` is one block of a document and the definitions are in
+    ///     the rest of it. Left out, the ones `source` holds are used.
+    public init(
+        source: String,
+        elementSeparator: String = "\n",
+        includesImageDescriptions: Bool = true,
+        definitions: MarkdownLinkDefinitions? = nil
+    ) {
+        let parsed = MarkdownBlockParser.parseDocument(source)
         var builder = Builder(
             source: source,
             elementSeparator: elementSeparator,
-            includesImageDescriptions: includesImageDescriptions
+            includesImageDescriptions: includesImageDescriptions,
+            definitions: definitions.map(parsed.definitions.merging) ?? parsed.definitions
         )
         builder.appendBlocks(
-            MarkdownBlockParser.parse(source),
+            parsed.blocks,
             lines: source.markdownLineSlices,
             separator: "\n"
         )
@@ -76,15 +86,22 @@ private struct Builder {
     let source: String
     let elementSeparator: String
     let includesImageDescriptions: Bool
+    let definitions: MarkdownLinkDefinitions
 
     var text = ""
     var runs: [MarkdownVisibleText.Run] = []
     private var displayOffset = 0
 
-    init(source: String, elementSeparator: String, includesImageDescriptions: Bool) {
+    init(
+        source: String,
+        elementSeparator: String,
+        includesImageDescriptions: Bool,
+        definitions: MarkdownLinkDefinitions
+    ) {
         self.source = source
         self.elementSeparator = elementSeparator
         self.includesImageDescriptions = includesImageDescriptions
+        self.definitions = definitions
     }
 
     /// Inline content assembled from the source, the way the parser assembles a
@@ -310,7 +327,7 @@ private struct Builder {
         // a table cell, a paragraph of one line — which the inline pass can
         // read where it lies.
         if pieces.count == 1, case let .source(content) = pieces[0] {
-            for run in MarkdownHTMLBuilder.inlineRuns(in: content) where includes(run) {
+            for run in MarkdownHTMLBuilder.inlineRuns(in: content, definitions: definitions) where includes(run) {
                 let sourceRange = offset(of: run.source.lowerBound)..<offset(of: run.source.upperBound)
                 append(run.replacement ?? String(source[run.source]), from: sourceRange)
             }
@@ -352,7 +369,7 @@ private struct Builder {
             }
         }
 
-        for run in MarkdownHTMLBuilder.inlineRuns(in: inlineText[...]) where includes(run) {
+        for run in MarkdownHTMLBuilder.inlineRuns(in: inlineText[...], definitions: definitions) where includes(run) {
             let inlineRange = run.source.lowerBound.utf16Offset(in: inlineText)
                 ..< run.source.upperBound.utf16Offset(in: inlineText)
 

@@ -1104,6 +1104,145 @@ struct ReferenceLinkTests {
     @Test func undefinedReferenceIsText() async throws {
         #expect(blockHTML("[foo][bar]") == "<p>[foo][bar]</p>")
     }
+
+    // MARK: Using a reference
+
+    @Test func theDefinitionMayComeFirst() async throws {
+        #expect(allBlockHTML("[foo]: /url\n\n[foo]") == ["<p><a href=\"/url\">foo</a></p>"])
+    }
+
+    @Test func labelsMatchWithoutRegardToSpacing() async throws {
+        #expect(allBlockHTML("[Foo   Bar]: /url\n\n[foo bar]") == ["<p><a href=\"/url\">foo bar</a></p>"])
+    }
+
+    @Test func theTextOfAReferenceIsInlineRendered() async throws {
+        #expect(
+            allBlockHTML("[*foo* `bar`][x]\n\n[x]: /url")
+                == ["<p><a href=\"/url\"><em>foo</em> <code>bar</code></a></p>"]
+        )
+    }
+
+    @Test func anInlineDestinationWinsOverADefinition() async throws {
+        #expect(allBlockHTML("[foo](/inline)\n\n[foo]: /defined") == ["<p><a href=\"/inline\">foo</a></p>"])
+    }
+
+    @Test func theFirstDefinitionOfALabelWins() async throws {
+        #expect(allBlockHTML("[foo]: /first\n[foo]: /second\n\n[foo]") == ["<p><a href=\"/first\">foo</a></p>"])
+    }
+
+    @Test func aLabelAfterTheTextIsWhatIsLookedUp() async throws {
+        // Spec examples 571 to 573. Text followed by a label is a reference to
+        // that label, never a shortcut for its own.
+        #expect(allBlockHTML("[foo][bar][baz]\n\n[baz]: /url") == ["<p>[foo]<a href=\"/url\">bar</a></p>"])
+        #expect(
+            allBlockHTML("[foo][bar][baz]\n\n[baz]: /url1\n[bar]: /url2")
+                == ["<p><a href=\"/url2\">foo</a><a href=\"/url1\">baz</a></p>"]
+        )
+        #expect(
+            allBlockHTML("[foo][bar][baz]\n\n[baz]: /url1\n[foo]: /url2")
+                == ["<p>[foo]<a href=\"/url1\">bar</a></p>"]
+        )
+    }
+
+    @Test func anEscapedBracketIsNotAReference() async throws {
+        #expect(allBlockHTML("\\[foo]\n\n[foo]: /url") == ["<p>[foo]</p>"])
+    }
+
+    @Test func collapsedAndShortcutImages() async throws {
+        #expect(allBlockHTML("![foo][]\n\n[foo]: /img.png \"t\"") == ["<p><img src=\"/img.png\" alt=\"foo\" title=\"t\" /></p>"])
+        #expect(allBlockHTML("![foo]\n\n[foo]: /img.png") == ["<p><img src=\"/img.png\" alt=\"foo\" /></p>"])
+    }
+
+    @Test func referencesWorkInEveryKindOfBlock() async throws {
+        let source = """
+        # [foo]
+
+        - [foo]
+
+        > [foo]
+
+        | [foo] |
+        | --- |
+        | [foo] |
+
+        [foo]: /url
+        """
+
+        #expect(
+            allBlockHTML(source) == [
+                "<h1><a href=\"/url\">foo</a></h1>",
+                "<ul><li><a href=\"/url\">foo</a></li></ul>",
+                "<blockquote><p><a href=\"/url\">foo</a></p></blockquote>",
+                "<div class=\"table-wrap\"><table><thead><tr><th class=\"a-left\"><a href=\"/url\">foo</a></th></tr></thead><tbody><tr><td class=\"a-left\"><a href=\"/url\">foo</a></td></tr></tbody></table></div>",
+            ]
+        )
+    }
+
+    @Test func aDefinitionInsideAQuoteCountsEverywhere() async throws {
+        #expect(
+            allBlockHTML("[foo]\n\n> [foo]: /url")
+                == ["<p><a href=\"/url\">foo</a></p>", "<blockquote></blockquote>"]
+        )
+    }
+
+    @Test func aScriptDestinationIsRefusedHereToo() async throws {
+        #expect(allBlockHTML("[foo]\n\n[foo]: javascript:alert(1)") == ["<p><a>foo</a></p>"])
+    }
+
+    // MARK: Writing a definition
+
+    @Test func titleMayBeInAnyOfTheThreeForms() async throws {
+        #expect(allBlockHTML("[foo]: /url 'the title'\n\n[foo]") == ["<p><a href=\"/url\" title=\"the title\">foo</a></p>"])
+        #expect(allBlockHTML("[foo]: /url (the title)\n\n[foo]") == ["<p><a href=\"/url\" title=\"the title\">foo</a></p>"])
+    }
+
+    @Test func titleMayBeOnTheNextLine() async throws {
+        #expect(
+            allBlockHTML("[foo]: /url\n  \"the title\"\n\n[foo]")
+                == ["<p><a href=\"/url\" title=\"the title\">foo</a></p>"]
+        )
+    }
+
+    @Test func destinationMayBeOnTheNextLine() async throws {
+        #expect(allBlockHTML("[foo]:\n/url\n\n[foo]") == ["<p><a href=\"/url\">foo</a></p>"])
+    }
+
+    @Test func destinationInAngleBracketsMayHoldSpaces() async throws {
+        #expect(allBlockHTML("[foo]: <my url>\n\n[foo]") == ["<p><a href=\"my%20url\">foo</a></p>"])
+    }
+
+    @Test func anythingAfterTheTitleMeansItIsNotADefinition() async throws {
+        #expect(
+            allBlockHTML("[foo]: /url \"title\" ok")
+                == ["<p>[foo]: /url &quot;title&quot; ok</p>"]
+        )
+    }
+
+    @Test func aTitleThatIsNotOneLeavesADefinitionWithoutATitle() async throws {
+        // Spec example 209: the second line is text, not a title.
+        #expect(allBlockHTML("[foo]: /url\n\"title\" ok") == ["<p>&quot;title&quot; ok</p>"])
+    }
+
+    @Test func aDefinitionCannotInterruptAParagraph() async throws {
+        #expect(
+            allBlockHTML("Foo\n[bar]: /baz\n\n[bar]")
+                == ["<p>Foo\n[bar]: /baz</p>", "<p>[bar]</p>"]
+        )
+    }
+
+    @Test func textMayFollowADefinitionInTheSameParagraph() async throws {
+        #expect(allBlockHTML("[foo]: /url\nbar [foo]") == ["<p>bar <a href=\"/url\">foo</a></p>"])
+    }
+
+    @Test func aDefinitionIsNotASetextHeading() async throws {
+        // Spec example 216: with the definition taken out there is nothing for
+        // the underline to underline, so it is text.
+        #expect(allBlockHTML("[foo]: /url\n===\n[foo]") == ["<p>===\n<a href=\"/url\">foo</a></p>"])
+    }
+
+    @Test func aLabelNeedsSomethingInIt() async throws {
+        #expect(allBlockHTML("[ ]: /url\n\n[ ]") == ["<p>[ ]: /url</p>", "<p>[ ]</p>"])
+    }
 }
 
 @Suite("Images (spec 6.4)")

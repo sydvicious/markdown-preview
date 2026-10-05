@@ -35,9 +35,8 @@ This document tracks planned work for MarkdownPreviewApp.
   - Failing tests: `ListTests/itemTextContinuesOnAnIndentedLine`, `lazyContinuationLineStaysInTheItem`, `itemsMayHoldSeveralParagraphs`, `itemsContainOtherBlocks`; `BlockQuoteTests/lazyContinuationLineStaysInTheQuote`.
 
 ### CommonMark constructs the renderer does not implement.
-  - Asserted in the conformance suite because its expectations come from the spec; each fails until it is built. All are in scope (Syd, 2026-10-04). Autolinks, the third, were built on 2026-10-05.
+  - Asserted in the conformance suite because its expectations come from the spec; each fails until it is built. All are in scope (Syd, 2026-10-04). Of the three there were, autolinks and link reference definitions were built on 2026-10-05, which leaves one.
   - Indented code blocks (spec 4.4): four spaces or a tab. `IndentedCodeTests`, 4 failing.
-  - Link reference definitions (spec 4.7): `[foo][bar]`, `[foo][]`, `[foo]` with `[bar]: /url` elsewhere, and the image form. `ReferenceLinkTests`, 5 failing.
 
 ### Crash at launch: two saved documents that resolve to one file. (fixed 2026-10-04; see what is left)
   - Found 2026-10-04 by reading the code, during the audit under "Audit the test suites and cover every markdown feature", then reproduced the same day in `DocumentSessionStore` on macOS, in a test, not by launching the app.
@@ -202,8 +201,8 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Audit the test suites and cover every markdown feature.
   - Done 2026-07-19 for the renderer: `MarkdownCore/Tests/MarkdownCoreConformanceTests` covers the block and inline features against CommonMark 0.31.2 and runs headlessly via `swift test`. It exposed 44 failing cases when it landed; all were fixed.
   - Done 2026-10-04 for the rest of the test work. The suites landed with the run red: each failure was filed under "Bugs", and the suites go green as those are fixed.
-    - The conformance suite grew from 92 cases to 242. 14 of them fail, all in the renderer: the two entries left under "Bugs" that name `ListTests`, `BlockQuoteTests`, `IndentedCodeTests` and `ReferenceLinkTests`.
-    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 71 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. When these landed, 85 cases failed; all pass as of 2026-10-05.
+    - The conformance suite grew from 92 cases to 263. 9 of them fail, all in the renderer: the two entries left under "Bugs" that name `ListTests`, `BlockQuoteTests` and `IndentedCodeTests`.
+    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 73 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. When these landed, 85 cases failed; all pass as of 2026-10-05.
     - What those failures led to: the mapping no longer parses markdown itself. `MarkdownVisibleText`, in `MarkdownCore`, builds a document's visible text from the parser's own line rules and from the pass that writes the HTML, and has its own suite, `MarkdownVisibleTextTests`, that runs from the command line.
     - The no-whitespace-between-tags check covers every block type, and passes.
     - Not covered, because there is nothing to assert yet: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.

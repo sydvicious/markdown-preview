@@ -22,6 +22,10 @@ import MarkdownCore
 /// A fragment of markdown that renders as a single block.
 struct MarkdownFeature: Sendable, CustomTestStringConvertible {
     let name: String
+    /// The block itself, which is the start of `source`.
+    let block: String
+    /// The whole document: the block, and after it any link definitions it
+    /// refers to. Those render as nothing and belong to no block.
     let source: String
     /// The block's text as the reader sees it in the preview, which renders a
     /// line ending inside a paragraph as a line break.
@@ -33,9 +37,10 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
 
     var testDescription: String { name }
 
-    init(_ name: String, _ source: String, visible: String, words: [String] = []) {
+    init(_ name: String, _ block: String, definitions: String = "", visible: String, words: [String] = []) {
         self.name = name
-        self.source = source
+        self.block = block
+        self.source = definitions.isEmpty ? block : block + "\n\n" + definitions
         self.visible = visible
         self.words = words
     }
@@ -169,6 +174,20 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
             words: ["Alpha", "beta", "gamma"]
         ),
         .init("unclosed link", "[Alpha](/url", visible: "[Alpha](/url", words: ["Alpha"]),
+        .init(
+            "reference link",
+            "See [Alpha][ref] and [Beta][] and [gamma] now",
+            definitions: "[ref]: https://example.com/one\n[beta]: /two \"Title\"\n[Gamma]: /three",
+            visible: "See Alpha and Beta and gamma now",
+            words: ["Alpha", "Beta", "gamma", "now"]
+        ),
+        .init(
+            "reference image",
+            "before ![Alt][ref] after",
+            definitions: "[ref]: pic.png",
+            visible: "before  after",
+            words: ["before", "after"]
+        ),
         .init(
             "autolink",
             "See <https://example.com/alpha_beta> now",
@@ -406,16 +425,17 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
 
 struct MarkdownFeatureOffsetMappingTests {
 
-    /// Every fragment is meant to be one block, covering the whole of its
-    /// source. If the parser disagrees, the offsets below are measured against
-    /// the wrong thing, so say so before anything else does.
+    /// Every fragment is meant to be one block, which is the whole of its
+    /// source apart from any definitions after it. If the parser disagrees, the
+    /// offsets below are measured against the wrong thing, so say so before
+    /// anything else does.
     @Test(arguments: MarkdownFeature.all)
     func fragmentIsOneBlockSpanningItsSource(feature: MarkdownFeature) throws {
         let blocks = MarkdownBlockParser.parse(feature.source)
         try #require(blocks.count == 1, "parsed into \(blocks.count) blocks")
 
         let range = MarkdownSourceLineTable(source: feature.source).range(for: blocks[0].lineRange)
-        #expect(range == MarkdownSelectionRange(location: 0, length: feature.source.utf16.count))
+        #expect(range == MarkdownSelectionRange(location: 0, length: feature.block.utf16.count))
     }
 
     // MARK: - Source to display text, and back
@@ -459,7 +479,7 @@ struct MarkdownFeatureOffsetMappingTests {
     /// half of each trip is exercised in `WebKitTextNodeAlignmentTests`.
     @Test(arguments: MarkdownFeature.all.filter { !$0.words.isEmpty })
     func wordsRoundTripBetweenSourceAndTheRenderedBlock(feature: MarkdownFeature) throws {
-        let blockEnd = feature.source.utf16.count
+        let blockEnd = feature.block.utf16.count
 
         for word in feature.words {
             let inSource = try #require(feature.sourceRange(of: word), "\(word) is not in the source")
