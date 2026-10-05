@@ -56,7 +56,9 @@ public struct MarkdownListItem: Identifiable {
 /// known. Depth depends on the surrounding lines, so the parser resolves it
 /// while walking the list.
 private struct ParsedListItem {
-    let text: String
+    /// The item's text, as a stretch of the line it was parsed from.
+    let content: Substring
+    var text: String { String(content) }
     let checkbox: Bool?
     let order: Int?
     let isOrdered: Bool
@@ -270,11 +272,11 @@ public struct MarkdownBlockParser {
                 continue
             }
 
-            if let heading = parseHeading(line) {
+            if let heading = headingContent(in: line[...]) {
                 flushAll(currentLine: index)
                 blocks.append(
                     .init(
-                        kind: .heading(level: heading.level, text: heading.text),
+                        kind: .heading(level: heading.level, text: String(heading.content)),
                         lineRange: index..<(index + 1)
                     )
                 )
@@ -292,7 +294,7 @@ public struct MarkdownBlockParser {
                 continue
             }
 
-            if let item = parseListItem(line) ?? parseOrderedListItem(line) {
+            if let item = parseListItem(line[...]) ?? parseOrderedListItem(line[...]) {
                 flushParagraph(currentLine: index)
                 flushQuote(currentLine: index)
                 appendListItem(item, at: index)
@@ -300,13 +302,13 @@ public struct MarkdownBlockParser {
                 continue
             }
 
-            if let quote = parseBlockquote(line) {
+            if let quote = blockquoteContent(in: line[...]) {
                 flushParagraph(currentLine: index)
                 flushList(currentLine: index)
                 if quoteStartLine == nil {
                     quoteStartLine = index
                 }
-                quoteLines.append(quote)
+                quoteLines.append(String(quote))
                 index += 1
                 continue
             }
@@ -319,7 +321,7 @@ public struct MarkdownBlockParser {
             // Leading whitespace is dropped, but trailing whitespace is kept:
             // two trailing spaces are a hard line break and the renderer needs
             // to see them.
-            paragraph.append(String(line.drop { $0 == " " || $0 == "\t" }))
+            paragraph.append(String(paragraphLineContent(in: line[...])))
             index += 1
         }
 
@@ -335,10 +337,16 @@ public struct MarkdownBlockParser {
         return blocks
     }
 
-    private static func parseHeading(_ line: String) -> (level: Int, text: String)? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        let hashes = trimmed.prefix { $0 == "#" }
-        let level = hashes.count
+    // The functions from here to `tableCellSlices` say where a line's content
+    // sits in the line, as a `Substring` of it. The parser turns that into the
+    // block's text; `MarkdownVisibleText` uses the same answer to say which
+    // characters of the source a piece of rendered text came from, so the two
+    // cannot disagree about what is content and what is markup.
+
+    /// The level and text of an ATX heading line, or nil if it is not one.
+    static func headingContent(in line: Substring) -> (level: Int, content: Substring)? {
+        let trimmed = line.trimmingMarkdownWhitespace()
+        let level = trimmed.prefix { $0 == "#" }.count
         guard (1...6).contains(level) else { return nil }
 
         let remainder = trimmed.dropFirst(level)
@@ -348,20 +356,42 @@ public struct MarkdownBlockParser {
             return nil
         }
 
-        var text = remainder.trimmingCharacters(in: .whitespaces)
+        var content = remainder.trimmingMarkdownWhitespace()
 
         // An optional closing run of hashes is decoration and is dropped, but
         // only when it is preceded by a space: "foo#" keeps its hash.
-        let withoutClosing = text.reversed().drop { $0 == "#" }
-        if withoutClosing.count < text.count {
-            let candidate = String(withoutClosing.reversed())
-            if candidate.isEmpty || candidate.last == " " || candidate.last == "\t" {
-                text = candidate.trimmingCharacters(in: .whitespaces)
-            }
+        var withoutClosing = content
+        while withoutClosing.last == "#" {
+            withoutClosing = withoutClosing.dropLast()
+        }
+        if withoutClosing.endIndex < content.endIndex,
+           withoutClosing.isEmpty || withoutClosing.last == " " || withoutClosing.last == "\t" {
+            content = withoutClosing.trimmingMarkdownWhitespace()
         }
 
         // An empty heading is valid: "#" alone is <h1></h1>.
-        return (level, text)
+        return (level, content)
+    }
+
+    /// A paragraph line's text: the line without its leading spaces and tabs.
+    /// Trailing whitespace is kept, because two trailing spaces are a hard line
+    /// break and the renderer needs to see them.
+    static func paragraphLineContent(in line: Substring) -> Substring {
+        line.drop { $0 == " " || $0 == "\t" }
+    }
+
+    /// The text of a list item line — after its marker and any task box — or
+    /// nil if the line is not a list item.
+    static func listItemContent(in line: Substring) -> Substring? {
+        (parseListItem(line) ?? parseOrderedListItem(line))?.content
+    }
+
+    /// Whether `closing` is the line that closes the fenced code block `opening`
+    /// opens: a fence of the same character, at least as long, with no info
+    /// string.
+    static func fence(_ opening: Substring, isClosedBy closing: Substring) -> Bool {
+        guard let open = parseCodeFence(opening), let close = parseCodeFence(closing) else { return false }
+        return close.marker == open.marker && close.length >= open.length && close.info.isEmpty
     }
 
     /// Whether the next non-blank line after `index` is another list item,
@@ -373,13 +403,13 @@ public struct MarkdownBlockParser {
             probe += 1
         }
         guard probe < lines.count else { return false }
-        return parseListItem(lines[probe]) != nil || parseOrderedListItem(lines[probe]) != nil
+        return listItemContent(in: lines[probe][...]) != nil
     }
 
     /// Recognises a code fence: a run of at least three backticks or tildes,
     /// indented no more than three spaces, optionally followed by an info
     /// string naming the language.
-    private static func parseCodeFence(_ line: String) -> (marker: Character, length: Int, info: String)? {
+    private static func parseCodeFence<Line: StringProtocol>(_ line: Line) -> (marker: Character, length: Int, info: String)? {
         guard indentColumns(in: line) <= 3 else { return nil }
 
         let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -412,17 +442,16 @@ public struct MarkdownBlockParser {
         return nil
     }
 
-    private static func parseListItem(_ line: String) -> ParsedListItem? {
+    private static func parseListItem(_ line: Substring) -> ParsedListItem? {
         let markerColumn = indentColumns(in: line)
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let trimmed = line.trimmingMarkdownWhitespace()
         guard trimmed.count >= 3 else { return nil }
         let first = trimmed.first
         guard first == "-" || first == "*" || first == "+" else { return nil }
         guard trimmed.dropFirst().first == " " else { return nil }
-        let rawText = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-        let (text, checkbox) = parseCheckbox(rawText)
+        let (content, checkbox) = parseCheckbox(trimmed.dropFirst(2).trimmingMarkdownWhitespace())
         return ParsedListItem(
-            text: text,
+            content: content,
             checkbox: checkbox,
             order: nil,
             isOrdered: false,
@@ -431,9 +460,9 @@ public struct MarkdownBlockParser {
         )
     }
 
-    private static func parseOrderedListItem(_ line: String) -> ParsedListItem? {
+    private static func parseOrderedListItem(_ line: Substring) -> ParsedListItem? {
         let markerColumn = indentColumns(in: line)
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let trimmed = line.trimmingMarkdownWhitespace()
         // Either "1." or "1)" starts a numbered item.
         guard let delimiterIndex = trimmed.firstIndex(where: { $0 == "." || $0 == ")" }) else {
             return nil
@@ -442,10 +471,9 @@ public struct MarkdownBlockParser {
         guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
         let afterDot = trimmed[trimmed.index(after: delimiterIndex)...]
         guard afterDot.first == " " else { return nil }
-        let rawText = String(afterDot.dropFirst()).trimmingCharacters(in: .whitespaces)
-        let (text, checkbox) = parseCheckbox(rawText)
+        let (content, checkbox) = parseCheckbox(afterDot.dropFirst().trimmingMarkdownWhitespace())
         return ParsedListItem(
-            text: text,
+            content: content,
             checkbox: checkbox,
             order: Int(number),
             isOrdered: true,
@@ -461,12 +489,12 @@ public struct MarkdownBlockParser {
     /// left keeps its own indentation and trailing spaces, so a nested quote,
     /// an indented list, or a hard line break inside the quote all survive to
     /// the recursive parse.
-    private static func parseBlockquote(_ line: String) -> String? {
+    static func blockquoteContent(in line: Substring) -> Substring? {
         let withoutIndent = line.drop { $0 == " " || $0 == "\t" }
         guard withoutIndent.first == ">" else { return nil }
 
         let remaining = withoutIndent.dropFirst()
-        return String(remaining.first == " " ? remaining.dropFirst() : remaining)
+        return remaining.first == " " ? remaining.dropFirst() : remaining
     }
 
     private static func parseRule(_ line: String) -> Bool {
@@ -482,7 +510,7 @@ public struct MarkdownBlockParser {
 
     /// Width of a line's leading whitespace in columns, expanding tabs to the
     /// next four-column tab stop as CommonMark specifies.
-    private static func indentColumns(in line: String) -> Int {
+    private static func indentColumns<Line: StringProtocol>(in line: Line) -> Int {
         var width = 0
         for ch in line {
             if ch == " " {
@@ -496,12 +524,12 @@ public struct MarkdownBlockParser {
         return width
     }
 
-    private static func parseCheckbox(_ text: String) -> (String, Bool?) {
+    private static func parseCheckbox(_ text: Substring) -> (Substring, Bool?) {
         if text.hasPrefix("[ ] ") {
-            return (String(text.dropFirst(4)), false)
+            return (text.dropFirst(4), false)
         }
         if text.hasPrefix("[x] ") || text.hasPrefix("[X] ") {
-            return (String(text.dropFirst(4)), true)
+            return (text.dropFirst(4), true)
         }
         return (text, nil)
     }
@@ -538,41 +566,65 @@ public struct MarkdownBlockParser {
     }
 
     private static func parseTableRow(_ line: String) -> [String]? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        tableCellSlices(in: line[...])?.map(tableCellText)
+    }
+
+    /// The cells of a table row as they are written, each trimmed of the
+    /// whitespace around it, or nil if the line has no pipe and so is not a row.
+    ///
+    /// A backslash escapes the character after it, so `\|` does not end a cell.
+    /// An empty cell before the first pipe or after the last is the row's edge,
+    /// not a cell.
+    static func tableCellSlices(in line: Substring) -> [Substring]? {
+        let trimmed = line.trimmingMarkdownWhitespace()
         guard trimmed.contains("|") else { return nil }
 
-        var cells: [String] = []
-        var current = ""
+        var cells: [Substring] = []
+        var cellStart = trimmed.startIndex
         var isEscaped = false
+        var index = trimmed.startIndex
 
-        for ch in trimmed {
+        while index < trimmed.endIndex {
+            let ch = trimmed[index]
             if isEscaped {
-                current.append(ch)
                 isEscaped = false
-                continue
-            }
-            if ch == "\\" {
+            } else if ch == "\\" {
                 isEscaped = true
-                continue
+            } else if ch == "|" {
+                cells.append(trimmed[cellStart..<index].trimmingMarkdownWhitespace())
+                cellStart = trimmed.index(after: index)
             }
-            if ch == "|" {
-                cells.append(current.trimmingCharacters(in: .whitespaces))
-                current = ""
-            } else {
-                current.append(ch)
-            }
+            index = trimmed.index(after: index)
         }
-        cells.append(current.trimmingCharacters(in: .whitespaces))
+        cells.append(trimmed[cellStart...].trimmingMarkdownWhitespace())
 
-        if cells.first?.isEmpty == true {
+        if let first = cells.first, tableCellText(first).isEmpty {
             cells.removeFirst()
         }
-        if cells.last?.isEmpty == true {
+        if let last = cells.last, tableCellText(last).isEmpty {
             cells.removeLast()
         }
 
         guard !cells.isEmpty else { return nil }
-        return cells.map { $0.replacingOccurrences(of: "\\|", with: "|") }
+        return cells
+    }
+
+    /// A cell's text as the renderer is given it: the cell without the
+    /// backslashes that escape something.
+    private static func tableCellText(_ cell: Substring) -> String {
+        var text = ""
+        var isEscaped = false
+        for ch in cell {
+            if isEscaped {
+                text.append(ch)
+                isEscaped = false
+            } else if ch == "\\" {
+                isEscaped = true
+            } else {
+                text.append(ch)
+            }
+        }
+        return text.trimmingCharacters(in: .whitespaces)
     }
 
     private static func parseDelimiterRow(_ line: String) -> [MarkdownTableAlignment]? {
@@ -600,5 +652,28 @@ public struct MarkdownBlockParser {
             }
         }
         return alignments
+    }
+}
+
+extension Character {
+    /// A space, a tab, or one of the other characters `CharacterSet.whitespaces`
+    /// holds. A line ending is not one.
+    var isMarkdownWhitespace: Bool {
+        unicodeScalars.allSatisfy(CharacterSet.whitespaces.contains)
+    }
+}
+
+extension Substring {
+    /// This stretch of text without the whitespace at either end, still as a
+    /// stretch of the string it came from.
+    func trimmingMarkdownWhitespace() -> Substring {
+        var trimmed = self
+        while let first = trimmed.first, first.isMarkdownWhitespace {
+            trimmed = trimmed.dropFirst()
+        }
+        while let last = trimmed.last, last.isMarkdownWhitespace {
+            trimmed = trimmed.dropLast()
+        }
+        return trimmed
     }
 }

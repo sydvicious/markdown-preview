@@ -67,16 +67,20 @@ public struct MarkdownSourceLineTable {
 
 extension String {
     /// The lines of a markdown source, without their line endings, split where
-    /// `MarkdownSourceLineTable` splits them.
+    /// `MarkdownSourceLineTable` splits them. Each is a stretch of this string,
+    /// so it still knows where in the source it is.
     ///
     /// In Swift a carriage return followed by a newline is a single
     /// `Character`, and it is not equal to `"\n"`. Splitting on `"\n"` alone
     /// therefore never splits a Windows file at all.
-    var markdownLines: [String] {
-        let lines: [Substring] = split(
+    var markdownLineSlices: [Substring] {
+        split(
             omittingEmptySubsequences: false,
             whereSeparator: { $0 == "\n" || $0 == "\r\n" || $0 == "\r" }
         )
-        return lines.map(String.init)
+    }
+
+    var markdownLines: [String] {
+        markdownLineSlices.map(String.init)
     }
 }

@@ -5,6 +5,8 @@
 
 ## 0.10
 
+- Find and selection now read markdown exactly as the preview renders it, where they used to have a parser of their own that disagreed with it. Fixed by this: a match landing on the wrong characters, or nowhere, after `snake_case` names, backslash escapes, entities such as `&amp;`, spaced asterisks, or a heading's closing `##`; text that could not be found at all in `1)` lists, in the later lines of a setext heading, or in the last line of an unclosed code block; and anything inside a block quote — a heading, a list, code, a nested quote — being counted with its markers.
+- The engine has a new type, `MarkdownVisibleText`, that gives a document's visible text and the source each part of it came from. It is built from the parser's own line rules and from the pass that writes the HTML, and is tested from the command line.
 - Files with Windows (CRLF) or classic Mac (CR) line endings, or a mixture of line endings, now render, search and select as they should. A Windows file used to be read as one long line.
 - A search match or selection in the preview no longer lands a character short after a line that starts in bold or with a link, or after two styled words with only a space between them.
 - Fixed a crash at every launch after a document was opened, moved, and opened again from its new place. The saved list then named the file twice; it is now restored once.

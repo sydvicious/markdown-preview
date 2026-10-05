@@ -233,35 +233,99 @@ public enum MarkdownHTMLBuilder {
     }
 
     private static func renderInlineMarkdownHTML(_ text: String, softBreak: SoftBreak = .newline) -> String {
-        renderInlineMarkdownHTML(Substring(text), softBreak: softBreak)
+        renderInline(Substring(text), softBreak: softBreak).html
     }
 
-    /// One piece of inline content: either finished HTML, or a run of `*`/`_`
-    /// whose role is not yet decided.
+    /// The text of `text` as the reader sees it once it is rendered, in order,
+    /// each piece with the stretch of `text` it came from.
+    ///
+    /// This is the same pass that writes the HTML, reporting what it showed as
+    /// it goes, so the two cannot disagree: whatever becomes a text node in the
+    /// page is a run here, and markup that renders as nothing — emphasis
+    /// delimiters, a link's destination, the backslash of an escape — is in no
+    /// run at all. `MarkdownVisibleText` builds find and selection offsets
+    /// from it.
+    public static func inlineRuns(in text: Substring) -> [MarkdownInlineRun] {
+        renderInline(text).runs
+    }
+
+    /// Inline content rendered: its HTML, and what of it the reader sees.
+    private typealias InlineRendering = (html: String, runs: [MarkdownInlineRun])
+
+    /// One piece of inline content: either finished, or a run of `*`/`_` whose
+    /// role is not yet decided.
     private enum InlineToken {
-        case html(String)
-        case delimiter(character: Character, count: Int, canOpen: Bool, canClose: Bool)
+        case content(html: String, runs: [MarkdownInlineRun])
+        /// `count` delimiters not yet paired, the first of them at `start`.
+        case delimiter(character: Character, count: Int, start: String.Index, canOpen: Bool, canClose: Bool)
     }
 
-    private static func renderInlineMarkdownHTML(_ text: Substring, softBreak: SoftBreak = .newline) -> String {
-        processEmphasis(tokenizeInline(text, softBreak: softBreak))
+    private static func renderInline(_ text: Substring, softBreak: SoftBreak = .newline) -> InlineRendering {
+        processEmphasis(tokenizeInline(text, softBreak: softBreak), in: text)
     }
 
-    /// Splits inline text into finished HTML and undecided emphasis delimiters.
+    /// Adds `run` to `runs`, joining it to the last one when both are shown as
+    /// written and one picks up where the other left off.
+    private static func append(_ run: MarkdownInlineRun, to runs: inout [MarkdownInlineRun]) {
+        guard !run.source.isEmpty || run.replacement?.isEmpty == false else { return }
+        if let last = runs.last,
+           last.replacement == nil, run.replacement == nil,
+           last.isImageDescription == run.isImageDescription,
+           last.source.upperBound == run.source.lowerBound {
+            runs[runs.count - 1].source = last.source.lowerBound..<run.source.upperBound
+        } else {
+            runs.append(run)
+        }
+    }
+
+    /// The characters the tokenizer looks at twice. Anything else is text, and
+    /// is taken a stretch at a time.
+    private static func startsInlineConstruct(_ character: Character) -> Bool {
+        switch character {
+        case "\\", " ", "\n", "&", "!", "[", "`", "*", "_":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Splits inline text into finished content and undecided emphasis
+    /// delimiters.
     ///
     /// Everything that outranks emphasis — escapes, entities, images, links,
     /// code spans — is resolved here, so emphasis matching only ever sees text
     /// it is allowed to affect.
     private static func tokenizeInline(_ text: Substring, softBreak: SoftBreak = .newline) -> [InlineToken] {
         var tokens: [InlineToken] = []
+        // Content gathers here until a delimiter run, or the end, closes it off.
+        var pendingHTML = ""
+        var pendingRuns: [MarkdownInlineRun] = []
         var index = text.startIndex
 
-        func appendHTML(_ html: String) {
-            if case let .html(existing)? = tokens.last {
-                tokens[tokens.count - 1] = .html(existing + html)
-            } else {
-                tokens.append(.html(html))
+        /// Content the reader sees as written: `source`, character for character.
+        func appendShown(_ html: String, from start: String.Index, to end: String.Index) {
+            pendingHTML += html
+            append(MarkdownInlineRun(source: start..<end), to: &pendingRuns)
+        }
+
+        /// Content the reader sees as `shown`, where the source says something else.
+        func appendShown(_ html: String, as shown: String, from start: String.Index, to end: String.Index) {
+            pendingHTML += html
+            append(MarkdownInlineRun(source: start..<end, replacement: shown), to: &pendingRuns)
+        }
+
+        func appendRendered(_ rendering: InlineRendering) {
+            pendingHTML += rendering.html
+            for run in rendering.runs {
+                append(run, to: &pendingRuns)
             }
+        }
+
+        func flushPending() {
+            guard !pendingHTML.isEmpty || !pendingRuns.isEmpty else { return }
+            tokens.append(.content(html: pendingHTML, runs: pendingRuns))
+            pendingHTML = ""
+            pendingRuns = []
         }
 
         while index < text.endIndex {
@@ -271,13 +335,15 @@ public enum MarkdownHTMLBuilder {
             if text[index] == "\\" {
                 let next = text.index(after: index)
                 if next < text.endIndex, text[next] == "\n" {
-                    appendHTML("<br />\n")
-                    index = text.index(after: next)
+                    let end = text.index(after: next)
+                    appendShown("<br />\n", as: "\n", from: index, to: end)
+                    index = end
                     continue
                 }
                 if next < text.endIndex, isASCIIPunctuation(text[next]) {
-                    appendHTML(escapeHTML(String(text[next])))
-                    index = text.index(after: next)
+                    let end = text.index(after: next)
+                    appendShown(escapeHTML(String(text[next])), as: String(text[next]), from: index, to: end)
+                    index = end
                     continue
                 }
             }
@@ -296,44 +362,51 @@ public enum MarkdownHTMLBuilder {
 
                 if runEnd < text.endIndex, text[runEnd] == "\n" {
                     let isHardBreak = spaces >= 2 || softBreak == .lineBreak
-                    appendHTML(isHardBreak ? "<br />\n" : "\n")
-                    index = text.index(after: runEnd)
+                    let end = text.index(after: runEnd)
+                    appendShown(isHardBreak ? "<br />\n" : "\n", as: "\n", from: index, to: end)
+                    index = end
                     continue
                 }
 
-                appendHTML(String(repeating: " ", count: spaces))
+                appendShown(String(repeating: " ", count: spaces), from: index, to: runEnd)
                 index = runEnd
                 continue
             }
 
             if text[index] == "\n" {
-                appendHTML(softBreak == .lineBreak ? "<br />\n" : "\n")
-                index = text.index(after: index)
+                let end = text.index(after: index)
+                appendShown(softBreak == .lineBreak ? "<br />\n" : "\n", from: index, to: end)
+                index = end
                 continue
             }
 
             if let entity = parseEntity(in: text, from: index) {
                 // Decoded, then re-escaped for output: "&amp;" in the source is
                 // an ampersand, which is written back out as "&amp;".
-                appendHTML(escapeHTML(String(entity.character)))
+                appendShown(
+                    escapeHTML(String(entity.character)),
+                    as: String(entity.character),
+                    from: index,
+                    to: entity.endIndex
+                )
                 index = entity.endIndex
                 continue
             }
 
             if let image = parseImage(in: text, from: index) {
-                appendHTML(image.html)
+                appendRendered((image.html, image.runs))
                 index = image.endIndex
                 continue
             }
 
             if let link = parseLink(in: text, from: index) {
-                appendHTML(link.html)
+                appendRendered((link.html, link.runs))
                 index = link.endIndex
                 continue
             }
 
             if let code = parseCodeSpan(in: text, from: index) {
-                appendHTML(code.html)
+                appendShown(code.html, from: code.content.lowerBound, to: code.content.upperBound)
                 index = code.endIndex
                 continue
             }
@@ -352,10 +425,12 @@ public enum MarkdownHTMLBuilder {
                 let after: Character? = end < text.endIndex ? text[end] : nil
                 let flanking = flankingRules(character: character, before: before, after: after)
 
+                flushPending()
                 tokens.append(
                     .delimiter(
                         character: character,
                         count: count,
+                        start: index,
                         canOpen: flanking.canOpen,
                         canClose: flanking.canClose
                     )
@@ -364,10 +439,16 @@ public enum MarkdownHTMLBuilder {
                 continue
             }
 
-            appendHTML(escapeHTML(String(character)))
-            index = text.index(after: index)
+            // Plain text, up to the next character that might start something.
+            var end = text.index(after: index)
+            while end < text.endIndex, !startsInlineConstruct(text[end]) {
+                end = text.index(after: end)
+            }
+            appendShown(escapeHTML(String(text[index..<end])), from: index, to: end)
+            index = end
         }
 
+        flushPending()
         return tokens
     }
 
@@ -416,12 +497,12 @@ public enum MarkdownHTMLBuilder {
     /// out correctly. Two delimiters are consumed at a time when both sides have
     /// them to spare, so `***x***` becomes emphasis wrapping strong. Delimiters
     /// that never find a partner are emitted as literal text.
-    private static func processEmphasis(_ tokens: [InlineToken]) -> String {
+    private static func processEmphasis(_ tokens: [InlineToken], in text: Substring) -> InlineRendering {
         var tokens = tokens
         var index = 0
 
         while index < tokens.count {
-            guard case let .delimiter(character, closeCount, _, canClose) = tokens[index],
+            guard case let .delimiter(character, closeCount, closeStart, _, canClose) = tokens[index],
                   canClose, closeCount > 0 else {
                 index += 1
                 continue
@@ -430,7 +511,7 @@ public enum MarkdownHTMLBuilder {
             var openerIndex: Int?
             var search = index - 1
             while search >= 0 {
-                if case let .delimiter(openCharacter, openCount, canOpen, _) = tokens[search],
+                if case let .delimiter(openCharacter, openCount, _, canOpen, _) = tokens[search],
                    openCharacter == character, canOpen, openCount > 0 {
                     openerIndex = search
                     break
@@ -439,37 +520,42 @@ public enum MarkdownHTMLBuilder {
             }
 
             guard let opener = openerIndex,
-                  case let .delimiter(_, openCount, canOpen, openCanClose) = tokens[opener] else {
+                  case let .delimiter(_, openCount, openStart, canOpen, openCanClose) = tokens[opener] else {
                 index += 1
                 continue
             }
 
             let use = (openCount >= 2 && closeCount >= 2) ? 2 : 1
-            let inner = flattenTokens(tokens[(opener + 1)..<index])
-            let wrapped = use == 2 ? "<strong>\(inner)</strong>" : "<em>\(inner)</em>"
+            let inner = flattenTokens(tokens[(opener + 1)..<index], in: text)
+            let wrapped = use == 2 ? "<strong>\(inner.html)</strong>" : "<em>\(inner.html)</em>"
 
-            tokens.replaceSubrange((opener + 1)..<index, with: [.html(wrapped)])
+            tokens.replaceSubrange((opener + 1)..<index, with: [.content(html: wrapped, runs: inner.runs)])
 
-            // After the splice the closer sits two past the opener.
+            // After the splice the closer sits two past the opener. Each side
+            // gives up the delimiters nearest what they enclose: the closer its
+            // first ones, the opener its last. What is left of a run, and so
+            // shown as text if it never pairs, is its outer end.
             var closerIndex = opener + 2
             tokens[closerIndex] = .delimiter(
                 character: character,
                 count: closeCount - use,
+                start: text.index(closeStart, offsetBy: use),
                 canOpen: false,
                 canClose: canClose
             )
             tokens[opener] = .delimiter(
                 character: character,
                 count: openCount - use,
+                start: openStart,
                 canOpen: canOpen,
                 canClose: openCanClose
             )
 
-            if case let .delimiter(_, count, _, _) = tokens[closerIndex], count == 0 {
+            if case let .delimiter(_, count, _, _, _) = tokens[closerIndex], count == 0 {
                 tokens.remove(at: closerIndex)
                 closerIndex -= 1
             }
-            if case let .delimiter(_, count, _, _) = tokens[opener], count == 0 {
+            if case let .delimiter(_, count, _, _, _) = tokens[opener], count == 0 {
                 tokens.remove(at: opener)
                 closerIndex -= 1
             }
@@ -477,19 +563,29 @@ public enum MarkdownHTMLBuilder {
             index = max(0, closerIndex)
         }
 
-        return flattenTokens(tokens[...])
+        return flattenTokens(tokens[...], in: text)
     }
 
     /// Renders tokens as they stand, with unmatched delimiters as literal text.
-    private static func flattenTokens(_ tokens: ArraySlice<InlineToken>) -> String {
-        tokens.map { token in
+    private static func flattenTokens(_ tokens: ArraySlice<InlineToken>, in text: Substring) -> InlineRendering {
+        var html = ""
+        var runs: [MarkdownInlineRun] = []
+
+        for token in tokens {
             switch token {
-            case let .html(html):
-                return html
-            case let .delimiter(character, count, _, _):
-                return String(repeating: character, count: count)
+            case let .content(tokenHTML, tokenRuns):
+                html += tokenHTML
+                for run in tokenRuns {
+                    append(run, to: &runs)
+                }
+            case let .delimiter(character, count, start, _, _):
+                guard count > 0 else { continue }
+                html += String(repeating: character, count: count)
+                append(MarkdownInlineRun(source: start..<text.index(start, offsetBy: count)), to: &runs)
             }
-        }.joined()
+        }
+
+        return (html, runs)
     }
 
     /// Parses a code span.
@@ -501,7 +597,7 @@ public enum MarkdownHTMLBuilder {
     private static func parseCodeSpan(
         in text: Substring,
         from start: String.Index
-    ) -> (html: String, endIndex: String.Index)? {
+    ) -> (html: String, content: Range<String.Index>, endIndex: String.Index)? {
         guard text[start] == "`" else { return nil }
 
         var openEnd = start
@@ -520,14 +616,18 @@ public enum MarkdownHTMLBuilder {
             }
 
             if text.distance(from: candidate, to: closeEnd) == openLength {
-                var content = String(text[openEnd..<candidate])
+                var content = text[openEnd..<candidate]
                 if content.count >= 2,
                    content.first == " ",
                    content.last == " ",
                    content.contains(where: { $0 != " " }) {
-                    content = String(content.dropFirst().dropLast())
+                    content = content.dropFirst().dropLast()
                 }
-                return ("<code>\(escapeHTML(content))</code>", closeEnd)
+                return (
+                    "<code>\(escapeHTML(String(content)))</code>",
+                    content.startIndex..<content.endIndex,
+                    closeEnd
+                )
             }
 
             search = closeEnd
@@ -593,36 +693,10 @@ public enum MarkdownHTMLBuilder {
         return (character, end)
     }
 
-    private static func parseDelimited(
-        in text: Substring,
-        from start: String.Index,
-        delimiter: String
-    ) -> (content: Substring, endIndex: String.Index)? {
-        guard text[start...].hasPrefix(delimiter) else { return nil }
-
-        let contentStart = text.index(start, offsetBy: delimiter.count)
-        guard contentStart < text.endIndex else { return nil }
-
-        var searchIndex = contentStart
-        while searchIndex < text.endIndex {
-            guard let range = text[searchIndex...].range(of: delimiter) else { return nil }
-            guard range.lowerBound > contentStart else {
-                searchIndex = range.upperBound
-                continue
-            }
-
-            let content = text[contentStart..<range.lowerBound]
-            guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            return (content, range.upperBound)
-        }
-
-        return nil
-    }
-
     private static func parseLink(
         in text: Substring,
         from start: String.Index
-    ) -> (html: String, endIndex: String.Index)? {
+    ) -> (html: String, runs: [MarkdownInlineRun], endIndex: String.Index)? {
         guard text[start] == "[" else { return nil }
         guard let closeBracket = text[start...].firstIndex(of: "]") else { return nil }
         let afterBracket = text.index(after: closeBracket)
@@ -633,10 +707,12 @@ public enum MarkdownHTMLBuilder {
         let label = text[text.index(after: start)..<closeBracket]
         guard let target = parseLinkTarget(text[urlStart..<closeParen]) else { return nil }
 
+        // What the reader sees of a link is its text, rendered.
+        let rendered = renderInline(label)
         let titleAttribute = target.title.map { " title=\"\(escapeHTMLAttribute($0))\"" } ?? ""
         let html = "<a href=\"\(escapeHTMLAttribute(target.destination))\"\(titleAttribute)>"
-            + "\(renderInlineMarkdownHTML(label))</a>"
-        return (html, text.index(after: closeParen))
+            + "\(rendered.html)</a>"
+        return (html, rendered.runs, text.index(after: closeParen))
     }
 
     /// Splits the parenthesised part of a link or image into its destination
@@ -701,7 +777,7 @@ public enum MarkdownHTMLBuilder {
     private static func parseImage(
         in text: Substring,
         from start: String.Index
-    ) -> (html: String, endIndex: String.Index)? {
+    ) -> (html: String, runs: [MarkdownInlineRun], endIndex: String.Index)? {
         guard text[start] == "!" else { return nil }
         let labelStart = text.index(after: start)
         guard labelStart < text.endIndex, text[labelStart] == "[" else { return nil }
@@ -715,12 +791,18 @@ public enum MarkdownHTMLBuilder {
         guard let target = parseLinkTarget(text[urlStart..<closeParen]) else { return nil }
 
         // The description is rendered and then flattened, so emphasis inside it
-        // contributes its text and nothing else.
-        let alt = strippedOfTags(renderInlineMarkdownHTML(description))
+        // contributes its text and nothing else. It is an attribute, not text in
+        // the page, so its runs are marked: a search may want them, the preview's
+        // offsets must not count them.
+        let rendered = renderInline(description)
+        let alt = strippedOfTags(rendered.html)
         let titleAttribute = target.title.map { " title=\"\(escapeHTMLAttribute($0))\"" } ?? ""
 
         let html = "<img src=\"\(escapeHTMLAttribute(target.destination))\" alt=\"\(alt)\"\(titleAttribute) />"
-        return (html, text.index(after: closeParen))
+        let runs = rendered.runs.map { run in
+            MarkdownInlineRun(source: run.source, replacement: run.replacement, isImageDescription: true)
+        }
+        return (html, runs, text.index(after: closeParen))
     }
 
     private static func escapeHTML(_ text: String) -> String {

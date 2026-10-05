@@ -4,7 +4,12 @@
 //
 
 import Foundation
+import MarkdownCore
 
+/// A block's visible text as the page holds it: what the preview's script
+/// finds when it walks the block's text nodes. Nothing separates one list item
+/// or quoted block from the next, because nothing does in the page, and an
+/// image's description is an attribute, not text.
 final class MarkdownPreviewTextOffsetMapping: TextOffsetMapping {
     let sourceText: String
     let displayText: String
@@ -13,13 +18,12 @@ final class MarkdownPreviewTextOffsetMapping: TextOffsetMapping {
     init(sourceText: String) {
         self.sourceText = sourceText
 
-        let builder = MarkdownDisplayBuilder(
-            sourceText: sourceText,
-            listItemSeparator: "",
-            includesImageAltText: false
+        let visible = MarkdownVisibleText(
+            source: sourceText,
+            elementSeparator: "",
+            includesImageDescriptions: false
         )
-        builder.build()
-        displayText = builder.displayText
-        runs = builder.runs
+        displayText = visible.text
+        runs = visible.runs.map(TextOffsetRun.init)
     }
 }
