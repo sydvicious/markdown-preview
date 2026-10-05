@@ -5,6 +5,7 @@
 
 ## 0.10
 
+- Files with Windows (CRLF) or classic Mac (CR) line endings, or a mixture of line endings, now render, search and select as they should. A Windows file used to be read as one long line.
 - A search match or selection in the preview no longer lands a character short after a line that starts in bold or with a link, or after two styled words with only a space between them.
 - Fixed a crash at every launch after a document was opened, moved, and opened again from its new place. The saved list then named the file twice; it is now restored once.
 - Removed `HTMLTextOffsetMapping`, which nothing in the app used.

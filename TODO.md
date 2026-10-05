@@ -30,7 +30,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - Schedule this work after the YMMV-related refactor work.
 
 ### Find and selection: the source mapping reads markdown differently from the renderer.
-  - Found 2026-10-04 by the per-feature tests; see "Audit the test suites and cover every markdown feature". `MarkdownDisplayBuilder` (`MarkdownPreview/Utilities/DisplayTextMappings.swift`) works out a block's visible text with an inline parser of its own, which does not match the one in `MarkdownHTMLBuilder`. Where the two disagree, a search misses, or the highlight lands on the wrong characters or nowhere. It disagrees on 18 of the 60 fragments in `MarkdownFeature.all`; two of them have their own entries below (`1)` lists, Windows line endings).
+  - Found 2026-10-04 by the per-feature tests; see "Audit the test suites and cover every markdown feature". `MarkdownDisplayBuilder` (`MarkdownPreview/Utilities/DisplayTextMappings.swift`) works out a block's visible text with an inline parser of its own, which does not match the one in `MarkdownHTMLBuilder`. Where the two disagree, a search misses, or the highlight lands on the wrong characters or nowhere. It disagrees on 17 of the 60 fragments in `MarkdownFeature.all`; one of them has its own entry below (`1)` lists).
   - Inline, 7 fragments:
     - `snake_case_name` is read as emphasis and loses its underscores ("underscores inside a word"). A search for `snake_case` finds nothing.
     - `2 * 3 * 4` loses its asterisks ("asterisks with spaces around them").
@@ -51,10 +51,6 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Find and selection: text in a `1)` list is invisible.
   - `MarkdownDisplayBuilder.listItemContentRange` accepts a number followed by `.` only, so an item written `1) Alpha` contributes no text at all: a search for it finds nothing, and a selection in it reflects to nothing. The renderer accepts both delimiters.
   - Failing tests: the "numbered list with parentheses" fragment in `MarkdownFeatureOffsetMappingTests` and `WebKitTextNodeAlignmentTests`, and "numbered item with a parenthesis" in `MarkdownSearchFeatureTests`.
-
-### Windows line endings: a CRLF file parses as one line.
-  - `MarkdownBlockParser.parse` splits the source on `"\n"` as a `Character`. In Swift `"\r\n"` is a single `Character` that is not equal to `"\n"`, so a file saved with CRLF endings never splits and the whole document becomes one block. `MarkdownSourceLineTable` counts UTF-16 newlines and does see the lines, so the block's source range covers only the first of them. Nothing normalizes line endings when a file is loaded.
-  - Failing tests: `ParagraphTests/windowsLineEndingsAreLineEndings`; the "Windows line endings" fragment in every `MarkdownFeatureOffsetMappingTests` case and in `WebKitTextNodeAlignmentTests/aSourceSelectionReachesThePageAndComesBackForEachFeature`.
 
 ### Lists: an item holds one line only.
   - A list item is its marker line and nothing else. A second line of the same item — indented, or not ("lazy continuation") — becomes a separate paragraph after the list, and an item cannot hold a second paragraph, a fenced block or a quote. Hard-wrapped lists are the common case.
@@ -246,8 +242,8 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Audit the test suites and cover every markdown feature.
   - Done 2026-07-19 for the renderer: `MarkdownCore/Tests/MarkdownCoreConformanceTests` covers the block and inline features against CommonMark 0.31.2 and runs headlessly via `swift test`. It exposed 44 failing cases when it landed; all were fixed.
   - Done 2026-10-04 for the rest of the test work. The suites are landed and the run is red: each failure is filed under "Bugs", and the suites go green as those are fixed.
-    - The conformance suite grew from 92 cases to 206, and 30 of them fail.
-    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 60 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. 79 cases fail across these.
+    - The conformance suite grew from 92 cases to 209, and 29 of them fail.
+    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 60 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. 74 cases fail across these.
     - The no-whitespace-between-tags check covers every block type, and passes.
     - Not covered, because there is nothing to assert yet: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.
   - Audit of the other suites, 2026-10-04: what the suites outside the renderer and the offset mappings cover, and what they do not. Done by reading the tests against the sources; nothing was run to produce it. "No test" means the name appears nowhere in either test directory, which was checked by search. Anything said about behavior is from reading the code and is marked so.
@@ -256,7 +252,7 @@ This document tracks planned work for MarkdownPreviewApp.
       - `DirectoryAccessStore` — the format-version discard, restoring and pruning bookmarks, granting. It takes a `UserDefaults`, so it can be tested the way `DocumentSessionStore` is.
       - `MarkdownFile` — the UTF-16 fallback and the undecodable-bytes error; only the UTF-8 path is reached, through other suites.
       - `MarkdownImageSchemeHandler` — the refuse / unreadable / not-an-image chain. `WKURLSchemeTask` is a protocol, so a stand-in works; the hard-wired `DirectoryAccessStore.shared` is what is in the way.
-      - `MarkdownSourceLineTable` and `MarkdownSelectionRange` — every offset in the app goes through them. Tests use them as helpers; none is about them.
+      - `MarkdownSelectionRange` — every offset in the app goes through it. Tests use it as a helper; none is about it. (`MarkdownSourceLineTable` was in the same state and got its own suite with the line-endings fix.)
       - `PreviewSelectionSynchronizer` and the none / missing / unreadable image decision, both in `MarkdownPreviewView.swift`.
     - Untested logic in files that do have tests:
       - `DocumentSessionStore`: `checkAllDocumentsForChanges`, `acknowledgeMissingActiveDocument`, `handleMissingDocument`, `hasPersistedDocumentList` (the gate for seeding the welcome document), and removal at compact width.

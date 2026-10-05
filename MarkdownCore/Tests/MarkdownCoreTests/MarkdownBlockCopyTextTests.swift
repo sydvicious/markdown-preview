@@ -110,6 +110,22 @@ struct MarkdownBlockCopyTextTests {
         )
     }
 
+    // MARK: - Windows line endings
+
+    @Test func aQuoteWithWindowsLineEndingsLosesItsMarkersOnEveryLine() {
+        #expect(
+            MarkdownBlockCopyText.copyText(fromBlockSource: "> first\r\n> second", kind: .blockquote)
+                == "first\nsecond"
+        )
+    }
+
+    @Test func aFencedBlockWithWindowsLineEndingsLosesItsFences() {
+        #expect(
+            MarkdownBlockCopyText.copyText(fromBlockSource: "```swift\r\nlet x = 1\r\nlet y = 2\r\n```", kind: .code)
+                == "let x = 1\nlet y = 2"
+        )
+    }
+
     // MARK: - Tables and unknown kinds
 
     /// A table's pipe syntax is the useful thing to paste elsewhere, so it is

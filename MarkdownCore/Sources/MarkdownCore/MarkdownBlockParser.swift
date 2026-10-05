@@ -69,7 +69,7 @@ private struct ParsedListItem {
 
 public struct MarkdownBlockParser {
     public static func parse(_ source: String) -> [MarkdownBlock] {
-        let lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let lines = source.markdownLines
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
         var paragraphStartLine: Int?

@@ -332,6 +332,14 @@ struct MarkdownHTMLBuilderTests {
         #expect(try blockSources(in: source) == ["# Héllo 😀", "wörld 👍🏽 text", "- naïve ✅"])
     }
 
+    @Test func sourceRangesInAFileWithWindowsLineEndings() throws {
+        // A block's range runs to the end of its last line's text; the line
+        // ending after it is not part of the block, whichever kind it is.
+        let source = "# Title\r\n\r\nFirst line\r\nsecond line\r\n\r\n- one\r\n- two\r\n"
+
+        #expect(try blockSources(in: source) == ["# Title", "First line\r\nsecond line", "- one\r\n- two"])
+    }
+
     @Test func blocksNestedInAQuoteAreNotWrappedOnTheirOwn() throws {
         // A nested block's line numbers are relative to the quote's stripped
         // content, so offsets written on it would point at the wrong text.

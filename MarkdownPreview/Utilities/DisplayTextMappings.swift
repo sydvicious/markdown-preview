@@ -25,7 +25,6 @@ final class MarkdownDisplayBuilder {
     let sourceText: String
     let nsSourceText: NSString
     let lineTable: MarkdownSourceLineTable
-    let lines: [String]
     let listItemSeparator: String
     let includesImageAltText: Bool
 
@@ -43,7 +42,6 @@ final class MarkdownDisplayBuilder {
         self.sourceText = sourceText
         nsSourceText = sourceText as NSString
         lineTable = MarkdownSourceLineTable(source: sourceText)
-        lines = sourceText.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         self.listItemSeparator = listItemSeparator
         self.includesImageAltText = includesImageAltText
     }

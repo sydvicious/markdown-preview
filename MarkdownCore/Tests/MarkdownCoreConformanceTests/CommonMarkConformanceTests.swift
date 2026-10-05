@@ -241,6 +241,37 @@ struct ParagraphTests {
         // together. A file saved with CRLF endings is the same document.
         #expect(allBlockHTML("# foo\r\n\r\nbar\r\nbaz\r\n") == ["<h1>foo</h1>", "<p>bar\nbaz</p>"])
     }
+
+    @Test func aCarriageReturnAloneIsALineEnding() async throws {
+        #expect(allBlockHTML("# foo\r\rbar\rbaz") == ["<h1>foo</h1>", "<p>bar\nbaz</p>"])
+    }
+
+    @Test func lineEndingsMayBeMixedInOneFile() async throws {
+        // Each line ends however it ends; nothing is decided for the file as a
+        // whole.
+        #expect(
+            allBlockHTML("# foo\r\n\nbar\rbaz\nqux\r\n\r- a\n- b\r\n")
+                == ["<h1>foo</h1>", "<p>bar\nbaz\nqux</p>", "<ul><li>a</li><li>b</li></ul>"]
+        )
+    }
+
+    @Test func windowsLineEndingsWorkInsideEveryKindOfBlock() async throws {
+        let source = [
+            "- a", "- b", "",
+            "> quoted", "> again", "",
+            "```", "let x = 1", "```", "",
+            "| h |", "| - |", "| 1 |", "",
+        ].joined(separator: "\r\n")
+
+        #expect(
+            allBlockHTML(source) == [
+                "<ul><li>a</li><li>b</li></ul>",
+                "<blockquote><p>quoted\nagain</p></blockquote>",
+                "<pre><code>let x = 1</code></pre>",
+                "<div class=\"table-wrap\"><table><thead><tr><th class=\"a-left\">h</th></tr></thead><tbody><tr><td class=\"a-left\">1</td></tr></tbody></table></div>",
+            ]
+        )
+    }
 }
 
 @Suite("Thematic breaks (spec 4.1)")

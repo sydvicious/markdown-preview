@@ -75,6 +75,7 @@ struct MarkdownSearchFeatureTests {
         .init("query of nothing but spaces", in: "Alpha beta", find: "  ", []),
         .init("every match, in order", in: "beta Alpha\n\n- alpha\n\n`ALPHA`", find: "alpha", ["Alpha", "alpha", "ALPHA"]),
         .init("text outside ASCII before the match", in: "😀 👍🏽 *Alpha*", find: "alpha", ["Alpha"]),
+        .init("after a Windows line ending", in: "Alpha\r\n\r\n- beta\r\n- gamma\r\n", find: "gamma", ["gamma"]),
 
         // Inline markup
         .init("emphasised text", in: "one *Alpha* two", find: "alpha", ["Alpha"]),
