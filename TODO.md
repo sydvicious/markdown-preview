@@ -38,11 +38,12 @@ This document tracks planned work for MarkdownPreviewApp.
     - iOS gets into the same state: checked 2026-10-04 with a temporary test Syd ran from Xcode on an iOS simulator. After the move the first entry stayed in the list, opening the file again added a second, and the first entry's saved bookmark resolved to the new path (and reported itself stale). So before the fix iOS would have crashed the same way; with the fix the restore came back with one entry.
     - Not checked in the signed, sandboxed Mac app. The macOS reproduction ran in the unsigned test host.
 
-### (iOS) `anEditedDocumentIsPutBackAtTheSameOffset` fails now and then in a full test run.
-  - Seen 2026-10-04: `WebKitTextNodeAlignmentTests/anEditedDocumentIsPutBackAtTheSameOffset()` failed once in a full run on the iPhone 17 simulator (iOS 27.0), at its last check — after the restore script the page was not at offset 900. Run on its own straight afterwards, it passed. It passes on the Mac in full runs.
-  - Suspected, not confirmed: the restore script ran before the reloaded page had been laid out to its full height, so the offset it asked for was cut short. That is more likely while the other WebKit tests are running alongside.
-  - The test now says where the page ended up and how far it could have scrolled. At the next failure, a maximum below 900 means the layout race; anything else means look again.
-  - If it is the race, the open question is whether the app can lose it too, since it restores as soon as the page finishes loading. Not looked into.
+### (iOS) A scroll restore could fall short of where the reader was. (fixed 2026-10-05; needs a full iOS run to confirm)
+  - First seen 2026-10-04 as `WebKitTextNodeAlignmentTests/anEditedDocumentIsPutBackAtTheSameOffset()` failing now and then in a full run on the iPhone 17 simulator (iOS 27.0), and passing on its own.
+  - Cause, confirmed by the failure of 2026-10-05: the page finishes loading before it has been laid out to its full height. That run failed in the test's own setup — a 121-paragraph page, told to scroll to 900 the moment it loaded, stayed at 0. The app asks for the reader's place back at that same moment (`restoreScrollPosition` in `MarkdownPreviewWebView.swift`), with one scroll, so it could land short in the same way. Seen only in a full iOS test run, with many web views loading at once; not seen in the app.
+  - Fixed in `MarkdownPreview/Web/scroll.js`: a restore that falls short is made again as the page grows, until it lands, the reader moves the page (wheel, touch, mouse or key), or two seconds pass. Nothing changed in Swift.
+  - Tests: six in `scroll.test.mjs`; in `WebKitTextNodeAlignmentTests`, `aRestoreMadeBeforeThePageIsTallEnoughLandsOnceItIs` and `aRestoreDoesNotOverrideTheReader`. The two older scroll tests there now use the app's own restore call and wait for the position to settle.
+  - Left: a full iOS run, which is where it failed and which only Syd can do. Remove this entry when that has passed a few times. Worth a look on a device too: reload a long document with images part way down, and see that the place is kept.
 
 ## Features
 

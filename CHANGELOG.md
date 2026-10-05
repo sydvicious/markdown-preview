@@ -5,6 +5,7 @@
 
 ## 0.10
 
+- Keeping the reader's place across a reload no longer depends on the page being fully laid out when it finishes loading. A restore that falls short because the page is not tall enough yet is made again as the page grows, until it lands, the reader scrolls, or two seconds pass. It could leave the reader higher up the page than they had been; seen so far only as a test failing now and then on iOS.
 - Indented code blocks: a line indented four spaces or a tab is code, as are the indented lines after it, with the blank lines between them. Indented under a paragraph it is still the paragraph's next line. The Copy button, find and selection treat it as they do fenced code.
 - A list marker indented four or more columns past where the item above starts its text is no longer a nested item; it is that item's next line, as CommonMark has it. Nesting goes one level at a time.
 - With this the conformance suite passes in full, for the first time: 285 cases.
