@@ -1,0 +1,14 @@
+{
+  "name": "markdown-preview-web-tests",
+  "private": true,
+  "description": "Tests for the preview's scripts in MarkdownPreview/Web. Tooling only; nothing here ships in the app.",
+  "author": "Syd Polk",
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"MarkdownCore/Tests/WebTests/*.test.mjs\""
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

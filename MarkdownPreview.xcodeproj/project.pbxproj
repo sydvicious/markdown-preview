@@ -52,9 +52,25 @@
 		62E0151A2FF1D23200E5ABB9 /* CHANGELOG.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CHANGELOG.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		62C74B2030734B9B00CA784C /* Exceptions for "MarkdownPreview" folder in "MarkdownPreview" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Web,
+			);
+			target = 62584AF02D45FB4E00831420 /* MarkdownPreview */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		62584AF32D45FB4E00831420 /* MarkdownPreview */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				62C74B2030734B9B00CA784C /* Exceptions for "MarkdownPreview" folder in "MarkdownPreview" target */,
+			);
+			explicitFolders = (
+				Web,
+			);
 			path = MarkdownPreview;
 			sourceTree = "<group>";
 		};

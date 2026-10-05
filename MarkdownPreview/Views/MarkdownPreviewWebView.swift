@@ -16,8 +16,8 @@ import AppKit
 private let copyBlockMessageHandlerName = "copyBlock"
 private let previewSelectionChangedMessageHandlerName = "previewSelectionChanged"
 private let previewScrollChangedMessageHandlerName = "previewScrollChanged"
-/// Internal, with the script that posts to it, so the tests can check the
-/// button really reaches the app.
+/// Internal so the tests can check the image-access button really reaches the
+/// app.
 let requestImageAccessMessageHandlerName = "requestImageAccess"
 
 #if os(iOS)
@@ -92,34 +92,15 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
             MarkdownImageSchemeHandler(),
             forURLScheme: MarkdownImageURL.scheme
         )
-        configuration.userContentController.addUserScript(
-            WKUserScript(
-                source: previewCopyButtonScript,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
+        for script in MarkdownWebResources.Script.allCases {
+            configuration.userContentController.addUserScript(
+                WKUserScript(
+                    source: MarkdownWebResources.script(script),
+                    injectionTime: .atDocumentEnd,
+                    forMainFrameOnly: true
+                )
             )
-        )
-        configuration.userContentController.addUserScript(
-            WKUserScript(
-                source: previewImageAccessButtonScript,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
-            )
-        )
-        configuration.userContentController.addUserScript(
-            WKUserScript(
-                source: previewScrollReportScript,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
-            )
-        )
-        configuration.userContentController.addUserScript(
-            WKUserScript(
-                source: previewSelectionChangeScript,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
-            )
-        )
+        }
         configuration.userContentController.add(context.coordinator, name: copyBlockMessageHandlerName)
         configuration.userContentController.add(context.coordinator, name: previewSelectionChangedMessageHandlerName)
         configuration.userContentController.add(context.coordinator, name: requestImageAccessMessageHandlerName)
@@ -266,34 +247,15 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             MarkdownImageSchemeHandler(),
             forURLScheme: MarkdownImageURL.scheme
         )
-        configuration.userContentController.addUserScript(
-            WKUserScript(
-                source: previewCopyButtonScript,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
+        for script in MarkdownWebResources.Script.allCases {
+            configuration.userContentController.addUserScript(
+                WKUserScript(
+                    source: MarkdownWebResources.script(script),
+                    injectionTime: .atDocumentEnd,
+                    forMainFrameOnly: true
+                )
             )
-        )
-        configuration.userContentController.addUserScript(
-            WKUserScript(
-                source: previewImageAccessButtonScript,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
-            )
-        )
-        configuration.userContentController.addUserScript(
-            WKUserScript(
-                source: previewScrollReportScript,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
-            )
-        )
-        configuration.userContentController.addUserScript(
-            WKUserScript(
-                source: previewSelectionChangeScript,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
-            )
-        )
+        }
         configuration.userContentController.add(context.coordinator, name: copyBlockMessageHandlerName)
         configuration.userContentController.add(context.coordinator, name: previewSelectionChangedMessageHandlerName)
         configuration.userContentController.add(context.coordinator, name: requestImageAccessMessageHandlerName)
@@ -369,350 +331,41 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 }
 #endif
 
-private let previewCopyButtonScript = """
-document.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-copy-button]');
-  if (!button) {
-    return;
-  }
+/// The calls the app makes into the preview's scripts.
+///
+/// The scripts themselves are files, in the `Web` folder beside `Views`, loaded
+/// through `MarkdownWebResources` and installed as user scripts. What is left in
+/// Swift is the calling of them: each of these invokes a function a script
+/// defined on `window.markdownPreview`, and comes back with nothing, rather than
+/// throwing, on a page whose scripts have not run yet.
+enum PreviewScriptCall {
+    /// The selection as text and display ranges, falling back to the last one
+    /// that was not empty.
+    static let selectionSnapshot = "window.markdownPreview?.selectionSnapshot?.() ?? null"
 
-  event.preventDefault();
-  event.stopPropagation();
+    /// The selection as ranges of each block's rendered text.
+    static let selectedDisplayRanges = "window.markdownPreview?.selectedDisplayRanges?.() ?? null"
 
-  const block = button.closest('[data-source-start][data-source-end]');
-  if (!block) {
-    return;
-  }
+    /// The selection as HTML, for rich-text copy.
+    static let selectedHTML = "window.markdownPreview?.selectedHTML?.() ?? null"
 
-  const start = Number(block.getAttribute('data-source-start'));
-  const end = Number(block.getAttribute('data-source-end'));
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-    return;
-  }
+    /// Where the reader is, as `PreviewScrollPosition` reads it.
+    static let scrollPosition = "window.markdownPreview?.scrollPosition?.() ?? null"
 
-  const kind = block.getAttribute('data-copy-kind');
-
-  window.getSelection()?.removeAllRanges();
-  window.webkit?.messageHandlers?.copyBlock?.postMessage({ start, end, kind });
-}, { capture: true });
-"""
-
-/// The button `MarkdownImageURL.replacingUnreadableImages` puts in place of an
-/// image the app is not allowed to read. Pressing it asks the app to ask the
-/// reader; the app decides what that means.
-let previewImageAccessButtonScript = """
-document.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-image-access-button]');
-  if (!button) {
-    return;
-  }
-
-  event.preventDefault();
-  event.stopPropagation();
-
-  window.webkit?.messageHandlers?.requestImageAccess?.postMessage({});
-}, { capture: true });
-"""
-
-/// Tells the app where the reader is, so a reload can put them back. Scrolling
-/// fires far more often than the answer is needed, so it is reported at most
-/// ten times a second.
-private let previewScrollReportScript = """
-(() => {
-  let pendingReport = null;
-
-  window.addEventListener('scroll', () => {
-    if (pendingReport !== null) {
-      return;
+    /// Selects the span between two positions, each a block's source offsets
+    /// and an offset into its rendered text. Six nulls clear the selection.
+    static func applySelection(_ arguments: String) -> String {
+        "window.markdownPreview?.applySelection?.(\(arguments))"
     }
 
-    pendingReport = setTimeout(() => {
-      pendingReport = null;
-      window.webkit?.messageHandlers?.previewScrollChanged?.postMessage(\(PreviewScrollRestoration.positionExpression));
-    }, 100);
-  }, { passive: true });
-})();
-"""
-
-private let previewSelectedHTMLScript = """
-(() => {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) {
-    return null;
-  }
-
-  // The preview's own buttons would come along with the text, so drop them.
-  const container = document.createElement('div');
-  for (let index = 0; index < selection.rangeCount; index += 1) {
-    container.appendChild(selection.getRangeAt(index).cloneContents());
-  }
-  container.querySelectorAll('[data-copy-button], [data-image-access-button]').forEach((button) => button.remove());
-
-  const html = container.innerHTML;
-  return html && html.trim().length > 0 ? html : null;
-})();
-"""
-
-/// Installed as a user script; also loaded directly by
-/// `WebKitTextNodeAlignmentTests`, which checks WebKit's own text nodes against
-/// the source-side offset mapping — hence internal rather than private.
-let previewSelectionChangeScript = """
-(() => {
-  let pendingSelectionUpdate = null;
-  let lastNonEmptySelectionSnapshot = null;
-
-  window.markdownPreview = window.markdownPreview ?? {};
-
-  window.markdownPreview.acceptedTextNodesInBlock = (block) => {
-    const walker = document.createTreeWalker(
-      block,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode(node) {
-          if (!node.textContent || node.textContent.length === 0) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          const parentElement = node.parentElement;
-          if (parentElement && parentElement.closest('[data-copy-button]')) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          if (
-            /^[\\s\\n\\r\\t]+$/.test(node.textContent) &&
-            !(parentElement && parentElement.closest('pre, code'))
-          ) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          return NodeFilter.FILTER_ACCEPT;
-        }
-      }
-    );
-
-    const textNodes = [];
-    let displayOffset = 0;
-    let currentNode;
-    while ((currentNode = walker.nextNode())) {
-      const text = currentNode.textContent ?? '';
-      textNodes.push({
-        node: currentNode,
-        start: displayOffset,
-        end: displayOffset + text.length
-      });
-      displayOffset += text.length;
-    }
-    return textNodes;
-  };
-
-  const selectedSpanInTextNode = (selectionRange, textNode) => {
-    if (!selectionRange.intersectsNode(textNode)) {
-      return null;
+    static func scrollToOffset(x: Double, y: Double) -> String {
+        "window.markdownPreview?.scrollToOffset?.(\(x), \(y));"
     }
 
-    const nodeRange = document.createRange();
-    nodeRange.selectNodeContents(textNode);
-    const textLength = textNode.textContent?.length ?? 0;
-
-    let start = 0;
-    if (selectionRange.startContainer === textNode) {
-      start = selectionRange.startOffset;
-    } else if (selectionRange.compareBoundaryPoints(Range.START_TO_START, nodeRange) > 0) {
-      const beforeSelectionStart = document.createRange();
-      beforeSelectionStart.setStart(textNode, 0);
-      beforeSelectionStart.setEnd(selectionRange.startContainer, selectionRange.startOffset);
-      start = beforeSelectionStart.toString().length;
+    static func scrollToFraction(x: Double, ofMaxY fraction: Double) -> String {
+        "window.markdownPreview?.scrollToFraction?.(\(x), \(fraction));"
     }
-
-    let end = textLength;
-    if (selectionRange.endContainer === textNode) {
-      end = selectionRange.endOffset;
-    } else if (selectionRange.compareBoundaryPoints(Range.END_TO_END, nodeRange) < 0) {
-      const beforeSelectionEnd = document.createRange();
-      beforeSelectionEnd.setStart(textNode, 0);
-      beforeSelectionEnd.setEnd(selectionRange.endContainer, selectionRange.endOffset);
-      end = beforeSelectionEnd.toString().length;
-    }
-
-    start = Math.max(0, Math.min(start, textLength));
-    end = Math.max(0, Math.min(end, textLength));
-    return end > start ? { start, end } : null;
-  };
-
-  const selectedDisplayRanges = () => {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-      return [];
-    }
-
-    const selectedRanges = [];
-    const blocks = Array.from(document.querySelectorAll('[data-source-start][data-source-end]'));
-    for (const block of blocks) {
-      const blockStart = Number(block.getAttribute('data-source-start'));
-      const blockEnd = Number(block.getAttribute('data-source-end'));
-      if (!Number.isFinite(blockStart) || !Number.isFinite(blockEnd) || blockEnd <= blockStart) {
-        continue;
-      }
-
-      const textNodes = window.markdownPreview.acceptedTextNodesInBlock(block);
-      for (let rangeIndex = 0; rangeIndex < selection.rangeCount; rangeIndex += 1) {
-        const selectionRange = selection.getRangeAt(rangeIndex);
-        let displayStart = null;
-        let displayEnd = null;
-
-        for (const entry of textNodes) {
-          const selectedSpan = selectedSpanInTextNode(selectionRange, entry.node);
-          if (!selectedSpan) {
-            continue;
-          }
-
-          const spanStart = entry.start + selectedSpan.start;
-          const spanEnd = entry.start + selectedSpan.end;
-          displayStart = displayStart === null ? spanStart : Math.min(displayStart, spanStart);
-          displayEnd = displayEnd === null ? spanEnd : Math.max(displayEnd, spanEnd);
-        }
-
-        if (displayStart !== null && displayEnd !== null && displayEnd > displayStart) {
-          selectedRanges.push({
-            blockStart,
-            blockEnd,
-            displayLocation: displayStart,
-            displayLength: displayEnd - displayStart
-          });
-        }
-      }
-    }
-
-    return selectedRanges;
-  };
-
-  const selectedText = () => {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-      return null;
-    }
-
-    const text = selection.toString().replace(/\\s+/g, ' ').trim();
-    return text.length > 0 ? text : null;
-  };
-
-  const currentSelectionSnapshot = () => {
-    return {
-      text: selectedText(),
-      ranges: selectedDisplayRanges()
-    };
-  };
-
-  const rememberSelection = () => {
-    const snapshot = currentSelectionSnapshot();
-    if (snapshot.ranges.length > 0) {
-      lastNonEmptySelectionSnapshot = snapshot;
-    }
-    return snapshot;
-  };
-
-  const publishSelection = () => {
-    const snapshot = rememberSelection();
-    window.webkit?.messageHandlers?.previewSelectionChanged?.postMessage(snapshot);
-  };
-
-  window.markdownPreview.selectedDisplayRanges = selectedDisplayRanges;
-  window.markdownPreview.selectionSnapshot = () => {
-    const snapshot = currentSelectionSnapshot();
-    return snapshot.ranges.length > 0 ? snapshot : lastNonEmptySelectionSnapshot;
-  };
-
-  const scheduleSelectionPublish = () => {
-    rememberSelection();
-
-    if (pendingSelectionUpdate !== null) {
-      clearTimeout(pendingSelectionUpdate);
-    }
-
-    pendingSelectionUpdate = setTimeout(() => {
-      pendingSelectionUpdate = null;
-      publishSelection();
-    }, 0);
-  };
-
-  document.addEventListener('selectionchange', scheduleSelectionPublish);
-  document.addEventListener('touchend', scheduleSelectionPublish, { passive: true });
-  document.addEventListener('pointerup', scheduleSelectionPublish, { passive: true });
-  document.addEventListener('keyup', scheduleSelectionPublish);
-})();
-"""
-
-private let previewSelectionSnapshotScript = """
-(() => {
-  return window.markdownPreview?.selectionSnapshot?.() ?? null;
-})()
-"""
-
-private let previewSelectedDisplayRangesScript = """
-(() => {
-  return window.markdownPreview?.selectedDisplayRanges?.() ?? null;
-})()
-"""
-
-private let previewSelectionScript = """
-((startBlockStart, startBlockEnd, startOffset, endBlockStart, endBlockEnd, endOffset) => {
-  const selection = window.getSelection();
-  if (selection) {
-    selection.removeAllRanges();
-  }
-
-  const args = [startBlockStart, startBlockEnd, startOffset, endBlockStart, endBlockEnd, endOffset];
-  if (!args.every((value) => Number.isFinite(value))) {
-    return false;
-  }
-
-  // Finds the text node and offset within it for a position in one block's
-  // rendered text. `isEnd` decides which side a boundary between two nodes
-  // belongs to, so a range ending exactly where a node ends stays inside it.
-  const locate = (blockStart, blockEnd, offset, isEnd) => {
-    const block = document.querySelector(
-      `[data-source-start="${blockStart}"][data-source-end="${blockEnd}"]`
-    );
-    if (!block) {
-      return null;
-    }
-
-    const textNodes = window.markdownPreview?.acceptedTextNodesInBlock?.(block) ?? [];
-    const combinedTextLength = textNodes.reduce((length, entry) => Math.max(length, entry.end), 0);
-    if (combinedTextLength === 0 || offset < 0 || offset > combinedTextLength) {
-      return null;
-    }
-
-    const entry = isEnd
-      ? textNodes.find((candidate) => offset > candidate.start && offset <= candidate.end)
-      : textNodes.find((candidate) => offset >= candidate.start && offset < candidate.end);
-    if (!entry) {
-      return null;
-    }
-
-    return { node: entry.node, offset: offset - entry.start };
-  };
-
-  const start = locate(startBlockStart, startBlockEnd, startOffset, false);
-  const end = locate(endBlockStart, endBlockEnd, endOffset, true);
-  if (!start || !end) {
-    return false;
-  }
-
-  const range = document.createRange();
-  range.setStart(start.node, start.offset);
-  range.setEnd(end.node, end.offset);
-  if (range.collapsed) {
-    return false;
-  }
-  selection?.addRange(range);
-
-  const boundingRect = range.getBoundingClientRect();
-  if (boundingRect) {
-    const top = boundingRect.top + window.scrollY - (window.innerHeight / 2) + (boundingRect.height / 2);
-    window.scrollTo({ top: Math.max(top, 0), behavior: 'auto' });
-  }
-
-  return true;
-})(
-"""
+}
 
 struct PreviewDisplaySelectionRange: Equatable {
     var blockStart: Int
@@ -810,18 +463,12 @@ enum PreviewScrollRestoration {
             case .top:
                 return nil
             case let .offset(x, y):
-                return "window.scrollTo(\(x), \(y));"
+                return PreviewScriptCall.scrollToOffset(x: x, y: y)
             case let .fraction(x, fraction):
-                return "window.scrollTo(\(x), \(fraction) * \(PreviewScrollRestoration.maxYExpression));"
+                return PreviewScriptCall.scrollToFraction(x: x, ofMaxY: fraction)
             }
         }
     }
-
-    /// How far down the page can scroll, as the page computes it.
-    static let maxYExpression = "Math.max(0, document.documentElement.scrollHeight - window.innerHeight)"
-
-    /// What the page posts, and what `PreviewScrollPosition` reads.
-    static let positionExpression = "[window.scrollX, window.scrollY, \(maxYExpression)]"
 
     /// Where to put the reader once `current` has replaced `previous`, given
     /// where they were.
@@ -1092,7 +739,7 @@ private extension MarkdownCopyWebView {
     func copySelectionToPasteboard(fallback: @escaping () -> Void) {
         let source = markdownSource
         let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "PrevCopy")
-        evaluateJavaScript(previewSelectedDisplayRangesScript) { [weak self] result, _ in
+        evaluateJavaScript(PreviewScriptCall.selectedDisplayRanges) { [weak self] result, _ in
             guard let self else {
                 fallback()
                 return
@@ -1108,7 +755,7 @@ private extension MarkdownCopyWebView {
                 return
             }
 
-            self.evaluateJavaScript(previewSelectedHTMLScript) { htmlResult, _ in
+            self.evaluateJavaScript(PreviewScriptCall.selectedHTML) { htmlResult, _ in
                 let selectionHTML = htmlResult as? String
                 // Plain text is the raw markdown under the selection; rich text
                 // is the rendered HTML the user can see.
@@ -1129,7 +776,7 @@ private extension MarkdownCopyWebView {
 
     func readSelectionSnapshot(completion: @escaping (_ selectedText: String?, _ ranges: [MarkdownSelectionRange]) -> Void) {
         let source = markdownSource
-        evaluateJavaScript(previewSelectionSnapshotScript) { result, _ in
+        evaluateJavaScript(PreviewScriptCall.selectionSnapshot) { result, _ in
             let payload = PreviewSelectionChangedMessage(messageBody: result as Any)
             let selectionRanges = PreviewSelectionBridge.contiguousSelectionRanges(
                 fromDisplayRangeResult: payload.displayRangeResult,
@@ -1153,7 +800,7 @@ private extension MarkdownCopyWebView {
                     "PREVSEL reflection FAILED for \(String(describing: selectedRange), privacy: .public)"
                 )
             }
-            return previewSelectionScript + "null, null, null, null, null, null)"
+            return PreviewScriptCall.applySelection("null, null, null, null, null, null")
         }
 
         let start = reflectedSelection.start
@@ -1162,9 +809,10 @@ private extension MarkdownCopyWebView {
             "PREVSEL reflection ok start=\(start.blockStart, privacy: .public)-\(start.blockEnd, privacy: .public)+\(start.displayOffset, privacy: .public) end=\(end.blockStart, privacy: .public)-\(end.blockEnd, privacy: .public)+\(end.displayOffset, privacy: .public)"
         )
 
-        return previewSelectionScript +
+        return PreviewScriptCall.applySelection(
             "\(start.blockStart), \(start.blockEnd), \(start.displayOffset), " +
-            "\(end.blockStart), \(end.blockEnd), \(end.displayOffset))"
+            "\(end.blockStart), \(end.blockEnd), \(end.displayOffset)"
+        )
     }
 }
 

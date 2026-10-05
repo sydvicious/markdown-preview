@@ -150,12 +150,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ## Tech Debt
 
-### Move all JavaScript and TypeScript in the project into their own files.
-  - The preview's scripts are Swift string literals today — six of them in `MarkdownPreview/Views/MarkdownPreviewWebView.swift` (copy button, selection change, selected HTML, selection snapshot, selected display ranges, apply selection), plus the stylesheet and page scaffolding in `MarkdownCore`'s `MarkdownHTMLBuilder`. Inside a `"""` literal there is no syntax highlighting, no linting, no formatter, and every backslash and interpolation is a hazard.
-  - Moving them to real `.js` files loaded from the bundle would give them tooling and make diffs readable.
-  - The bigger reason is testability: real files can be **tested in JavaScript**, with a JS test runner and a DOM, rather than only through Swift. Today the only way to exercise this code is to drive a `WKWebView` from a Swift test (`MarkdownPreviewTests/Views/WebKitTextNodeAlignmentTests.swift`), which is slow, needs the app test host, and can only check what the whole page does end to end. Unit tests in JS could cover the walkers and range logic directly — the text-node walker, the cross-block selection builder, the display-range reader — including the edge cases that are painful to reach through a rendered document.
-  - Two things to work out before starting: how a bundled script is read at runtime under the sandbox on both platforms, and whether anything still needs Swift-side interpolation (the apply-selection script is currently built by appending arguments to the literal, which would become a call with parameters instead).
-
 ### Rename and simplify `ContentView.swift`.
   - Consider renaming `ContentView.swift` to a clearer top-level container name.
   - Consider combining this cleanup with YMMV-related work.

@@ -15,6 +15,9 @@ DerivedData/
 Packages/
 Package.resolved
 
+# Node, for the preview scripts' tests (npm install, npm test)
+node_modules/
+
 # Fastlane
 fastlane/report.xml
 fastlane/Preview.html

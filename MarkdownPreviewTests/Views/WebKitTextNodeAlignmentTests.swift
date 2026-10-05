@@ -92,7 +92,7 @@ struct WebKitTextNodeAlignmentTests {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.addUserScript(
             WKUserScript(
-                source: previewSelectionChangeScript,
+                source: MarkdownWebResources.script(.selection),
                 injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
             )
@@ -309,7 +309,7 @@ struct WebKitTextNodeAlignmentTests {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.addUserScript(
             WKUserScript(
-                source: previewImageAccessButtonScript,
+                source: MarkdownWebResources.script(.imageAccessButton),
                 injectionTime: .atDocumentEnd,
                 forMainFrameOnly: true
             )
@@ -351,9 +351,17 @@ struct WebKitTextNodeAlignmentTests {
     }
 
     private func makeWebView() -> (WKWebView, LoadObserver) {
+        let configuration = WKWebViewConfiguration()
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: MarkdownWebResources.script(.scroll),
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+        )
         let webView = WKWebView(
             frame: CGRect(x: 0, y: 0, width: 800, height: 600),
-            configuration: WKWebViewConfiguration()
+            configuration: configuration
         )
         let observer = LoadObserver()
         webView.navigationDelegate = observer
@@ -361,7 +369,7 @@ struct WebKitTextNodeAlignmentTests {
     }
 
     private func scrollPosition(in webView: WKWebView) async throws -> PreviewScrollPosition {
-        let reported = try await webView.evaluateJavaScript(PreviewScrollRestoration.positionExpression)
+        let reported = try await webView.evaluateJavaScript(PreviewScriptCall.scrollPosition)
         return try #require(PreviewScrollPosition(messageBody: reported as Any))
     }
 
@@ -405,9 +413,7 @@ struct WebKitTextNodeAlignmentTests {
             baseURL: nil
         )
         try await observer.wait()
-        _ = try await webView.evaluateJavaScript(
-            "window.scrollTo(0, 0.5 * \(PreviewScrollRestoration.maxYExpression)); true"
-        )
+        _ = try await webView.evaluateJavaScript(PreviewScriptCall.scrollToFraction(x: 0, ofMaxY: 0.5) + " true")
         let position = try await scrollPosition(in: webView)
         try #require(position.maxY > 0, "the page should be long enough to scroll")
 

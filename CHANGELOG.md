@@ -5,6 +5,7 @@
 
 ## 0.10
 
+- The preview's page template, stylesheet and scripts are now files, in `MarkdownPreview/Web`, where they were string literals in Swift. The pages they produce are unchanged. The scripts have their own tests, written in JavaScript: `npm install` once, then `npm test`.
 - (iOS/iPadOS) A document whose security scope the system refuses is asked for it once per launch, not on every polling tick. The repeated request logged `sandbox_extension_consume failed: 22 (Invalid argument)` to the console once a second.
 - An image the app is not permitted to read is replaced in the preview by an Allow… button that opens the folder picker, in place of a broken image. The bar above the preview that offers the same thing was easy to miss. An image that is simply missing still shows as broken.
 - The preview keeps its scroll position when the document on screen is redrawn: when the file is edited on disk, the text size changes, or a folder is granted for its images. It used to jump back to the top each time.

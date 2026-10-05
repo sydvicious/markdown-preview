@@ -26,7 +26,14 @@ let package = Package(
         .library(name: "MarkdownCore", targets: ["MarkdownCore"])
     ],
     targets: [
-        .target(name: "MarkdownCore"),
+        .target(
+            name: "MarkdownCore",
+            // The preview's page template, stylesheet and scripts, copied as
+            // the folder they are so nothing in it is renamed or flattened.
+            // `Web` here is a link to `MarkdownPreview/Web`, where the files
+            // live; the build copies what it points at, not the link.
+            resources: [.copy("Web")]
+        ),
         // Split in two so each can be run on its own from a test plan:
         // MarkdownCoreTests is expected to pass, while the conformance suite is
         // expected to fail until the renderer catches up with the spec.

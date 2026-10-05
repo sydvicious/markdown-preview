@@ -70,6 +70,10 @@ This app is designed to feel like a lightweight Preview-style reader for `.md` f
 - `MarkdownPreview/MarkdownPreviewApp.swift`: app entry, scene setup, `onOpenURL`
 - `MarkdownPreview/Views/`: SwiftUI views — `ContentView.swift` (navigation and file list), `MarkdownPreviewView.swift` and `MarkdownPreviewWebView.swift` (rendered preview), `MarkdownSourceView.swift` (raw source)
 - `MarkdownPreview/View Models/`: `ContentViewModel.swift` and `SearchViewModel.swift`
+- `MarkdownPreview/Web/`: the preview's page template (`document.html`), stylesheet
+  (`preview.css`) and scripts (`*.js`), as real files rather than Swift string literals. The
+  folder is kept out of the app target: `MarkdownCore` bundles it, through a link, so that the
+  engine can build a complete page on its own.
 - `MarkdownPreview/Utilities/`: app-level supporting types
   - `DisplayTextMappings.swift`, `MarkdownPreviewTextOffsetMapping.swift`: map between source text, displayed text, and rendered HTML
   - `MarkdownFile.swift`: file loading and supported content types
@@ -81,7 +85,10 @@ This app is designed to feel like a lightweight Preview-style reader for `.md` f
   - `Sources/MarkdownCore/MarkdownHTMLBuilder.swift`: renders those blocks as an HTML document
   - `Sources/MarkdownCore/MarkdownSourceLineTable.swift`, `MarkdownSelectionRange.swift`: source
     offset bookkeeping the preview's selection mapping depends on
+  - `Sources/MarkdownCore/Web`: a link to `MarkdownPreview/Web`, below, which is how the package
+    takes those files into its resource bundle. They are read through `MarkdownWebResources.swift`.
   - `Tests/MarkdownCoreTests/`: the engine's tests
+  - `Tests/WebTests/`: tests for the preview's scripts, written in JavaScript
 
 ## Build and Run
 
@@ -132,7 +139,7 @@ After this, double-clicking `.md` files should open them in this app.
 
 ## Tests
 
-There are two test suites:
+There are three test suites:
 
 - `MarkdownCoreTests`: tests for the markdown engine, including per-feature conformance tests
   written against [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/). These run from the
@@ -151,6 +158,21 @@ swift test --package-path MarkdownCore
 
 ```bash
 xcodebuild test -project MarkdownPreview.xcodeproj -scheme MarkdownPreview -destination 'platform=macOS'
+```
+
+- `MarkdownCore/Tests/WebTests`: tests for the preview's scripts in `MarkdownPreview/Web`,
+  written in JavaScript and run under [Node](https://nodejs.org) against a DOM
+  ([jsdom](https://github.com/jsdom/jsdom)). They load the same files the app ships. Node is
+  needed only for this suite, never to build or run the app. Once, to fetch jsdom:
+
+```bash
+npm install
+```
+
+  Then, from the repository root:
+
+```bash
+npm test
 ```
 
 
