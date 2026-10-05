@@ -262,12 +262,16 @@ private struct Builder {
             codeLines = codeLines.dropLast()
         }
 
+        // The indentation a line shares with the fence is not code, so it is
+        // part of what lies between one line of code and the next.
+        let fenceIndent = MarkdownBlockParser.fenceIndent(of: opening)
         var previousEnd: Int?
         for line in codeLines {
+            let code = MarkdownBlockParser.codeLineContent(in: line, fenceIndent: fenceIndent)
             if let previousEnd {
-                append("\n", from: previousEnd..<offset(of: line.startIndex))
+                append("\n", from: previousEnd..<offset(of: code.startIndex))
             }
-            append(String(line), from: offset(of: line.startIndex)..<offset(of: line.endIndex))
+            append(String(code), from: offset(of: code.startIndex)..<offset(of: code.endIndex))
             previousEnd = offset(of: line.endIndex)
         }
     }

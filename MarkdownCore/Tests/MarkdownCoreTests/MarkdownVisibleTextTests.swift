@@ -57,6 +57,13 @@ struct MarkdownVisibleTextTests {
         #expect(pieces(of: "x `` a`b `` y") == [["x ", "x "], ["a`b", "a`b"], [" y", " y"]])
     }
 
+    @Test func aLineEndingInACodeSpanIsShownAsASpace() {
+        #expect(
+            pieces(of: "a `b\n   c` d")
+                == [["a ", "a "], ["b", "b"], ["\n   ", " "], ["c", "c"], [" d", " d"]]
+        )
+    }
+
     @Test func aLinkIsShownAsItsText() {
         #expect(pieces(of: "[*Alpha* b](https://example.com \"t\") c") == [["Alpha", "Alpha"], [" b", " b"], [" c", " c"]])
     }
@@ -127,6 +134,13 @@ struct MarkdownVisibleTextTests {
     @Test func aCodeBlockIsItsLinesWithoutItsFences() {
         #expect(text(of: "```swift\nlet a = 1\n\n  let b = 2\n```") == "let a = 1\n\n  let b = 2")
         #expect(text(of: "~~~\nlet a = 1\n~~~") == "let a = 1")
+    }
+
+    @Test func aCodeBlockLosesTheIndentationItSharesWithItsFence() {
+        #expect(
+            pieces(of: "  ```\n  let a = 1\n    let b = 2\n ragged\n  ```")
+                == [["let a = 1", "let a = 1"], ["\n  ", "\n"], ["  let b = 2", "  let b = 2"], ["\n ", "\n"], ["ragged", "ragged"]]
+        )
     }
 
     @Test func aCodeBlockWithNoClosingFenceKeepsItsLastLine() {

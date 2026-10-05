@@ -130,14 +130,20 @@ public enum MarkdownHTMLBuilder {
         softBreak: SoftBreak
     ) -> String {
         var index = 0
-        return renderListLevel(
-            items,
-            index: &index,
-            depth: 0,
-            ordered: ordered,
-            isLoose: isLoose,
-            softBreak: softBreak
-        )
+        var lists = ""
+        // One list, unless the top-level items change marker part way, which the
+        // parser does not hand over in a single block.
+        while index < items.count {
+            lists += renderListLevel(
+                items,
+                index: &index,
+                depth: 0,
+                ordered: index == 0 ? ordered : items[index].isOrdered,
+                isLoose: isLoose,
+                softBreak: softBreak
+            )
+        }
+        return lists
     }
 
     /// Emits one nesting level, recursing into deeper items so they land inside
@@ -156,16 +162,24 @@ public enum MarkdownHTMLBuilder {
         softBreak: SoftBreak
     ) -> String {
         let tag = ordered ? "ol" : "ul"
+        let marker = index < items.count ? items[index].marker : nil
         var rows = ""
 
         while index < items.count, items[index].indent >= depth {
+            // An item beside these with a different marker starts a list of its
+            // own, which the caller picks up.
+            if !rows.isEmpty, items[index].indent == depth, items[index].marker != marker {
+                break
+            }
+
             let item = items[index]
             index += 1
 
-            // Anything deeper that follows belongs inside this item.
+            // Anything deeper that follows belongs inside this item, as one
+            // list or as several.
             var nested = ""
-            if index < items.count, items[index].indent > depth {
-                nested = renderListLevel(
+            while index < items.count, items[index].indent > depth {
+                nested += renderListLevel(
                     items,
                     index: &index,
                     depth: items[index].indent,
@@ -256,8 +270,16 @@ public enum MarkdownHTMLBuilder {
     /// role is not yet decided.
     private enum InlineToken {
         case content(html: String, runs: [MarkdownInlineRun])
-        /// `count` delimiters not yet paired, the first of them at `start`.
-        case delimiter(character: Character, count: Int, start: String.Index, canOpen: Bool, canClose: Bool)
+        /// `count` delimiters not yet paired, the first of them at `start`, out
+        /// of a run that was `original` long.
+        case delimiter(
+            character: Character,
+            count: Int,
+            original: Int,
+            start: String.Index,
+            canOpen: Bool,
+            canClose: Bool
+        )
     }
 
     private static func renderInline(_ text: Substring, softBreak: SoftBreak = .newline) -> InlineRendering {
@@ -406,7 +428,7 @@ public enum MarkdownHTMLBuilder {
             }
 
             if let code = parseCodeSpan(in: text, from: index) {
-                appendShown(code.html, from: code.content.lowerBound, to: code.content.upperBound)
+                appendRendered((code.html, code.runs))
                 index = code.endIndex
                 continue
             }
@@ -430,6 +452,7 @@ public enum MarkdownHTMLBuilder {
                     .delimiter(
                         character: character,
                         count: count,
+                        original: count,
                         start: index,
                         canOpen: flanking.canOpen,
                         canClose: flanking.canClose
@@ -502,7 +525,8 @@ public enum MarkdownHTMLBuilder {
         var index = 0
 
         while index < tokens.count {
-            guard case let .delimiter(character, closeCount, closeStart, _, canClose) = tokens[index],
+            guard case let .delimiter(character, closeCount, closeOriginal, closeStart, closeCanOpen, canClose)
+                    = tokens[index],
                   canClose, closeCount > 0 else {
                 index += 1
                 continue
@@ -511,16 +535,25 @@ public enum MarkdownHTMLBuilder {
             var openerIndex: Int?
             var search = index - 1
             while search >= 0 {
-                if case let .delimiter(openCharacter, openCount, _, canOpen, _) = tokens[search],
+                if case let .delimiter(openCharacter, openCount, openOriginal, _, canOpen, openCanClose) = tokens[search],
                    openCharacter == character, canOpen, openCount > 0 {
-                    openerIndex = search
-                    break
+                    // The "multiple of three" rule: when either run could have
+                    // gone both ways, the two may not pair if their lengths add
+                    // up to a multiple of three, unless each is one itself. It
+                    // is what makes `*foo**bar**baz*` emphasis around strong.
+                    let isRuledOut = (closeCanOpen || openCanClose)
+                        && closeOriginal % 3 != 0
+                        && (openOriginal + closeOriginal) % 3 == 0
+                    if !isRuledOut {
+                        openerIndex = search
+                        break
+                    }
                 }
                 search -= 1
             }
 
             guard let opener = openerIndex,
-                  case let .delimiter(_, openCount, openStart, canOpen, openCanClose) = tokens[opener] else {
+                  case let .delimiter(_, openCount, openOriginal, openStart, canOpen, openCanClose) = tokens[opener] else {
                 index += 1
                 continue
             }
@@ -539,6 +572,7 @@ public enum MarkdownHTMLBuilder {
             tokens[closerIndex] = .delimiter(
                 character: character,
                 count: closeCount - use,
+                original: closeOriginal,
                 start: text.index(closeStart, offsetBy: use),
                 canOpen: false,
                 canClose: canClose
@@ -546,16 +580,17 @@ public enum MarkdownHTMLBuilder {
             tokens[opener] = .delimiter(
                 character: character,
                 count: openCount - use,
+                original: openOriginal,
                 start: openStart,
                 canOpen: canOpen,
                 canClose: openCanClose
             )
 
-            if case let .delimiter(_, count, _, _, _) = tokens[closerIndex], count == 0 {
+            if case let .delimiter(_, count, _, _, _, _) = tokens[closerIndex], count == 0 {
                 tokens.remove(at: closerIndex)
                 closerIndex -= 1
             }
-            if case let .delimiter(_, count, _, _, _) = tokens[opener], count == 0 {
+            if case let .delimiter(_, count, _, _, _, _) = tokens[opener], count == 0 {
                 tokens.remove(at: opener)
                 closerIndex -= 1
             }
@@ -578,7 +613,7 @@ public enum MarkdownHTMLBuilder {
                 for run in tokenRuns {
                     append(run, to: &runs)
                 }
-            case let .delimiter(character, count, start, _, _):
+            case let .delimiter(character, count, _, start, _, _):
                 guard count > 0 else { continue }
                 html += String(repeating: character, count: count)
                 append(MarkdownInlineRun(source: start..<text.index(start, offsetBy: count)), to: &runs)
@@ -597,7 +632,7 @@ public enum MarkdownHTMLBuilder {
     private static func parseCodeSpan(
         in text: Substring,
         from start: String.Index
-    ) -> (html: String, content: Range<String.Index>, endIndex: String.Index)? {
+    ) -> (html: String, runs: [MarkdownInlineRun], endIndex: String.Index)? {
         guard text[start] == "`" else { return nil }
 
         var openEnd = start
@@ -616,18 +651,32 @@ public enum MarkdownHTMLBuilder {
             }
 
             if text.distance(from: candidate, to: closeEnd) == openLength {
+                // A line ending inside a code span is shown as a space, and
+                // counts as one when the padding is stripped.
+                func showsAsSpace(_ character: Character) -> Bool {
+                    character == " " || character == "\n"
+                }
+
                 var content = text[openEnd..<candidate]
                 if content.count >= 2,
-                   content.first == " ",
-                   content.last == " ",
-                   content.contains(where: { $0 != " " }) {
+                   let first = content.first, showsAsSpace(first),
+                   let last = content.last, showsAsSpace(last),
+                   content.contains(where: { !showsAsSpace($0) }) {
                     content = content.dropFirst().dropLast()
                 }
-                return (
-                    "<code>\(escapeHTML(String(content)))</code>",
-                    content.startIndex..<content.endIndex,
-                    closeEnd
-                )
+
+                var runs: [MarkdownInlineRun] = []
+                var shownStart = content.startIndex
+                for index in content.indices where content[index] == "\n" {
+                    let afterLineEnding = content.index(after: index)
+                    append(MarkdownInlineRun(source: shownStart..<index), to: &runs)
+                    append(MarkdownInlineRun(source: index..<afterLineEnding, replacement: " "), to: &runs)
+                    shownStart = afterLineEnding
+                }
+                append(MarkdownInlineRun(source: shownStart..<content.endIndex), to: &runs)
+
+                let shown = String(content).replacingOccurrences(of: "\n", with: " ")
+                return ("<code>\(escapeHTML(shown))</code>", runs, closeEnd)
             }
 
             search = closeEnd

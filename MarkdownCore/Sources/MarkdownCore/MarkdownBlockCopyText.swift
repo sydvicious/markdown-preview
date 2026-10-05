@@ -83,13 +83,16 @@ public enum MarkdownBlockCopyText {
         var lines = source.markdownLines
 
         if let first = lines.first, fenceMarker(of: first) != nil {
+            // What is copied is the code as the preview shows it, without the
+            // indentation it shares with its fence.
+            let fenceIndent = MarkdownBlockParser.fenceIndent(of: first[...])
             lines.removeFirst()
             // A fenced block at the end of a document may be unterminated, so a
             // closing fence is stripped only if one is actually there.
             if let last = lines.last, fenceMarker(of: last) != nil {
                 lines.removeLast()
             }
-            return joined(lines)
+            return joined(lines.map { String(MarkdownBlockParser.codeLineContent(in: $0[...], fenceIndent: fenceIndent)) })
         }
 
         let indentedLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }

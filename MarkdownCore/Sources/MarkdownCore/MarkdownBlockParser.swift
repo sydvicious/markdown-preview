@@ -50,6 +50,10 @@ public struct MarkdownListItem: Identifiable {
     public let checkbox: Bool?
     public let order: Int?
     public let isOrdered: Bool
+    /// What marks the item: its bullet character, or for a numbered item the
+    /// delimiter after the number. Items side by side with different markers
+    /// are in different lists.
+    public let marker: Character
 }
 
 /// A list item as it appears on one source line, before its nesting depth is
@@ -62,6 +66,10 @@ private struct ParsedListItem {
     let checkbox: Bool?
     let order: Int?
     let isOrdered: Bool
+    /// The bullet character, or the delimiter after a number.
+    let marker: Character
+    /// An item with nothing after its marker.
+    var isEmpty: Bool { content.isEmpty && checkbox == nil }
     /// Column the list marker starts at.
     let markerColumn: Int
     /// Column the item's text starts at; a following line indented at least
@@ -82,6 +90,9 @@ public struct MarkdownBlockParser {
         // absolute indent width.
         var openLevels: [(markerColumn: Int, contentColumn: Int)] = []
         var listIsLoose = false
+        // A blank line has gone by since the last item. Whether that makes the
+        // list loose depends on whether the next item is another of its own.
+        var blankLineSinceLastItem = false
         var quoteLines: [String] = []
         var quoteStartLine: Int?
         var code: [String] = []
@@ -90,6 +101,7 @@ public struct MarkdownBlockParser {
         var inCodeFence = false
         var fenceMarker: Character?
         var fenceLength = 0
+        var fenceIndent = 0
         var fenceLanguage: String?
 
         func flushParagraph(currentLine: Int) {
@@ -119,6 +131,7 @@ public struct MarkdownBlockParser {
             listStartLine = nil
             openLevels.removeAll()
             listIsLoose = false
+            blankLineSinceLastItem = false
         }
 
         /// Resolves `parsed` against the open nesting levels and appends it,
@@ -141,13 +154,21 @@ public struct MarkdownBlockParser {
 
             let depth = openLevels.count - 1
 
-            // Switching between bulleted and numbered at the top level starts a
-            // separate list, matching CommonMark and keeping the two kinds of
-            // block distinct.
-            if depth == 0, let first = listItems.first, first.isOrdered != parsed.isOrdered {
+            // A different marker at the top level starts a separate list: a
+            // numbered item after bulleted ones, but also `+` after `-`, or `2)`
+            // after `1.`. Deeper down the items stay in this block, and the
+            // renderer splits them into lists by their markers.
+            if depth == 0, let first = listItems.first, first.marker != parsed.marker {
                 flushList(currentLine: index)
                 openLevels = [(parsed.markerColumn, parsed.contentColumn)]
             }
+
+            // A blank line between two items of one list makes it loose. One
+            // between the end of a list and the start of the next does not.
+            if blankLineSinceLastItem, !listItems.isEmpty {
+                listIsLoose = true
+            }
+            blankLineSinceLastItem = false
 
             if listStartLine == nil {
                 listStartLine = index
@@ -159,7 +180,8 @@ public struct MarkdownBlockParser {
                     indent: depth,
                     checkbox: parsed.checkbox,
                     order: parsed.order,
-                    isOrdered: parsed.isOrdered
+                    isOrdered: parsed.isOrdered,
+                    marker: parsed.marker
                 )
             )
         }
@@ -208,7 +230,7 @@ public struct MarkdownBlockParser {
                     fenceLanguage = nil
                     inCodeFence = false
                 } else {
-                    code.append(line)
+                    code.append(String(codeLineContent(in: line[...], fenceIndent: fenceIndent)))
                 }
                 index += 1
                 continue
@@ -219,6 +241,7 @@ public struct MarkdownBlockParser {
                 inCodeFence = true
                 fenceMarker = fence.marker
                 fenceLength = fence.length
+                fenceIndent = Self.fenceIndent(of: line[...])
                 // Only the first word of the info string names the language.
                 fenceLanguage = fence.info.split(separator: " ").first.map(String.init)
                 codeFenceStartLine = index
@@ -229,10 +252,11 @@ public struct MarkdownBlockParser {
 
             if line.trimmingCharacters(in: .whitespaces).isEmpty {
                 // A blank line inside a list does not end it if another item
-                // follows; it makes the list loose, and every item's content is
-                // then wrapped in a paragraph.
+                // follows. If that item turns out to be one of this list's own,
+                // the list is loose, and every item's content is then wrapped
+                // in a paragraph.
                 if !listItems.isEmpty, nextNonBlankLineContinuesList(lines, after: index) {
-                    listIsLoose = true
+                    blankLineSinceLastItem = true
                     index += 1
                     continue
                 }
@@ -294,7 +318,12 @@ public struct MarkdownBlockParser {
                 continue
             }
 
-            if let item = parseListItem(line[...]) ?? parseOrderedListItem(line[...]) {
+            // Not everything that looks like an item may interrupt a paragraph:
+            // an empty item may not, and a numbered one only if it starts at 1.
+            // Otherwise a wrapped sentence whose next line happens to begin
+            // "14." would turn into a list.
+            if let item = parseListItem(line[...]) ?? parseOrderedListItem(line[...]),
+               paragraph.isEmpty || (!item.isEmpty && (!item.isOrdered || item.order == 1)) {
                 flushParagraph(currentLine: index)
                 flushQuote(currentLine: index)
                 appendListItem(item, at: index)
@@ -386,6 +415,24 @@ public struct MarkdownBlockParser {
         (parseListItem(line) ?? parseOrderedListItem(line))?.content
     }
 
+    /// How many spaces the opening line of a fenced code block is indented by.
+    static func fenceIndent(of opening: Substring) -> Int {
+        opening.prefix { $0 == " " }.count
+    }
+
+    /// A line inside a fenced code block as code: the line without the
+    /// indentation it shares with the fence. A block indented to sit under a
+    /// list item is not indented code.
+    static func codeLineContent(in line: Substring, fenceIndent: Int) -> Substring {
+        var content = line
+        var removed = 0
+        while removed < fenceIndent, content.first == " " {
+            content = content.dropFirst()
+            removed += 1
+        }
+        return content
+    }
+
     /// Whether `closing` is the line that closes the fenced code block `opening`
     /// opens: a fence of the same character, at least as long, with no info
     /// string.
@@ -445,16 +492,18 @@ public struct MarkdownBlockParser {
     private static func parseListItem(_ line: Substring) -> ParsedListItem? {
         let markerColumn = indentColumns(in: line)
         let trimmed = line.trimmingMarkdownWhitespace()
-        guard trimmed.count >= 3 else { return nil }
-        let first = trimmed.first
-        guard first == "-" || first == "*" || first == "+" else { return nil }
-        guard trimmed.dropFirst().first == " " else { return nil }
-        let (content, checkbox) = parseCheckbox(trimmed.dropFirst(2).trimmingMarkdownWhitespace())
+        guard let marker = trimmed.first, marker == "-" || marker == "*" || marker == "+" else { return nil }
+        // The marker is followed by a space or a tab, or by nothing at all,
+        // which is an empty item.
+        let afterMarker = trimmed.dropFirst()
+        guard afterMarker.isEmpty || afterMarker.first == " " || afterMarker.first == "\t" else { return nil }
+        let (content, checkbox) = parseCheckbox(afterMarker.trimmingMarkdownWhitespace())
         return ParsedListItem(
             content: content,
             checkbox: checkbox,
             order: nil,
             isOrdered: false,
+            marker: marker,
             markerColumn: markerColumn,
             contentColumn: markerColumn + 2
         )
@@ -470,13 +519,14 @@ public struct MarkdownBlockParser {
         let number = trimmed[..<delimiterIndex]
         guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
         let afterDot = trimmed[trimmed.index(after: delimiterIndex)...]
-        guard afterDot.first == " " else { return nil }
-        let (content, checkbox) = parseCheckbox(afterDot.dropFirst().trimmingMarkdownWhitespace())
+        guard afterDot.isEmpty || afterDot.first == " " || afterDot.first == "\t" else { return nil }
+        let (content, checkbox) = parseCheckbox(afterDot.trimmingMarkdownWhitespace())
         return ParsedListItem(
             content: content,
             checkbox: checkbox,
             order: Int(number),
             isOrdered: true,
+            marker: trimmed[delimiterIndex],
             markerColumn: markerColumn,
             // "12. " is a wider marker than "1. ", so children line up further in.
             contentColumn: markerColumn + number.count + 2

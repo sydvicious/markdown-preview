@@ -5,6 +5,9 @@
 
 ## 0.10
 
+- Lists: a marker with nothing after it is an empty item; a tab may follow the marker; and a change of marker — `+` after `-`, `2)` after `1.` — starts a new list, nested ones included. A wrapped line that begins with a number and a period, such as `14.`, no longer turns into a list: only a list starting at 1 may interrupt a paragraph. A blank line between one list and the next no longer makes the first one loose.
+- Code: a fenced block loses the indentation it shares with its fence, in the preview and in what the Copy button copies, so a block indented under a list item is not indented code. A line ending inside a code span is shown as a space.
+- Emphasis follows CommonMark's "multiple of three" rule, so `*foo**bar**baz*` is emphasis around strong.
 - Links and images: a destination may hold balanced parentheses, as Wikipedia addresses do; link text may hold brackets; and an image may be a link's text, which is how a badge is written. Each used to end at the first `]` or `)`. A title may hold a parenthesis or be written in parentheses, and a link inside another link's text is now the link, with the outer brackets left as text.
 - Tables: a backslash in a cell is kept unless it escapes a pipe. `\*` in a cell is an escaped asterisk again, and a path such as `C:\dir` in a code span keeps its backslash.
 - Find and selection now read markdown exactly as the preview renders it, where they used to have a parser of their own that disagreed with it. Fixed by this: a match landing on the wrong characters, or nowhere, after `snake_case` names, backslash escapes, entities such as `&amp;`, spaced asterisks, or a heading's closing `##`; text that could not be found at all in `1)` lists, in the later lines of a setext heading, or in the last line of an unclosed code block; and anything inside a block quote — a heading, a list, code, a nested quote — being counted with its markers.

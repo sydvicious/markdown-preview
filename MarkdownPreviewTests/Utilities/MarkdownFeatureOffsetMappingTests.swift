@@ -136,6 +136,12 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
             words: ["Alpha", "here"]
         ),
         .init(
+            "code span over a line ending",
+            "Use `let alpha\nbeta` here",
+            visible: "Use let alpha beta here",
+            words: ["alpha", "beta", "here"]
+        ),
+        .init(
             "double-backtick code span",
             "Type `` a`b `` here",
             visible: "Type a`b here",
@@ -247,6 +253,14 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
             visible: "Alpha and betaGamma",
             words: ["Alpha", "beta", "Gamma"]
         ),
+        .init("list with an empty item", "- Alpha\n-\n- Beta", visible: "AlphaBeta", words: ["Alpha", "Beta"]),
+        .init("list with a tab after the marker", "-\tAlpha\n-\tBeta", visible: "AlphaBeta", words: ["Alpha", "Beta"]),
+        .init(
+            "nested lists with different markers",
+            "- Alpha\n  - Beta\n  + Gamma\n- Delta",
+            visible: "AlphaBetaGammaDelta",
+            words: ["Alpha", "Beta", "Gamma", "Delta"]
+        ),
         .init(
             "list with extra space after the marker",
             "-   Alpha\n-   Beta",
@@ -295,6 +309,12 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
         .init(
             "fenced code",
             "```swift\nlet alpha = 1\n  let beta = 2\n```",
+            visible: "let alpha = 1\n  let beta = 2",
+            words: ["alpha", "beta"]
+        ),
+        .init(
+            "fenced code indented with its fence",
+            "  ```\n  let alpha = 1\n    let beta = 2\n  ```",
             visible: "let alpha = 1\n  let beta = 2",
             words: ["alpha", "beta"]
         ),

@@ -360,6 +360,10 @@ struct FencedCodeTests {
         #expect(blockHTML("  ```\n  foo\n    bar\n  ```") == "<pre><code>foo\n  bar</code></pre>")
     }
 
+    @Test func contentIndentedLessThanTheFenceLosesWhatItHas() async throws {
+        #expect(blockHTML("   ```\n   aaa\n    aaa\n  aaa\n   ```") == "<pre><code>aaa\n aaa\naaa</code></pre>")
+    }
+
     @Test func emptyFenceIsAnEmptyBlock() async throws {
         #expect(blockHTML("```\n```") == "<pre><code></code></pre>")
     }
@@ -597,6 +601,22 @@ struct ListTests {
         #expect(blockHTML("- foo\n-\n- bar") == "<ul><li>foo</li><li></li><li>bar</li></ul>")
     }
 
+    @Test func aMarkerAloneIsAnEmptyItem() async throws {
+        #expect(blockHTML("*") == "<ul><li></li></ul>")
+    }
+
+    @Test func emptyNumberedItemIsAllowed() async throws {
+        #expect(
+            blockHTML("1. foo\n2.\n3. bar")
+                == "<ol><li value=\"1\">foo</li><li value=\"2\"></li><li value=\"3\">bar</li></ol>"
+        )
+    }
+
+    @Test func anEmptyItemCannotInterruptAParagraph() async throws {
+        #expect(blockHTML("foo\n*") == "<p>foo\n*</p>")
+        #expect(blockHTML("foo\n1.") == "<p>foo\n1.</p>")
+    }
+
     @Test func leadingZerosInTheNumberAreIgnored() async throws {
         #expect(blockHTML("003. foo") == "<ol><li value=\"3\">foo</li></ol>")
     }
@@ -612,6 +632,10 @@ struct ListTests {
             blockHTML("The number of windows in my house is\n14.  The number of doors is 6.")
                 == "<p>The number of windows in my house is\n14.  The number of doors is 6.</p>"
         )
+    }
+
+    @Test func aNumberedListStartingAtOneCanInterruptAParagraph() async throws {
+        #expect(allBlockHTML("foo\n1. bar") == ["<p>foo</p>", "<ol><li value=\"1\">bar</li></ol>"])
     }
 
     @Test func blankLineThenUnindentedTextEndsTheList() async throws {
@@ -640,6 +664,23 @@ struct ListTests {
 
     @Test func changingBulletCharacterStartsANewList() async throws {
         #expect(allBlockHTML("- foo\n+ bar") == ["<ul><li>foo</li></ul>", "<ul><li>bar</li></ul>"])
+    }
+
+    @Test func changingBulletCharacterInANestedListStartsANewNestedList() async throws {
+        #expect(
+            blockHTML("- a\n  - b\n  + c\n- d")
+                == "<ul><li>a<ul><li>b</li></ul><ul><li>c</li></ul></li><li>d</li></ul>"
+        )
+    }
+
+    @Test func aBlankLineBeforeANewListDoesNotLoosenTheOneBefore() async throws {
+        // A list is loose when a blank line separates two of its own items. One
+        // between the end of a list and the start of the next is neither's.
+        #expect(allBlockHTML("- foo\n\n+ bar") == ["<ul><li>foo</li></ul>", "<ul><li>bar</li></ul>"])
+        #expect(
+            allBlockHTML("- foo\n\n1. bar")
+                == ["<ul><li>foo</li></ul>", "<ol><li value=\"1\">bar</li></ol>"]
+        )
     }
 
     @Test func changingNumberDelimiterStartsANewList() async throws {
@@ -732,6 +773,12 @@ struct CodeSpanTests {
 
     @Test func lineEndingInsideIsASpace() async throws {
         #expect(blockHTML("`foo\nbar`") == "<p><code>foo bar</code></p>")
+    }
+
+    @Test func lineEndingsBecomeSpacesBeforeThePaddingIsStripped() async throws {
+        // Spec example 335: the line endings at each end become the single
+        // spaces that are then stripped, and the two spaces after "bar" stay.
+        #expect(blockHTML("``\nfoo\nbar  \nbaz\n``") == "<p><code>foo bar   baz</code></p>")
     }
 
     @Test func backslashIsLiteralInside() async throws {
@@ -827,6 +874,26 @@ struct EmphasisTests {
             blockHTML("*[foo](/url)* **`x`**")
                 == "<p><em><a href=\"/url\">foo</a></em> <strong><code>x</code></strong></p>"
         )
+    }
+
+    // Spec examples 414 to 418, which with 413 below pin how runs of different
+    // lengths pair up.
+
+    @Test func aRunThatCannotPairStaysAsText() async throws {
+        #expect(blockHTML("*foo**bar*") == "<p><em>foo**bar</em></p>")
+    }
+
+    @Test func aRunOfThreeOpensStrongInsideEmphasis() async throws {
+        #expect(blockHTML("***foo** bar*") == "<p><em><strong>foo</strong> bar</em></p>")
+    }
+
+    @Test func aRunOfThreeClosesStrongInsideEmphasis() async throws {
+        #expect(blockHTML("*foo **bar***") == "<p><em>foo <strong>bar</strong></em></p>")
+        #expect(blockHTML("*foo**bar***") == "<p><em>foo<strong>bar</strong></em></p>")
+    }
+
+    @Test func runsOfThreeInsideAWord() async throws {
+        #expect(blockHTML("foo***bar***baz") == "<p>foo<em><strong>bar</strong></em>baz</p>")
     }
 
     @Test func strongInsideEmphasisInsideAWord() async throws {
