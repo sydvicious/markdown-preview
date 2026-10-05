@@ -35,8 +35,9 @@ let package = Package(
             resources: [.copy("Web")]
         ),
         // Split in two so each can be run on its own from a test plan:
-        // MarkdownCoreTests is expected to pass, while the conformance suite is
-        // expected to fail until the renderer catches up with the spec.
+        // MarkdownCoreTests holds the engine's own tests. The conformance suite
+        // is written against the specification, so a case in it may be left
+        // failing while the renderer catches up.
         .testTarget(name: "MarkdownCoreTests", dependencies: ["MarkdownCore"]),
         .testTarget(name: "MarkdownCoreConformanceTests", dependencies: ["MarkdownCore"]),
     ]

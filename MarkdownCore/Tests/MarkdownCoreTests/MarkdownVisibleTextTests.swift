@@ -190,6 +190,13 @@ struct MarkdownVisibleTextTests {
         )
     }
 
+    @Test func anIndentedCodeBlockIsItsLinesWithoutTheirIndentation() {
+        #expect(
+            pieces(of: "    one\n\n      two\n\nafter")
+                == [["one", "one"], ["\n", "\n"], ["\n    ", "\n"], ["  two", "  two"], ["\n\n", "\n"], ["after", "after"]]
+        )
+    }
+
     @Test func aCodeBlockWithNoClosingFenceKeepsItsLastLine() {
         #expect(text(of: "```\nlet a = 1\nlet b = 2") == "let a = 1\nlet b = 2")
     }

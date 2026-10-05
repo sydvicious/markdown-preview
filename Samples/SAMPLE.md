@@ -121,6 +121,11 @@ Tilde fences work too, and the content is never interpreted as markdown:
 *this stays literal*  &amp;  <not a tag>
 ~~~
 
+A block indented four spaces, or a tab, is code as well, with no fences:
+
+    let answer = 42
+    print(answer)
+
 ## Lists
 
 A tight bulleted list:
@@ -322,7 +327,6 @@ These are recognized markdown elsewhere but render as literal text here:
 - Bare URLs: an address is a link only in angle brackets or in link syntax
 - Strikethrough, written as `~~text~~`
 - Raw inline or block HTML, which is always escaped and shown as text
-- Indented (four-space) code blocks — use a fenced block instead
 
 ---
 

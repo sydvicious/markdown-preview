@@ -222,6 +222,34 @@ public struct MarkdownBlockParser {
                 continue
             }
 
+            // Indented four columns or more. Under a paragraph that is the
+            // paragraph's next line, however much it looks like something else;
+            // anywhere else it is code, and so are the indented lines after it.
+            if isIndentedCodeLine(line[...]) {
+                if !paragraph.isEmpty {
+                    paragraph.append(String(paragraphLineContent(in: line[...])))
+                    index += 1
+                    continue
+                }
+                if quoteEndsInAnOpenParagraph() {
+                    quoteLines.append(line)
+                    index += 1
+                    continue
+                }
+
+                flushAll(currentLine: index)
+                let lineCount = indentedCodeLineCount(startingAt: index, in: lineSlices)
+                let codeLines = lineSlices[index..<(index + lineCount)].map { String(indentedCodeLineContent(in: $0)) }
+                blocks.append(
+                    .init(
+                        kind: .code(codeLines.joined(separator: "\n"), language: nil),
+                        lineRange: index..<(index + lineCount)
+                    )
+                )
+                index += lineCount
+                continue
+            }
+
             // A setext underline turns the paragraph above it into a heading, so
             // the heading's content is however many lines that paragraph had.
             if setextUnderlineLevel(line) != nil, !paragraph.isEmpty {
@@ -432,7 +460,8 @@ public struct MarkdownBlockParser {
                     continue
                 }
 
-                if let sibling = parseItem(line), sibling.marker == first.marker {
+                // Four columns in is too far to be an item of this list.
+                if indentColumns(in: line) < 4, let sibling = parseItem(line), sibling.marker == first.marker {
                     nextItem = sibling
                     break
                 }
@@ -475,6 +504,11 @@ public struct MarkdownBlockParser {
     /// the next line of a paragraph above it.
     private static func startsABlock(at index: Int, in lines: [Substring]) -> Bool {
         let line = lines[index]
+        // Indented code cannot interrupt a paragraph, and nothing else starts
+        // that far in.
+        if isIndentedCodeLine(line) {
+            return false
+        }
         if parseCodeFence(line) != nil || headingContent(in: line) != nil || blockquoteContent(in: line) != nil {
             return true
         }
@@ -534,18 +568,33 @@ public struct MarkdownBlockParser {
         return remaining
     }
 
-    /// The column a list item's content starts at, given the line up to where
-    /// its text begins: marker, and the spaces after it. With more than four
-    /// spaces, or with no text on the line, content starts one column after the
-    /// marker.
-    private static func contentColumn(markerEnd: Int, spaceAfterMarker: Substring, hasText: Bool) -> Int {
+    /// Where a list item's content starts, given what follows its marker.
+    ///
+    /// Normally that is where the text starts: `content` is the text, and the
+    /// column is the marker's width plus the spaces after it. With five or more
+    /// spaces, the item begins with indented code instead: its content starts
+    /// one column after the marker, and the rest of the spaces are the code's
+    /// indentation. With no text on the line it is one column after the marker
+    /// too.
+    private static func itemContent(
+        after afterMarker: Substring,
+        markerEnd: Int
+    ) -> (content: Substring, checkbox: Bool?, contentColumn: Int) {
+        let text = afterMarker.trimmingMarkdownWhitespace()
         var width = 0
-        for character in spaceAfterMarker {
+        for character in afterMarker[..<text.startIndex] {
             width += character == "\t" ? 4 - ((markerEnd + width) % 4) : 1
         }
-        return hasText && (1...4).contains(width) ? markerEnd + width : markerEnd + 1
-    }
 
+        if text.isEmpty {
+            return (text, nil, markerEnd + 1)
+        }
+        if width > 4 {
+            return (afterMarker.dropFirst(), nil, markerEnd + 1)
+        }
+        let (content, checkbox) = parseCheckbox(text)
+        return (content, checkbox, markerEnd + width)
+    }
 
     /// A link reference definition at the start of a paragraph's lines:
     /// `[label]: destination`, with an optional title in quotes or parentheses.
@@ -719,6 +768,35 @@ public struct MarkdownBlockParser {
         return content
     }
 
+    /// Whether a line is indented far enough to be indented code: four columns
+    /// or more, and not blank.
+    static func isIndentedCodeLine(_ line: Substring) -> Bool {
+        indentColumns(in: line) >= 4 && !isBlank(line)
+    }
+
+    /// How many lines the indented code block starting at `lines[start]` takes
+    /// up: through its last indented line, with any blank lines between
+    /// indented ones. Blank lines after the last are not part of it.
+    static func indentedCodeLineCount(startingAt start: Int, in lines: [Substring]) -> Int {
+        var end = start
+        var index = start
+        while index < lines.count {
+            if isIndentedCodeLine(lines[index]) {
+                end = index + 1
+            } else if !isBlank(lines[index]) {
+                break
+            }
+            index += 1
+        }
+        return end - start
+    }
+
+    /// A line of an indented code block as code: the line without its first
+    /// four columns of indentation.
+    static func indentedCodeLineContent(in line: Substring) -> Substring {
+        droppingColumns(4, from: line)
+    }
+
     /// Whether `closing` is the line that closes the fenced code block `opening`
     /// opens: a fence of the same character, at least as long, with no info
     /// string.
@@ -771,19 +849,14 @@ public struct MarkdownBlockParser {
         // which is an empty item.
         let afterMarker = trimmed.dropFirst()
         guard afterMarker.isEmpty || afterMarker.first == " " || afterMarker.first == "\t" else { return nil }
-        let text = afterMarker.trimmingMarkdownWhitespace()
-        let (content, checkbox) = parseCheckbox(text)
+        let item = itemContent(after: afterMarker, markerEnd: markerColumn + 1)
         return ParsedListItem(
-            content: content,
-            checkbox: checkbox,
+            content: item.content,
+            checkbox: item.checkbox,
             order: nil,
             isOrdered: false,
             marker: marker,
-            contentColumn: contentColumn(
-                markerEnd: markerColumn + 1,
-                spaceAfterMarker: afterMarker[..<text.startIndex],
-                hasText: !text.isEmpty
-            )
+            contentColumn: item.contentColumn
         )
     }
 
@@ -798,20 +871,15 @@ public struct MarkdownBlockParser {
         guard !number.isEmpty, number.allSatisfy(\.isNumber) else { return nil }
         let afterDot = trimmed[trimmed.index(after: delimiterIndex)...]
         guard afterDot.isEmpty || afterDot.first == " " || afterDot.first == "\t" else { return nil }
-        let text = afterDot.trimmingMarkdownWhitespace()
-        let (content, checkbox) = parseCheckbox(text)
+        // "12. " is a wider marker than "1. ", so children line up further in.
+        let item = itemContent(after: afterDot, markerEnd: markerColumn + number.count + 1)
         return ParsedListItem(
-            content: content,
-            checkbox: checkbox,
+            content: item.content,
+            checkbox: item.checkbox,
             order: Int(number),
             isOrdered: true,
             marker: trimmed[delimiterIndex],
-            // "12. " is a wider marker than "1. ", so children line up further in.
-            contentColumn: contentColumn(
-                markerEnd: markerColumn + number.count + 1,
-                spaceAfterMarker: afterDot[..<text.startIndex],
-                hasText: !text.isEmpty
-            )
+            contentColumn: item.contentColumn
         )
     }
 

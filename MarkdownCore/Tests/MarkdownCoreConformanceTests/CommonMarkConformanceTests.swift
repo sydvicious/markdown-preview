@@ -28,9 +28,8 @@
 //    - raw HTML is escaped rather than passed through, which is what stops a
 //      document putting markup of its own into the preview.
 //
-//  Constructs the renderer does not implement yet — indented code blocks,
-//  autolinks, link reference definitions, list items that hold more than one
-//  line — are asserted here all the same, and fail until it does.
+//  A case for something the renderer does not do yet is asserted here all the
+//  same, and fails until it does. At present every case passes.
 //
 
 import Foundation
@@ -438,6 +437,58 @@ struct IndentedCodeTests {
     @Test func indentedLineCannotInterruptAParagraph() async throws {
         // It is a continuation of the paragraph instead.
         #expect(blockHTML("foo\n    bar") == "<p>foo\nbar</p>")
+    }
+
+    @Test func whatWouldBeAnotherBlockIsCodeWhenIndented() async throws {
+        #expect(blockHTML("    # not a heading") == "<pre><code># not a heading</code></pre>")
+        #expect(blockHTML("    - not a list") == "<pre><code>- not a list</code></pre>")
+        #expect(blockHTML("    > not a quote") == "<pre><code>&gt; not a quote</code></pre>")
+    }
+
+    @Test func anIndentedHeadingUnderAParagraphIsItsNextLine() async throws {
+        #expect(blockHTML("foo\n    # bar") == "<p>foo\n# bar</p>")
+    }
+
+    @Test func blankLinesInsideAreKeptAndTheOnesAfterAreNot() async throws {
+        #expect(
+            allBlockHTML("    a\n\n\n    b\n\n\nc")
+                == ["<pre><code>a\n\n\nb</code></pre>", "<p>c</p>"]
+        )
+    }
+
+    @Test func theBlockEndsAtALineThatIsNotIndented() async throws {
+        #expect(allBlockHTML("    foo\nbar") == ["<pre><code>foo</code></pre>", "<p>bar</p>"])
+    }
+
+    @Test func tabsBeyondTheFirstAreContent() async throws {
+        #expect(blockHTML("\tfoo\n\t\tbar") == "<pre><code>foo\n\tbar</code></pre>")
+    }
+
+    @Test func indentedCodeInsideAListItemAndAQuote() async throws {
+        // Indented four columns past where the item's own content starts.
+        #expect(
+            allBlockHTML("- foo\n\n      bar")
+                == ["<ul><li><p>foo</p><pre><code>bar</code></pre></li></ul>"]
+        )
+        #expect(blockHTML(">     foo") == "<blockquote><pre><code>foo</code></pre></blockquote>")
+    }
+
+    @Test func anItemMayBeginWithIndentedCode() async throws {
+        // Spec example 273. With five or more spaces after the marker, the
+        // item's content starts one column after it and the rest is indentation.
+        #expect(
+            allBlockHTML("1.      indented code\n\n   paragraph\n\n       more code")
+                == ["<ol><li value=\"1\"><pre><code> indented code</code></pre><p>paragraph</p><pre><code>more code</code></pre></li></ol>"]
+        )
+    }
+
+    @Test func aMarkerIndentedFourColumnsIsNotAListItem() async throws {
+        // Spec example 312: the last line is too far in to be an item, and too
+        // close to be inside the one before, so it is that item's next line.
+        #expect(
+            allBlockHTML("- a\n - b\n  - c\n   - d\n    - e")
+                == ["<ul><li>a</li><li>b</li><li>c</li><li>d\n- e</li></ul>"]
+        )
     }
 }
 

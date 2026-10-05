@@ -234,6 +234,7 @@ struct MarkdownHTMLBuilderTests {
         "plain paragraph",
         "---",
         "```swift\nlet x = 1\n\nlet y = 2\n```",
+        "    let x = 1\n\n    let y = 2",
         "- parent\n  - child\n- sibling",
         "1. one\n   1. nested\n2. two",
         "- one\n\n- two",

@@ -5,6 +5,9 @@
 
 ## 0.10
 
+- Indented code blocks: a line indented four spaces or a tab is code, as are the indented lines after it, with the blank lines between them. Indented under a paragraph it is still the paragraph's next line. The Copy button, find and selection treat it as they do fenced code.
+- A list marker indented four or more columns past where the item above starts its text is no longer a nested item; it is that item's next line, as CommonMark has it. Nesting goes one level at a time.
+- With this the conformance suite passes in full, for the first time: 285 cases.
 - List items can hold more than one line. An item's text may run on to following lines, indented or not; an item may hold a second paragraph, a block quote, a fenced code block or a table; and an item may begin with one, so `- # Heading` is a heading in a list. A hard-wrapped list item used to end at its first line, with the rest shown as a paragraph after the list. Block quotes gained the same thing for a line written without its `>`.
 - Each list is loose or tight on its own, so a blank line inside a nested list no longer spaces out the list around it.
 - An item's content is indented to where its text starts, as CommonMark has it. After `1.` and two spaces that is four columns, so a line indented three is not inside the item.

@@ -73,11 +73,13 @@ struct MarkdownBlockParserTests {
         }
     }
 
-    @Test func nestingDepthDoesNotSkipLevels() async throws {
-        // Eight spaces under a top-level item is still a single level deeper;
-        // CommonMark has no way to jump straight to depth two.
+    @Test func aMarkerIndentedTooFarIsNotANestedItem() async throws {
+        // Eight spaces under a top-level item is six columns past where its
+        // content starts. Four or more is not a list item at all in CommonMark:
+        // under the item's text, it is that paragraph's next line. Nesting goes
+        // one level at a time, and there is no way to skip one.
         let items = listItems("- parent\n        - child")
-        #expect(items.map(\.indent) == [0, 1])
+        #expect(items.map(\.indent) == [0])
     }
 
     @Test func dedentReturnsToTheMatchingLevel() async throws {

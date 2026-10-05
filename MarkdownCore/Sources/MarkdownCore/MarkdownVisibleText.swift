@@ -280,6 +280,21 @@ private struct Builder {
     private mutating func appendCodeBlock(_ lines: ArraySlice<Substring>) {
         guard let opening = lines.first else { return }
 
+        // Indented code has no fences: every line is code, without the four
+        // columns of indentation that make it so.
+        if MarkdownBlockParser.isIndentedCodeLine(opening) {
+            var previousEnd: Int?
+            for line in lines {
+                let code = MarkdownBlockParser.indentedCodeLineContent(in: line)
+                if let previousEnd {
+                    append("\n", from: previousEnd..<offset(of: code.startIndex))
+                }
+                append(String(code), from: offset(of: code.startIndex)..<offset(of: code.endIndex))
+                previousEnd = offset(of: line.endIndex)
+            }
+            return
+        }
+
         // The first line is the opening fence. The last is the closing one,
         // unless the block runs to the end of the document without one.
         var codeLines = lines.dropFirst()

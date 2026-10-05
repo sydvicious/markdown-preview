@@ -29,10 +29,6 @@ This document tracks planned work for MarkdownPreviewApp.
   - Symptom driving this: opening a new file visibly freezes the GUI. The whole open path — read, parse, HTML build — currently runs on `@Main`, so the window stops responding until it finishes.
   - Schedule this work after the YMMV-related refactor work.
 
-### CommonMark constructs the renderer does not implement.
-  - Asserted in the conformance suite because its expectations come from the spec; each fails until it is built. All are in scope (Syd, 2026-10-04). Of the three there were, autolinks and link reference definitions were built on 2026-10-05, which leaves one.
-  - Indented code blocks (spec 4.4): four spaces or a tab. `IndentedCodeTests`, 4 failing.
-
 ### Crash at launch: two saved documents that resolve to one file. (fixed 2026-10-04; see what is left)
   - Found 2026-10-04 by reading the code, during the audit under "Audit the test suites and cover every markdown feature", then reproduced the same day in `DocumentSessionStore` on macOS, in a test, not by launching the app.
   - To reproduce: open `first/notes.md`; move the file to `second/notes.md`; open it again from there. The first entry is not removed by polling, because its bookmark follows the file, so the list holds the document twice, once under each path, and both are saved. On the next restore both resolved to `second/notes.md`, and `DocumentSearchIndex.rebuild` trapped in `Dictionary(uniqueKeysWithValues:)` — at every launch, because the saved list was still the same.
@@ -195,9 +191,9 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Audit the test suites and cover every markdown feature.
   - Done 2026-07-19 for the renderer: `MarkdownCore/Tests/MarkdownCoreConformanceTests` covers the block and inline features against CommonMark 0.31.2 and runs headlessly via `swift test`. It exposed 44 failing cases when it landed; all were fixed.
-  - Done 2026-10-04 for the rest of the test work. The suites landed with the run red: each failure was filed under "Bugs", and the suites go green as those are fixed.
-    - The conformance suite grew from 92 cases to 277. 4 of them fail, all for one thing the renderer does not do: the entry left under "Bugs" that names `IndentedCodeTests`.
-    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 79 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. When these landed, 85 cases failed; all pass as of 2026-10-05.
+  - Done 2026-10-04 for the rest of the test work. The suites landed with the run red, each failure filed under "Bugs". Every one of those was fixed by 2026-10-05, and the whole run is green.
+    - The conformance suite grew from 92 cases to 285, and passes in full. It had 30 failing when it was extended.
+    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 81 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. When these landed, 85 cases failed; all pass as of 2026-10-05.
     - What those failures led to: the mapping no longer parses markdown itself. `MarkdownVisibleText`, in `MarkdownCore`, builds a document's visible text from the parser's own line rules and from the pass that writes the HTML, and has its own suite, `MarkdownVisibleTextTests`, that runs from the command line.
     - The no-whitespace-between-tags check covers every block type, and passes.
     - Not covered, because there is nothing to assert yet: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.

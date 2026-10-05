@@ -113,6 +113,7 @@ struct MarkdownSearchFeatureTests {
         .init("markers inside a block quote are not text", in: "> # Alpha\n> - beta", find: "#", []),
         .init("fenced code", in: "```swift\nlet alpha = 1\n```", find: "alpha", ["alpha"]),
         .init("fence and its language are not text", in: "```swift\nlet alpha = 1\n```", find: "swift", []),
+        .init("indented code", in: "text\n\n    let alpha = 1\n    let beta = 2", find: "let beta", ["let beta"]),
         .init("fenced code with no closing fence", in: "```\nlet alpha = 1", find: "alpha", ["alpha"]),
         .init("table cell", in: "| Name | Count |\n| --- | --- |\n| Alpha | 12 |", find: "alpha", ["Alpha"]),
         .init("table delimiter row is not text", in: "| Name | Count |\n| --- | --- |\n| Alpha | 12 |", find: "---", []),

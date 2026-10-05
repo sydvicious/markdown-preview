@@ -312,6 +312,12 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
             words: ["Alpha", "Beta", "gamma", "Delta"]
         ),
         .init(
+            "list item holding indented code",
+            "- Alpha\n\n      let beta = 1\n- Gamma",
+            visible: "Alphalet beta = 1Gamma",
+            words: ["Alpha", "beta", "Gamma"]
+        ),
+        .init(
             "task item over two lines",
             "- [x] Alpha\n  beta\n- [ ] Gamma",
             visible: "Alpha\nbetaGamma",
@@ -373,6 +379,12 @@ struct MarkdownFeature: Sendable, CustomTestStringConvertible {
             "fenced code indented with its fence",
             "  ```\n  let alpha = 1\n    let beta = 2\n  ```",
             visible: "let alpha = 1\n  let beta = 2",
+            words: ["alpha", "beta"]
+        ),
+        .init(
+            "indented code",
+            "    let alpha = 1\n\n      let beta = 2",
+            visible: "let alpha = 1\n\n  let beta = 2",
             words: ["alpha", "beta"]
         ),
         .init("tilde-fenced code", "~~~\nlet alpha = 1\n~~~", visible: "let alpha = 1", words: ["alpha"]),

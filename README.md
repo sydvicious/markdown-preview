@@ -150,8 +150,9 @@ After this, double-clicking `.md` files should open them in this app.
 - Rendering is intentionally lightweight and block-oriented.
 - It supports common Markdown structures (headings, paragraphs, lists, ordered lists, blockquotes, fenced code, rules, and tables), plus the GitHub task-list and table extensions.
 - Table rendering is HTML/CSS-based via `WKWebView` for fidelity and scrolling behavior.
-- It is not yet a complete CommonMark implementation. [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) is the reference the renderer is measured against. The one place it currently falls short is covered by failing tests in `MarkdownCoreConformanceTests` and tracked under "Bugs" in `TODO.md`: indented code blocks.
-- Raw HTML in a document is shown as text, not rendered. That is deliberate.
+- [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) is the reference the renderer is measured against, one small case per feature in `MarkdownCoreConformanceTests`, all of which pass. It is not a complete implementation: it has not been run against the specification's full set of examples.
+- It differs from CommonMark on purpose in three places. Raw HTML in a document is shown as text, not rendered. A link to `javascript:` is not a link. A numbered list keeps each item's number as written.
+- Not supported: strikethrough, and turning a bare URL into a link.
 
 ## Tests
 
@@ -166,9 +167,10 @@ swift test --package-path MarkdownCore
 
   `MarkdownCoreTests` is expected to pass. `MarkdownCoreConformanceTests` is one small case per
   markdown feature, written against [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/).
-  Its expectations follow the specification rather than current behavior, so it documents what
-  the renderer *should* do. Cases fail where the renderer is not there yet; each failure is
-  tracked under "Bugs" in `TODO.md`. A failing run is expected until those are fixed.
+  Its expectations follow the specification rather than whatever the renderer does, so a
+  failing case means the renderer is wrong. All of them pass at present; a case added for
+  something the renderer does not do yet is left failing, and tracked under "Bugs" in
+  `TODO.md`, until it does.
 
 - `MarkdownPreviewTests`: tests for the app layer (view models, file state, selection handling).
   It also checks find and selection one markdown feature at a time, loading the real page and
