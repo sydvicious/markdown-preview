@@ -208,4 +208,178 @@ struct MarkdownHTMLBuilderTests {
 
         #expect(html.contains("<ul><li>one<ul><li>two<ul><li>three</li></ul></li></ul></li></ul>"))
     }
+
+    // MARK: - No whitespace between tags, for every block type
+
+    /// The markup of the document's blocks, from the first block's opening tag
+    /// to the last one's closing tag.
+    private func blockMarkup(for source: String) -> String {
+        let html = MarkdownHTMLBuilder.document(for: source)
+        guard let start = html.range(of: "<div class=\"md-block"),
+              let article = html.range(of: "</article>"),
+              let end = html.range(of: "</div>", options: .backwards, range: start.upperBound..<article.lowerBound) else {
+            return ""
+        }
+        return String(html[start.lowerBound..<end.upperBound])
+    }
+
+    /// The same rule the list test above holds lists to, for the rest: a block
+    /// made of several elements must not put whitespace between them, or the
+    /// preview's text walker meets a text node the source mapping never
+    /// counted. Each source here is one block, so the newline the builder puts
+    /// between blocks does not come into it.
+    @Test(arguments: [
+        "# heading",
+        "heading\n===",
+        "plain paragraph",
+        "---",
+        "```swift\nlet x = 1\n\nlet y = 2\n```",
+        "    let x = 1\n\n    let y = 2",
+        "- parent\n  - child\n- sibling",
+        "1. one\n   1. nested\n2. two",
+        "- one\n\n- two",
+        "- [ ] task\n  - [x] nested task\n- plain",
+        "- first line\n  second line\n\n  second paragraph\n- next",
+        "1. item\n   > quoted\n   ```\n   code\n   ```\n   - nested\n2. next",
+        "> quoted",
+        "> first paragraph\n>\n> second paragraph",
+        "> > nested quote",
+        "> # heading\n> text\n> - item\n> - item\n>\n> ```\n> code\n> ```\n> ---",
+        "> | a | b |\n> | --- | --- |\n> | 1 | 2 |",
+        "| a | b |\n| :-- | --: |\n| 1 | 2 |\n| 3 | 4 |",
+    ])
+    func blockMarkupHasNoWhitespaceBetweenTags(source: String) throws {
+        let markup = blockMarkup(for: source)
+        try #require(!markup.isEmpty, "expected \(source.debugDescription) to render a block")
+        #expect(
+            markup.components(separatedBy: "class=\"md-block").count == 2,
+            "expected \(source.debugDescription) to be one block"
+        )
+
+        let between = try NSRegularExpression(pattern: ">\\s+<")
+        let found = between.matches(in: markup, range: NSRange(markup.startIndex..., in: markup))
+            .compactMap { Range($0.range, in: markup).map { String(markup[$0]) } }
+        #expect(found.isEmpty, "whitespace between tags \(found) in \(markup)")
+    }
+
+    // MARK: - Source ranges on the blocks
+
+    /// The stretch of `source` each rendered block says it came from, read back
+    /// out of the `data-source-start` and `data-source-end` attributes.
+    private func blockSources(in source: String) throws -> [String] {
+        let html = MarkdownHTMLBuilder.document(for: source)
+        let attributes = try NSRegularExpression(
+            pattern: "data-source-start=\"(\\d+)\" data-source-end=\"(\\d+)\""
+        )
+        let nsHTML = html as NSString
+        let nsSource = source as NSString
+
+        return attributes.matches(in: html, range: NSRange(location: 0, length: nsHTML.length)).map { match in
+            let start = Int(nsHTML.substring(with: match.range(at: 1))) ?? -1
+            let end = Int(nsHTML.substring(with: match.range(at: 2))) ?? -1
+            guard start >= 0, end >= start, end <= nsSource.length else {
+                return "<out of bounds \(start)..<\(end)>"
+            }
+            return nsSource.substring(with: NSRange(location: start, length: end - start))
+        }
+    }
+
+    @Test func everyBlockCarriesTheRangeOfItsOwnSource() throws {
+        let source = """
+        # Title
+
+        First line
+        second line
+
+        - one
+          - two
+
+
+        > quoted
+        > again
+
+        | a | b |
+        | --- | --- |
+        | 1 | 2 |
+
+        ---
+
+        ```swift
+        let x = 1
+        ```
+
+        Underlined
+        ----------
+        """
+
+        #expect(
+            try blockSources(in: source) == [
+                "# Title",
+                "First line\nsecond line",
+                "- one\n  - two",
+                "> quoted\n> again",
+                "| a | b |\n| --- | --- |\n| 1 | 2 |",
+                "---",
+                "```swift\nlet x = 1\n```",
+                "Underlined\n----------",
+            ]
+        )
+    }
+
+    @Test func sourceRangesAreCountedInUTF16LikeTheTextViewsCountThem() throws {
+        // The source view's selection is an NSRange, so the offsets written on
+        // the blocks have to be UTF-16 too. An emoji is two units and a
+        // skin-toned one four, where a Swift `Character` count says one each.
+        let source = "# Héllo 😀\n\nwörld 👍🏽 text\n\n- naïve ✅"
+
+        #expect(try blockSources(in: source) == ["# Héllo 😀", "wörld 👍🏽 text", "- naïve ✅"])
+    }
+
+    @Test func sourceRangesInAFileWithWindowsLineEndings() throws {
+        // A block's range runs to the end of its last line's text; the line
+        // ending after it is not part of the block, whichever kind it is.
+        let source = "# Title\r\n\r\nFirst line\r\nsecond line\r\n\r\n- one\r\n- two\r\n"
+
+        #expect(try blockSources(in: source) == ["# Title", "First line\r\nsecond line", "- one\r\n- two"])
+    }
+
+    @Test func blocksNestedInAQuoteAreNotWrappedOnTheirOwn() throws {
+        // A nested block's line numbers are relative to the quote's stripped
+        // content, so offsets written on it would point at the wrong text.
+        #expect(try blockSources(in: "> # heading\n> text\n> - item") == ["> # heading\n> text\n> - item"])
+    }
+
+    @Test func anUnclosedFenceRunsToTheEndOfTheSource() throws {
+        #expect(try blockSources(in: "text\n\n```\nlet x = 1\nlet y = 2") == ["text", "```\nlet x = 1\nlet y = 2"])
+    }
+
+    // MARK: - The document around the blocks
+
+    @Test func aDocumentWithNothingToRenderGetsAnEmptyPlaceholder() async throws {
+        for source in ["", "\n", "  \n\n\t\n"] {
+            let html = MarkdownHTMLBuilder.document(for: source)
+
+            #expect(html.contains("<p class=\"empty\"></p>"), "no placeholder for \(source.debugDescription)")
+            #expect(!html.contains("class=\"md-block"), "a block was rendered for \(source.debugDescription)")
+        }
+    }
+
+    @Test func blocksAreSeparatedByASingleNewline() async throws {
+        // Outside any block, so it is never counted as text; pinned because
+        // the page's markup is what the copy and selection scripts walk.
+        let html = MarkdownHTMLBuilder.document(for: "one\n\ntwo")
+
+        #expect(
+            html.contains(
+                "<div class=\"md-block\" data-source-start=\"0\" data-source-end=\"3\"><p>one</p></div>\n<div class=\"md-block\" data-source-start=\"5\" data-source-end=\"8\"><p>two</p></div>"
+            )
+        )
+    }
+
+    @Test func contentScaleReachesTheStylesheet() async throws {
+        let html = MarkdownHTMLBuilder.document(for: "text", contentScale: 1.5)
+
+        #expect(html.contains("--content-scale: 1.5;"))
+        #expect(!html.contains("{{content-scale}}"))
+    }
 }

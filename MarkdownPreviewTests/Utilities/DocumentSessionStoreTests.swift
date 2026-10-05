@@ -490,4 +490,89 @@ struct DocumentSessionStoreTests {
         #expect(store.documentMatchesListSearch(fileURL.standardizedFileURL.path, query: "Alpha") == false)
         #expect(store.documentMatchesListSearch(fileURL.standardizedFileURL.path, query: "Gamma"))
     }
+
+    // Two saved entries can name one file. Open a document, move it, and open
+    // it again from its new place: it is now in the list under both paths, and
+    // the first entry's bookmark follows the file, so on the next launch both
+    // resolve to the same path. Restoring that list used to trap while building
+    // the search index, and went on trapping at every launch, because the saved
+    // list was still the same.
+    //
+    // The restore runs in a child process, so that if it ever traps again it
+    // fails this test and not the whole run.
+    @MainActor
+    @Test(.timeLimit(.minutes(1)))
+    func twoSavedEntriesForOneFileRestoreAsOne() async throws {
+        struct PersistedDocumentRecord: Codable {
+            let id: String
+            let lastOpened: Date
+            let bookmarkData: Data
+        }
+
+        let suiteName = "DocumentSessionStoreTests.\(#function).\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Unable to create isolated UserDefaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let temporaryDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let fileURL = temporaryDirectory.appendingPathComponent("notes.md")
+        try "# Notes".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let originalStore = DocumentSessionStore(disablePersistenceRestore: true, userDefaults: defaults)
+        try originalStore.openDocument(at: fileURL)
+        originalStore.persistDocuments(to: defaults)
+
+        // The same bookmark saved a second time, under the path the document
+        // had before it was moved, and opened earlier.
+        let saved = try #require(
+            defaults.data(forKey: "openedMarkdownDocuments").flatMap {
+                try? JSONDecoder().decode([PersistedDocumentRecord].self, from: $0)
+            }?.first
+        )
+        let earlierID = "/somewhere/else/notes.md"
+        defaults.set(
+            try JSONEncoder().encode([
+                PersistedDocumentRecord(
+                    id: earlierID,
+                    lastOpened: saved.lastOpened.addingTimeInterval(-60),
+                    bookmarkData: saved.bookmarkData
+                ),
+                saved,
+            ]),
+            forKey: "openedMarkdownDocuments"
+        )
+        // The reader was last looking at it under its old path.
+        defaults.set(earlierID, forKey: "selectedMarkdownDocumentID")
+        defaults.synchronize()
+
+        let resolvedID = fileURL.standardizedFileURL.path
+        #if os(macOS)
+        await #expect(processExitsWith: .success) { [suiteName = suiteName as String, resolvedID = resolvedID as String] in
+            let restoredAsOne = await MainActor.run {
+                DocumentSessionStoreTests.restoresOneDocument(resolvedID, fromSuiteNamed: suiteName)
+            }
+            exit(restoredAsOne ? EXIT_SUCCESS : EXIT_FAILURE)
+        }
+        #else
+        // Exit tests are macOS only, so here a trap would take the run with it.
+        #expect(Self.restoresOneDocument(resolvedID, fromSuiteNamed: suiteName))
+        #endif
+    }
+
+    /// Restores the session saved in the named defaults suite, and says whether
+    /// what came back is the one document `resolvedID`, selected and indexed.
+    @MainActor
+    private static func restoresOneDocument(_ resolvedID: String, fromSuiteNamed suiteName: String) -> Bool {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return false }
+        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
+
+        return restoredStore.openedDocuments.map(\.id) == [resolvedID]
+            && restoredStore.selectedDocumentID == resolvedID
+            && restoredStore.documentMatchesListSearch(resolvedID, query: "Notes")
+    }
 }

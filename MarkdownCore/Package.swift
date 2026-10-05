@@ -10,8 +10,8 @@
 //  Keep this target free of SwiftUI, UIKit, and AppKit. A UI-framework import
 //  here is what would push these tests back into an app host.
 //
-//  `Sources/MarkdownCore` is also compiled into the MarkdownPreview app target
-//  by the Xcode project, so the app and this package build the same files.
+//  The MarkdownPreview app links this library and imports it as a module, so
+//  the app and these tests run the same build of the engine.
 //
 
 import PackageDescription
@@ -35,8 +35,9 @@ let package = Package(
             resources: [.copy("Web")]
         ),
         // Split in two so each can be run on its own from a test plan:
-        // MarkdownCoreTests is expected to pass, while the conformance suite is
-        // expected to fail until the renderer catches up with the spec.
+        // MarkdownCoreTests holds the engine's own tests. The conformance suite
+        // is written against the specification, so a case in it may be left
+        // failing while the renderer catches up.
         .testTarget(name: "MarkdownCoreTests", dependencies: ["MarkdownCore"]),
         .testTarget(name: "MarkdownCoreConformanceTests", dependencies: ["MarkdownCore"]),
     ]

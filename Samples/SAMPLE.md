@@ -121,6 +121,11 @@ Tilde fences work too, and the content is never interpreted as markdown:
 *this stays literal*  &amp;  <not a tag>
 ~~~
 
+A block indented four spaces, or a tab, is code as well, with no fences:
+
+    let answer = 42
+    print(answer)
+
 ## Lists
 
 A tight bulleted list:
@@ -183,6 +188,23 @@ Ordered lists may use a parenthesis instead of a period:
 1) First
 2) Second
 
+An item is not limited to one line. Its text can run on to the next line,
+and it can hold more than text, as long as what it holds is indented to line up
+with it:
+
+- This item is written on two lines in the source,
+  the second indented under the first.
+- This one holds a second paragraph, a quote and some code.
+
+  The second paragraph, after a blank line.
+
+  > A quote inside the item.
+
+  ```
+  and a code block inside it
+  ```
+- And the list carries on afterwards.
+
 ## Block quotes
 
 > Block quotes hold real block structure rather than plain text.
@@ -213,6 +235,17 @@ one [with a title](https://commonmark.org "CommonMark home page") that appears
 on hover. Destinations containing spaces are written in angle brackets, like
 [this one](</some path/file.md>). Link text can be *formatted* too, as in
 [**this bold link**](https://example.com).
+
+An address in angle brackets is a link all by itself: <https://commonmark.org>,
+or for mail, <support@sydpolk.com>.
+
+A link can also keep its address out of the way, by giving it a name and saying
+elsewhere what the name stands for. [This link][spec] and [this one][] are
+written that way. The two lines that say where they go come straight after this
+paragraph in the source, and render as nothing.
+
+[spec]: https://spec.commonmark.org/0.31.2/ "The CommonMark specification"
+[this one]: https://commonmark.org
 
 Images use the same syntax as links, with a leading exclamation mark. They come
 in two kinds.
@@ -291,11 +324,9 @@ Named and numeric HTML entities are decoded: &amp; &lt; &gt; &copy; &mdash;
 
 These are recognized markdown elsewhere but render as literal text here:
 
-- Reference-style links, written as `[text][label]` with a definition elsewhere
-- Autolinks, written as `<https://example.com>` or as a bare URL
+- Bare URLs: an address is a link only in angle brackets or in link syntax
 - Strikethrough, written as `~~text~~`
 - Raw inline or block HTML, which is always escaped and shown as text
-- Indented (four-space) code blocks — use a fenced block instead
 
 ---
 

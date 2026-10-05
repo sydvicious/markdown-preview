@@ -228,6 +228,134 @@ struct WebKitTextNodeAlignmentTests {
         #expect(webKit.text == MarkdownPreviewTextOffsetMapping(sourceText: quote).displayText)
     }
 
+    // MARK: - Every markdown feature
+
+    /// The preview's page for `source`, with the scripts that read and set the
+    /// selection running in it.
+    private func loadedPreview(for source: String) async throws -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        for script in [MarkdownWebResources.Script.selection, .applySelection] {
+            configuration.userContentController.addUserScript(
+                WKUserScript(
+                    source: MarkdownWebResources.script(script),
+                    injectionTime: .atDocumentEnd,
+                    forMainFrameOnly: true
+                )
+            )
+        }
+
+        let webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let observer = LoadObserver()
+        webView.navigationDelegate = observer
+        webView.loadHTMLString(MarkdownHTMLBuilder.document(for: source, softBreak: .lineBreak), baseURL: nil)
+        try await observer.wait()
+        return webView
+    }
+
+    /// The other half of `MarkdownFeatureOffsetMappingTests`, which checks the
+    /// source mapping against the same hand-written text: here it is WebKit,
+    /// through the preview's own walker, that has to agree with it.
+    @Test(.timeLimit(.minutes(1)), arguments: MarkdownFeature.all)
+    func webKitShowsTheExpectedTextForEachFeature(feature: MarkdownFeature) async throws {
+        let webKit = try await webKitBlockText(for: feature.source)
+
+        #expect(webKit.text == feature.visible)
+        #expect(webKit.combinedLength == webKit.text.utf16.count)
+    }
+
+    /// The whole trip, both ways, with nothing stood in for: a range in the
+    /// source is reflected into the page by the call the app makes, WebKit is
+    /// asked what it then has selected, and what the page reports back is
+    /// turned into a source range again.
+    @Test(.timeLimit(.minutes(1)), arguments: MarkdownFeature.all.filter { !$0.words.isEmpty })
+    func aSourceSelectionReachesThePageAndComesBackForEachFeature(feature: MarkdownFeature) async throws {
+        let webView = try await loadedPreview(for: feature.source)
+
+        for word in feature.words {
+            let inSource = try #require(feature.sourceRange(of: word), "\(word) is not in the source")
+            guard let reflected = PreviewSelectionReflection.reflectedSelection(
+                in: feature.source,
+                selectedRange: inSource
+            ) else {
+                Issue.record("the source selection of \(word) reflects to nothing")
+                continue
+            }
+
+            let arguments = "\(reflected.start.blockStart), \(reflected.start.blockEnd), "
+                + "\(reflected.start.displayOffset), \(reflected.end.blockStart), "
+                + "\(reflected.end.blockEnd), \(reflected.end.displayOffset)"
+            let result = try await webView.evaluateJavaScript("""
+                (() => {
+                  const applied = \(PreviewScriptCall.applySelection(arguments));
+                  return {
+                    applied: applied === true,
+                    text: window.getSelection()?.toString() ?? '',
+                    ranges: \(PreviewScriptCall.selectedDisplayRanges)
+                  };
+                })();
+                """)
+            let payload = try #require(result as? [String: Any])
+
+            #expect(payload["applied"] as? Bool == true, "the page made no selection for \(word)")
+            #expect(payload["text"] as? String == word, "what the page selected, for \(word)")
+
+            let reported = PreviewSelectionBridge.sourceRanges(
+                fromDisplayRangeResult: payload["ranges"],
+                source: feature.source
+            )
+            #expect(
+                PreviewSelectionBridge.enclosingRange(of: reported) == inSource,
+                "what came back to the source, for \(word)"
+            )
+        }
+    }
+
+    // MARK: - Script links
+
+    /// A `javascript:` link runs in the page when it is clicked, and WebKit
+    /// does not ask the app first. The renderer writes such a link without its
+    /// `href`, which the engine's own tests check as text; this asks WebKit
+    /// whether anything the renderer wrote is still script to it, and clicks
+    /// every link to see.
+    @Test(.timeLimit(.minutes(1)))
+    func clickingAScriptLinkRunsNothing() async throws {
+        let source = [
+            "[inline](javascript:void(document.title='ran'))",
+            "<javascript:void(document.title='ran')>",
+            "[mixed case](JaVaScRiPt:void(document.title='ran'))",
+            "[a tab inside](<java\tscript:void(document.title='ran')>)",
+            "[spaces before](<  javascript:void(document.title='ran')>)",
+            "[an ordinary link](https://example.com)",
+        ].joined(separator: "\n\n")
+        let webView = try await loadedPreview(for: source)
+
+        let counted = try await webView.evaluateJavaScript("""
+            (() => {
+              document.title = 'untouched';
+              const links = Array.from(document.querySelectorAll('a'));
+              return {
+                links: links.length,
+                scriptLinks: links.filter((link) => link.protocol === 'javascript:').length
+              };
+            })();
+            """)
+        let counts = try #require(counted as? [String: Any])
+        #expect((counts["links"] as? NSNumber)?.intValue == 6)
+        #expect((counts["scriptLinks"] as? NSNumber)?.intValue == 0)
+
+        // All but the ordinary link, which would only ask to leave the page.
+        _ = try await webView.evaluateJavaScript("""
+            Array.from(document.querySelectorAll('a')).slice(0, 5).forEach((link) => link.click()); true
+            """)
+        // A script link runs a moment after the click, not during it.
+        try await Task.sleep(for: .milliseconds(300))
+
+        #expect(try await webView.evaluateJavaScript("document.title") as? String == "untouched")
+    }
+
     // MARK: - The button that stands in for an unreadable image
 
     /// A folder the test cannot list, standing in for one the sandbox refuses.
@@ -373,6 +501,25 @@ struct WebKitTextNodeAlignmentTests {
         return try #require(PreviewScrollPosition(messageBody: reported as Any))
     }
 
+    /// The scroll position once `hasSettled` says it is where it was going, or
+    /// after three seconds whatever it is by then.
+    ///
+    /// A page finishes loading before it has necessarily been laid out to its
+    /// full height, so a scroll asked for at that moment can fall short. The
+    /// page's own restore allows for that by trying again as the page grows,
+    /// which means the answer is not always there on the first look.
+    private func scrollPosition(
+        in webView: WKWebView,
+        once hasSettled: (PreviewScrollPosition) -> Bool
+    ) async throws -> PreviewScrollPosition {
+        var position = try await scrollPosition(in: webView)
+        for _ in 0..<60 where !hasSettled(position) {
+            try await Task.sleep(for: .milliseconds(50))
+            position = try await scrollPosition(in: webView)
+        }
+        return position
+    }
+
     /// The decision is tested on its own; this checks that the scripts it
     /// produces do what they say in the engine that has to run them.
     @Test(.timeLimit(.minutes(1)))
@@ -383,9 +530,12 @@ struct WebKitTextNodeAlignmentTests {
         let (webView, observer) = makeWebView()
         webView.loadHTMLString(MarkdownHTMLBuilder.document(for: before, softBreak: .lineBreak), baseURL: nil)
         try await observer.wait()
-        _ = try await webView.evaluateJavaScript("window.scrollTo(0, 900); true")
-        let position = try await scrollPosition(in: webView)
-        try #require(position.y == 900, "the page should be long enough to scroll")
+        _ = try await webView.evaluateJavaScript(PreviewScriptCall.scrollToOffset(x: 0, y: 900) + " true")
+        let position = try await scrollPosition(in: webView) { $0.y == 900 }
+        try #require(
+            position.y == 900,
+            "the page should be long enough to scroll; it got to \(position.y) of a possible \(position.maxY)"
+        )
 
         let restoration = PreviewScrollRestoration.restoration(
             of: position,
@@ -400,7 +550,59 @@ struct WebKitTextNodeAlignmentTests {
 
         _ = try await reloaded.evaluateJavaScript(try #require(restoration.script) + " true")
 
-        #expect(try await scrollPosition(in: reloaded).y == 900)
+        // A failure says where the page ended up and how far it could have
+        // scrolled, which tells a page that never grew tall enough from a
+        // restore that went to the wrong place.
+        let restored = try await scrollPosition(in: reloaded) { $0.y == 900 }
+        #expect(restored.y == 900, "restored to \(restored.y), of a possible \(restored.maxY)")
+    }
+
+    /// Makes the page taller after the fact, the way a page still being laid
+    /// out, or one whose images are still arriving, grows under a restore.
+    private static let growThePage = """
+        (() => {
+          const filler = document.createElement('div');
+          filler.style.height = '5000px';
+          document.body.appendChild(filler);
+          return true;
+        })();
+        """
+
+    /// The race this exists for: the app asks for the reader's place back the
+    /// moment the page finishes loading, and the page may not be tall enough
+    /// yet. Here it is certainly not, until the test makes it so.
+    @Test(.timeLimit(.minutes(1)))
+    func aRestoreMadeBeforeThePageIsTallEnoughLandsOnceItIs() async throws {
+        let (webView, observer) = makeWebView()
+        webView.loadHTMLString(MarkdownHTMLBuilder.document(for: "A short page.", softBreak: .lineBreak), baseURL: nil)
+        try await observer.wait()
+
+        _ = try await webView.evaluateJavaScript(PreviewScriptCall.scrollToOffset(x: 0, y: 900) + " true")
+        let tooSoon = try await scrollPosition(in: webView)
+        try #require(tooSoon.y == 0 && tooSoon.maxY < 900, "the page should start too short to scroll that far")
+
+        _ = try await webView.evaluateJavaScript(Self.growThePage)
+
+        let restored = try await scrollPosition(in: webView) { $0.y == 900 }
+        #expect(restored.y == 900, "restored to \(restored.y), of a possible \(restored.maxY)")
+    }
+
+    /// Once the reader has moved the page themselves, a restore still waiting
+    /// for the page to grow must not snatch it back.
+    @Test(.timeLimit(.minutes(1)))
+    func aRestoreDoesNotOverrideTheReader() async throws {
+        let (webView, observer) = makeWebView()
+        webView.loadHTMLString(MarkdownHTMLBuilder.document(for: "A short page.", softBreak: .lineBreak), baseURL: nil)
+        try await observer.wait()
+
+        _ = try await webView.evaluateJavaScript(PreviewScriptCall.scrollToOffset(x: 0, y: 900) + " true")
+        _ = try await webView.evaluateJavaScript("window.dispatchEvent(new Event('wheel')); true")
+        _ = try await webView.evaluateJavaScript(Self.growThePage)
+        try await Task.sleep(for: .milliseconds(400))
+
+        let position = try await scrollPosition(in: webView)
+        try #require(position.maxY >= 900, "the page should have grown")
+        #expect(position.y == 0)
     }
 
     @Test(.timeLimit(.minutes(1)))
@@ -414,7 +616,7 @@ struct WebKitTextNodeAlignmentTests {
         )
         try await observer.wait()
         _ = try await webView.evaluateJavaScript(PreviewScriptCall.scrollToFraction(x: 0, ofMaxY: 0.5) + " true")
-        let position = try await scrollPosition(in: webView)
+        let position = try await scrollPosition(in: webView) { $0.maxY > 0 && abs($0.y / $0.maxY - 0.5) < 0.01 }
         try #require(position.maxY > 0, "the page should be long enough to scroll")
 
         let restoration = PreviewScrollRestoration.restoration(
@@ -431,8 +633,13 @@ struct WebKitTextNodeAlignmentTests {
         try await reloadObserver.wait()
         _ = try await reloaded.evaluateJavaScript(try #require(restoration.script) + " true")
 
-        let restored = try await scrollPosition(in: reloaded)
+        let restored = try await scrollPosition(in: reloaded) {
+            $0.maxY > position.maxY && abs($0.y / $0.maxY - 0.5) < 0.01
+        }
         try #require(restored.maxY > position.maxY, "larger text should make a taller page")
-        #expect(abs(restored.y / restored.maxY - 0.5) < 0.01)
+        #expect(
+            abs(restored.y / restored.maxY - 0.5) < 0.01,
+            "restored to \(restored.y), of a possible \(restored.maxY)"
+        )
     }
 }

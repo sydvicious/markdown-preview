@@ -7,9 +7,10 @@ A native SwiftUI Markdown viewer for macOS, iOS, and iPadOS.
 
 This app is designed to feel like a lightweight Preview-style reader for `.md` files:
 - Open files from the file picker or via file association
-- Keep a persistent, recent-first list of opened files
+- Keep a persistent list of opened files
 - Render a readable Markdown preview
 - Toggle between rendered preview and raw source
+- Find text in a document, or across every document in the list
 
 ## Platforms
 
@@ -24,7 +25,7 @@ This app is designed to feel like a lightweight Preview-style reader for `.md` f
   - Detail area for content
 - Sidebar behavior:
   - Shows every opened file
-  - Sorted by most recently opened first
+  - Sorted by file name; on macOS, grouped by the folder each file is in
   - Deletable rows
   - macOS row tooltip shows full path (`~` for home directory)
 - File opening:
@@ -33,7 +34,14 @@ This app is designed to feel like a lightweight Preview-style reader for `.md` f
   - Supports `.md` and plain text imports
 - Detail behavior:
   - Defaults to rendered preview
-  - Toolbar toggle button switches Preview/Source (`accessibilityIdentifier`: `View`)
+  - Toolbar control switches Preview/Source (`accessibilityIdentifier`: `DetailModePicker`)
+  - A selection made in one view carries over to the other
+  - Text size is set per document
+- Search:
+  - A search field over the file list narrows it to the documents containing the text
+  - A search field in the document finds matches there, with next and previous
+  - Search runs on the document's visible text, so it finds what the preview shows and not the markup
+  - macOS shares the system find buffer with other apps
 - Persistence:
   - Stores opened file list and selection in `UserDefaults`
   - Persists bookmarks for reopening files across launches
@@ -45,16 +53,17 @@ This app is designed to feel like a lightweight Preview-style reader for `.md` f
   - Single-window macOS scene
 - Accessibility:
   - Dynamic text sizing (`Dynamic Type`) supported across list/preview/source content
-- Table rendering:
-  - Tables are rendered with an embedded `WKWebView` block (macOS + iOS/iPadOS)
+- Preview rendering:
+  - The whole preview is HTML in a `WKWebView` (macOS + iOS/iPadOS)
+  - Local images, read from beside the document, and remote ones over `http`/`https`
+  - A Copy button on code, quote and table blocks
   - Horizontal scrolling for wide tables
-  - Preserves explicit line breaks in cells
-  - Disables hyphenation/truncation behavior that was clipping table text
-  - Supports inline backticks in table cells/headers as styled inline code
+  - Inline markup in table cells and headers: code, emphasis, links
+  - Files with Unix, Windows or classic Mac line endings, or a mixture
 
 ## Changelog
 
-- See `CHANGELOG.md` for dated change entries.
+- See `CHANGELOG.md` for changes, one section per release.
 
 ## Preview Table Sample
 
@@ -75,7 +84,7 @@ This app is designed to feel like a lightweight Preview-style reader for `.md` f
   folder is kept out of the app target: `MarkdownCore` bundles it, through a link, so that the
   engine can build a complete page on its own.
 - `MarkdownPreview/Utilities/`: app-level supporting types
-  - `DisplayTextMappings.swift`, `MarkdownPreviewTextOffsetMapping.swift`: map between source text, displayed text, and rendered HTML
+  - `DisplayTextMappings.swift`, `MarkdownPreviewTextOffsetMapping.swift`: the two views of a document's visible text that the app uses — one for search, one for the preview's selection — each a thin wrapper over the engine's `MarkdownVisibleText`
   - `MarkdownFile.swift`: file loading and supported content types
   - `DocumentSessionStore.swift`: the opened-file list, selection, and persistence
 - `MarkdownCore/`: the markdown engine, as a local Swift package the app depends on. It is
@@ -83,11 +92,17 @@ This app is designed to feel like a lightweight Preview-style reader for `.md` f
   line without an app host.
   - `Sources/MarkdownCore/MarkdownBlockParser.swift`: parses markdown source into blocks
   - `Sources/MarkdownCore/MarkdownHTMLBuilder.swift`: renders those blocks as an HTML document
+  - `Sources/MarkdownCore/MarkdownVisibleText.swift`: a document's text as the reader sees it, and
+    which characters of the source each part came from. Find and selection are built on it. It
+    takes its answers from the parser and from the pass that writes the HTML, so it cannot
+    disagree with what is rendered.
   - `Sources/MarkdownCore/MarkdownSourceLineTable.swift`, `MarkdownSelectionRange.swift`: source
     offset bookkeeping the preview's selection mapping depends on
-  - `Sources/MarkdownCore/Web`: a link to `MarkdownPreview/Web`, below, which is how the package
+  - `Sources/MarkdownCore/Web`: a link to `MarkdownPreview/Web`, above, which is how the package
     takes those files into its resource bundle. They are read through `MarkdownWebResources.swift`.
-  - `Tests/MarkdownCoreTests/`: the engine's tests
+  - `Tests/MarkdownCoreTests/`: the engine's tests, which are expected to pass
+  - `Tests/MarkdownCoreConformanceTests/`: per-feature tests written against the CommonMark
+    specification, which fail wherever the renderer is not there yet
   - `Tests/WebTests/`: tests for the preview's scripts, written in JavaScript
 
 ## Build and Run
@@ -135,26 +150,32 @@ After this, double-clicking `.md` files should open them in this app.
 - Rendering is intentionally lightweight and block-oriented.
 - It supports common Markdown structures (headings, paragraphs, lists, ordered lists, blockquotes, fenced code, rules, and tables), plus the GitHub task-list and table extensions.
 - Table rendering is HTML/CSS-based via `WKWebView` for fidelity and scrolling behavior.
-- It is not yet a complete CommonMark implementation. [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) is the reference the renderer is measured against, and the places it currently falls short — backslash escapes, hard line breaks, emphasis flanking rules, and nested block quotes among them — are covered by failing tests in `MarkdownCoreTests` and tracked under "Bug fixes" in `TODO.md`.
+- [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) is the reference the renderer is measured against, one small case per feature in `MarkdownCoreConformanceTests`, all of which pass. It is not a complete implementation: it has not been run against the specification's full set of examples.
+- It differs from CommonMark on purpose in three places. Raw HTML in a document is shown as text, not rendered. A link to `javascript:` is not a link. A numbered list keeps each item's number as written.
+- Not supported: strikethrough, and turning a bare URL into a link.
 
 ## Tests
 
-There are three test suites:
+There are four test suites:
 
-- `MarkdownCoreTests`: tests for the markdown engine, including per-feature conformance tests
-  written against [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/). These run from the
-  command line with no app host:
+- `MarkdownCoreTests` and `MarkdownCoreConformanceTests`: tests for the markdown engine. Both
+  run from the command line with no app host:
 
 ```bash
 swift test --package-path MarkdownCore
 ```
 
-  Expectations follow the specification rather than current behavior, so this suite documents
-  what the renderer *should* do. Cases fail where the renderer is not there yet; each failure is
-  tracked under "Bug fixes" in `TODO.md`. A failing run is expected until those are fixed.
+  `MarkdownCoreTests` is expected to pass. `MarkdownCoreConformanceTests` is one small case per
+  markdown feature, written against [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/).
+  Its expectations follow the specification rather than whatever the renderer does, so a
+  failing case means the renderer is wrong. All of them pass at present; a case added for
+  something the renderer does not do yet is left failing, and tracked under "Bugs" in
+  `TODO.md`, until it does.
 
-- `MarkdownPreviewTests`: unit tests for the app layer (view models, file state, selection
-  handling). These need the app target:
+- `MarkdownPreviewTests`: tests for the app layer (view models, file state, selection handling).
+  It also checks find and selection one markdown feature at a time, loading the real page and
+  scripts in WebKit, without a window, and carrying a selection from the source to the page and
+  back. These need the app target, and its test plan runs the two engine suites as well:
 
 ```bash
 xcodebuild test -project MarkdownPreview.xcodeproj -scheme MarkdownPreview -destination 'platform=macOS'

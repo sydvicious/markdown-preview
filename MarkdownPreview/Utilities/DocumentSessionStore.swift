@@ -740,6 +740,12 @@ final class DocumentSessionStore: ObservableObject {
             guard let loaded = loadFromBookmarkData(entry.bookmarkData) else { continue }
             let resolvedID = loaded.file.url.standardizedFileURL.path
             idMap[entry.id] = resolvedID
+            // Two entries can resolve to one file: a document opened, moved, and
+            // opened again from its new place is saved under both paths, and the
+            // first entry's bookmark follows the file. `persisted` arrives newest
+            // first, so the one kept is the one opened last; the other's ID still
+            // maps to it, for the selection and text size saved under that ID.
+            guard !restored.contains(where: { $0.id == resolvedID }) else { continue }
             restored.append(
                 .init(
                     id: resolvedID,

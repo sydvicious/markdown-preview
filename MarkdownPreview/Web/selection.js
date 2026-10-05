@@ -9,6 +9,13 @@
 
   window.markdownPreview = window.markdownPreview ?? {};
 
+  // Elements that hold other elements and no text of their own. Whitespace
+  // directly inside one is how the markup was laid out, not something the
+  // reader sees.
+  const elementOnlyTags = new Set([
+    'ARTICLE', 'BLOCKQUOTE', 'DIV', 'OL', 'TABLE', 'TBODY', 'TFOOT', 'THEAD', 'TR', 'UL'
+  ]);
+
   window.markdownPreview.acceptedTextNodesInBlock = (block) => {
     const walker = document.createTreeWalker(
       block,
@@ -22,9 +29,14 @@
           if (parentElement && parentElement.closest('[data-copy-button]')) {
             return NodeFilter.FILTER_REJECT;
           }
+          // Whitespace on its own is still text wherever text can be: the
+          // space between two emphasised words, the line break before a line
+          // that starts in bold, the blank lines in a code block. The source
+          // mapping counts each of those, so dropping one here puts every
+          // offset after it out by one.
           if (
             /^[\s\n\r\t]+$/.test(node.textContent) &&
-            !(parentElement && parentElement.closest('pre, code'))
+            (!parentElement || elementOnlyTags.has(parentElement.tagName))
           ) {
             return NodeFilter.FILTER_REJECT;
           }

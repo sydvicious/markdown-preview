@@ -37,7 +37,7 @@ enum MarkdownSelectionClipboard {
 
         return MarkdownSelectionClipboardPayload(
             markdown: markdown,
-            rtf: richTextHTML.flatMap(rtf(fromHTML:)) ?? renderedRTF(for: markdown)
+            rtf: richTextHTML.flatMap(rtf(fromHTML:)) ?? renderedRTF(for: markdown, in: source)
         )
     }
 
@@ -111,10 +111,15 @@ enum MarkdownSelectionClipboard {
         )
     }
 
-    private static func renderedRTF(for markdown: String) -> Data? {
+    private static func renderedRTF(for markdown: String, in source: String) -> Data? {
         // Match the preview's rendering so copied rich text breaks lines the
-        // same way the user sees them.
-        let html = MarkdownHTMLBuilder.document(for: markdown, softBreak: .lineBreak)
+        // same way the user sees them, and a reference in the selection is
+        // still a link though its definition is in the rest of the document.
+        let html = MarkdownHTMLBuilder.document(
+            for: markdown,
+            softBreak: .lineBreak,
+            definitions: MarkdownLinkDefinitions(source: source)
+        )
         return rtf(fromHTMLData: Data(html.utf8))
     }
 

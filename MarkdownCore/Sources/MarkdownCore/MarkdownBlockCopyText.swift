@@ -61,7 +61,7 @@ public enum MarkdownBlockCopyText {
     /// — its inner `>` is content of the outer quote, and the result is still
     /// the markdown the reader sees quoted.
     private static func strippingQuoteMarkers(from source: String) -> String {
-        joined(source.components(separatedBy: "\n").map { line in
+        joined(source.markdownLines.map { line in
             var remainder = Substring(line)
             var indent = 0
             while indent < 3, remainder.first == " " {
@@ -80,16 +80,19 @@ public enum MarkdownBlockCopyText {
     /// Removes a fenced code block's fences, or an indented code block's
     /// four-space indent, leaving the code itself.
     private static func strippingCodeDecoration(from source: String) -> String {
-        var lines = source.components(separatedBy: "\n")
+        var lines = source.markdownLines
 
         if let first = lines.first, fenceMarker(of: first) != nil {
+            // What is copied is the code as the preview shows it, without the
+            // indentation it shares with its fence.
+            let fenceIndent = MarkdownBlockParser.fenceIndent(of: first[...])
             lines.removeFirst()
             // A fenced block at the end of a document may be unterminated, so a
             // closing fence is stripped only if one is actually there.
             if let last = lines.last, fenceMarker(of: last) != nil {
                 lines.removeLast()
             }
-            return joined(lines)
+            return joined(lines.map { String(MarkdownBlockParser.codeLineContent(in: $0[...], fenceIndent: fenceIndent)) })
         }
 
         let indentedLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }

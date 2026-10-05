@@ -27,11 +27,35 @@ struct MarkdownBlockParserTests {
         #expect(blocks.first?.lineRange == 0..<3)
     }
 
-    private func listItems(_ source: String) -> [MarkdownListItem] {
+    /// A list item, flattened: how deep it is nested, and what kind it is.
+    private struct FlatItem {
+        let indent: Int
+        let isOrdered: Bool
+        let order: Int?
+    }
+
+    /// The items of the first list in `source`, in source order, each with its
+    /// nesting depth. An item is a container that holds its nested lists, so
+    /// this walks down into them.
+    private func listItems(_ source: String) -> [FlatItem] {
+        func flattened(_ items: [MarkdownListItem], depth: Int) -> [FlatItem] {
+            items.flatMap { item -> [FlatItem] in
+                let nested = item.children.flatMap { child -> [FlatItem] in
+                    switch child.kind {
+                    case let .list(items, _), let .orderedList(items, _):
+                        return flattened(items, depth: depth + 1)
+                    default:
+                        return []
+                    }
+                }
+                return [FlatItem(indent: depth, isOrdered: item.isOrdered, order: item.order)] + nested
+            }
+        }
+
         for block in MarkdownBlockParser.parse(source) {
             switch block.kind {
             case let .list(items, _), let .orderedList(items, _):
-                return items
+                return flattened(items, depth: 0)
             default:
                 continue
             }
@@ -49,11 +73,13 @@ struct MarkdownBlockParserTests {
         }
     }
 
-    @Test func nestingDepthDoesNotSkipLevels() async throws {
-        // Eight spaces under a top-level item is still a single level deeper;
-        // CommonMark has no way to jump straight to depth two.
+    @Test func aMarkerIndentedTooFarIsNotANestedItem() async throws {
+        // Eight spaces under a top-level item is six columns past where its
+        // content starts. Four or more is not a list item at all in CommonMark:
+        // under the item's text, it is that paragraph's next line. Nesting goes
+        // one level at a time, and there is no way to skip one.
         let items = listItems("- parent\n        - child")
-        #expect(items.map(\.indent) == [0, 1])
+        #expect(items.map(\.indent) == [0])
     }
 
     @Test func dedentReturnsToTheMatchingLevel() async throws {
@@ -93,11 +119,12 @@ struct MarkdownBlockParserTests {
         let blocks = MarkdownBlockParser.parse(source)
         // The mixed nesting stays one block so it can render as one nested list.
         #expect(blocks.count == 1)
-        guard case let .list(items, _)? = blocks.first?.kind else {
+        guard case .list? = blocks.first?.kind else {
             Issue.record("Expected a bulleted list block")
             return
         }
 
+        let items = listItems(source)
         #expect(items.map(\.indent) == [0, 1, 1, 0])
         #expect(items.map(\.isOrdered) == [false, true, true, false])
     }

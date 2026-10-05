@@ -61,6 +61,47 @@ test('whitespace between elements is formatting, not text', () => {
   assert.deepEqual(spans(entries), [[0, 5], [5, 11]]);
 });
 
+test('so is whitespace between the blocks in a quote and the rows of a table', () => {
+  const quote = walk(block(0, 30, '\n<p>First</p>\n<p>Second</p>\n', 'blockquote'));
+  const table = walk(
+    '<div class="md-block" data-source-start="0" data-source-end="30">\n<div class="table-wrap">\n' +
+    '<table>\n<thead>\n<tr>\n<th>Name</th>\n<th>Count</th>\n</tr>\n</thead>\n' +
+    '<tbody>\n<tr>\n<td>apples</td>\n<td>12</td>\n</tr>\n</tbody>\n</table>\n</div>\n</div>'
+  );
+
+  assert.deepEqual(texts(quote), ['First', 'Second']);
+  assert.deepEqual(texts(table), ['Name', 'Count', 'apples', '12']);
+});
+
+// Between two inline elements it is the other way round: the space is a
+// character the reader sees and the source mapping counts.
+test('a space between two inline elements is text', () => {
+  const entries = walk(block(0, 30, '<em>Alpha</em> <strong>beta</strong>'));
+
+  assert.deepEqual(texts(entries), ['Alpha', ' ', 'beta']);
+  assert.deepEqual(spans(entries), [[0, 5], [5, 6], [6, 10]]);
+});
+
+test('a line break followed by an inline element is still a line break', () => {
+  const entries = walk(block(0, 30, '<strong>Name:</strong> Alpha<br />\n<strong>Place:</strong> beta'));
+
+  assert.deepEqual(texts(entries), ['Name:', ' Alpha', '\n', 'Place:', ' beta']);
+  assert.equal(entries.at(-1).end, 'Name: Alpha\nPlace: beta'.length);
+});
+
+// The other fixtures here put the offsets on the element itself. The renderer
+// wraps each block in a div that carries them, with the Copy button inside it.
+test('a block shaped as the renderer writes one', () => {
+  const entries = walk(
+    '<div class="md-block md-copyable-block" data-copy-kind="blockquote" data-source-start="0" data-source-end="30">' +
+    '<button type="button" class="md-copy-button" data-copy-button>Copy</button>' +
+    '<blockquote><p>Quoted <em>line</em></p><ul><li>First</li><li>Second</li></ul></blockquote></div>'
+  );
+
+  assert.deepEqual(texts(entries), ['Quoted ', 'line', 'First', 'Second']);
+  assert.deepEqual(spans(entries), [[0, 7], [7, 11], [11, 16], [16, 22]]);
+});
+
 test('whitespace inside code is kept, because there it is the text', () => {
   const entries = walk(block(0, 30, '<code><span>let</span> <span>value</span></code>', 'pre'));
 

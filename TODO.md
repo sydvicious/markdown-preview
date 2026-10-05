@@ -29,6 +29,22 @@ This document tracks planned work for MarkdownPreviewApp.
   - Symptom driving this: opening a new file visibly freezes the GUI. The whole open path — read, parse, HTML build — currently runs on `@Main`, so the window stops responding until it finishes.
   - Schedule this work after the YMMV-related refactor work.
 
+### Crash at launch: two saved documents that resolve to one file. (fixed 2026-10-04; see what is left)
+  - Found 2026-10-04 by reading the code, during the audit under "Audit the test suites and cover every markdown feature", then reproduced the same day in `DocumentSessionStore` on macOS, in a test, not by launching the app.
+  - To reproduce: open `first/notes.md`; move the file to `second/notes.md`; open it again from there. The first entry is not removed by polling, because its bookmark follows the file, so the list holds the document twice, once under each path, and both are saved. On the next restore both resolved to `second/notes.md`, and `DocumentSearchIndex.rebuild` trapped in `Dictionary(uniqueKeysWithValues:)` — at every launch, because the saved list was still the same.
+  - Fixed: `DocumentSessionStore.restoreMigration` keeps one entry for each resolved path, the one opened last, and `DocumentSearchIndex.rebuild` no longer traps on a repeat. Tests: `DocumentSessionStoreTests/twoSavedEntriesForOneFileRestoreAsOne` and `DocumentSearchIndexTests/aDocumentListedTwiceIsIndexedOnce`. On macOS each runs the step that used to trap in a child process (a Swift Testing exit test), so a regression fails the test and not the whole run; exit tests do not exist on iOS, where the same checks run in the test process.
+  - Left:
+    - Until the next launch the document is still listed twice after it is moved and opened again. The entry under the old path keeps that path as its ID.
+    - iOS gets into the same state: checked 2026-10-04 with a temporary test Syd ran from Xcode on an iOS simulator. After the move the first entry stayed in the list, opening the file again added a second, and the first entry's saved bookmark resolved to the new path (and reported itself stale). So before the fix iOS would have crashed the same way; with the fix the restore came back with one entry.
+    - Not checked in the signed, sandboxed Mac app. The macOS reproduction ran in the unsigned test host.
+
+### (iOS) A scroll restore could fall short of where the reader was. (fixed 2026-10-05; needs a full iOS run to confirm)
+  - First seen 2026-10-04 as `WebKitTextNodeAlignmentTests/anEditedDocumentIsPutBackAtTheSameOffset()` failing now and then in a full run on the iPhone 17 simulator (iOS 27.0), and passing on its own.
+  - Cause, confirmed by the failure of 2026-10-05: the page finishes loading before it has been laid out to its full height. That run failed in the test's own setup — a 121-paragraph page, told to scroll to 900 the moment it loaded, stayed at 0. The app asks for the reader's place back at that same moment (`restoreScrollPosition` in `MarkdownPreviewWebView.swift`), with one scroll, so it could land short in the same way. Seen only in a full iOS test run, with many web views loading at once; not seen in the app.
+  - Fixed in `MarkdownPreview/Web/scroll.js`: a restore that falls short is made again as the page grows, until it lands, the reader moves the page (wheel, touch, mouse or key), or two seconds pass. Nothing changed in Swift.
+  - Tests: six in `scroll.test.mjs`; in `WebKitTextNodeAlignmentTests`, `aRestoreMadeBeforeThePageIsTallEnoughLandsOnceItIs` and `aRestoreDoesNotOverrideTheReader`. The two older scroll tests there now use the app's own restore call and wait for the position to settle.
+  - Left: a full iOS run, which is where it failed and which only Syd can do. Remove this entry when that has passed a few times. Worth a look on a device too: reload a long document with images part way down, and see that the place is kept.
+
 ## Features
 
 ### Investigate using Liquid Glass controls.
@@ -162,14 +178,58 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Hardening for production use.
   - Improve handling/performance for very large markdown files.
-    - Profile and handle really large files end to end: parsing/rendering, the offset mappings (`MarkdownTextOffsetMapping`/`HTMLTextOffsetMapping` currently rebuild over the whole document), in-document search, and WKWebView load/selection. Expect this to be significant work.
+    - Profile and handle really large files end to end: parsing/rendering, the offset mappings (`MarkdownTextOffsetMapping` currently rebuilds over the whole document), in-document search, and WKWebView load/selection. Expect this to be significant work.
     - Consider incremental/virtualized rendering or chunking so opening, scrolling, and searching stay responsive; guard against pathological inputs (huge single lines/tables, deeply nested structures).
     - Relates to the search-field performance work under "Expand search and indexing."
   - Add robustness for markdown edge cases and malformed input across parser/renderer paths.
   - See "Audit the test suites and cover every markdown feature" for the parser/renderer test work this depends on.
 
+### Turn content JavaScript off in the preview. (investigate)
+  - Found 2026-10-05, while adding autolinks: clicking a `javascript:` link ran its script in the preview's page. WebKit does not call `decidePolicyFor` for one, so the app's link handling never saw it. Script in the page can read the key `MarkdownImageURL` puts on image URLs, and so ask the scheme handler for other image files the app can read, and can post to the app's message handlers. The inline form, `[text](javascript:…)`, had behaved this way since links were first rendered.
+  - Fixed in the renderer the same day: a link or autolink whose destination is `javascript:` or `vbscript:` is written without its `href`. Tests: `ScriptLinkTests` in the conformance suite, and `WebKitTextNodeAlignmentTests/clickingAScriptLinkRunsNothing`, which asks WebKit whether anything the renderer wrote is still script to it and clicks every link.
+  - That is one layer. The second would be `allowsContentJavaScript = false` on the preview's `WKWebpagePreferences` — it is set to `true` in both platforms' `makeUIView`/`makeNSView` in `MarkdownPreviewWebView.swift`. Apple documents that setting as stopping script the *content* brings, `javascript:` URLs included, while user scripts and `evaluateJavaScript` still run. If that holds, nothing a document contains could run script even if the renderer let something through, and it is the right default before raw HTML is allowed in ("Support inline HTML").
+  - To check before changing it: that the app's own scripts still work with it off — the Copy button, selection reporting and applying, the image-access button, scroll reporting and restoring. The WebKit tests build their own configuration, so they do not exercise the app's; they would need to share it, or this wants checking in the running app.
+
 ### Audit the test suites and cover every markdown feature.
-  - Done 2026-07-19 for the renderer: `MarkdownCore/Tests/MarkdownCoreConformanceTests` covers the block and inline features against CommonMark 0.31.2, runs headlessly via `swift test`, and passes. It exposed 44 failing cases when it landed; all are now fixed. Still to do: the offset-mapping round trips below, and the audit of the remaining Xcode-hosted suites.
+  - Done 2026-07-19 for the renderer: `MarkdownCore/Tests/MarkdownCoreConformanceTests` covers the block and inline features against CommonMark 0.31.2 and runs headlessly via `swift test`. It exposed 44 failing cases when it landed; all were fixed.
+  - Done 2026-10-04 for the rest of the test work. The suites landed with the run red, each failure filed under "Bugs". Every one of those was fixed by 2026-10-05, and the whole run is green.
+    - The conformance suite grew from 92 cases to 285, and passes in full. It had 30 failing when it was extended.
+    - The offset mappings are tested per feature: `MarkdownFeature.all` (`MarkdownPreviewTests/Utilities/MarkdownFeatureOffsetMappingTests.swift`) is 81 one-block fragments, each with its visible text written by hand. Each is checked against the source mapping, against WebKit's own text, and by carrying a selection from the source to the page and back; `MarkdownSearchFeatureTests` does the same for what a search finds. When these landed, 85 cases failed; all pass as of 2026-10-05.
+    - What those failures led to: the mapping no longer parses markdown itself. `MarkdownVisibleText`, in `MarkdownCore`, builds a document's visible text from the parser's own line rules and from the pass that writes the HTML, and has its own suite, `MarkdownVisibleTextTests`, that runs from the command line.
+    - The no-whitespace-between-tags check covers every block type, and passes.
+    - Not covered, because there is nothing to assert yet: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.
+  - Audit of the other suites, 2026-10-04: what the suites outside the renderer and the offset mappings cover, and what they do not. Done by reading the tests against the sources; nothing was run to produce it. "No test" means the name appears nowhere in either test directory, which was checked by search. Anything said about behavior is from reading the code and is marked so.
+    - A possible crash at launch came out of this audit; it has its own entry under "Bugs".
+    - Files with no tests at all:
+      - `DirectoryAccessStore` — the format-version discard, restoring and pruning bookmarks, granting. It takes a `UserDefaults`, so it can be tested the way `DocumentSessionStore` is.
+      - `MarkdownFile` — the UTF-16 fallback and the undecodable-bytes error; only the UTF-8 path is reached, through other suites.
+      - `MarkdownImageSchemeHandler` — the refuse / unreadable / not-an-image chain. `WKURLSchemeTask` is a protocol, so a stand-in works; the hard-wired `DirectoryAccessStore.shared` is what is in the way.
+      - `MarkdownSelectionRange` — every offset in the app goes through it. Tests use it as a helper; none is about it. (`MarkdownSourceLineTable` was in the same state and got its own suite with the line-endings fix.)
+      - `PreviewSelectionSynchronizer` and the none / missing / unreadable image decision, both in `MarkdownPreviewView.swift`.
+    - Untested logic in files that do have tests:
+      - `DocumentSessionStore`: `checkAllDocumentsForChanges`, `acknowledgeMissingActiveDocument`, `handleMissingDocument`, `hasPersistedDocumentList` (the gate for seeding the welcome document), and removal at compact width.
+      - `ContentViewModel`: `handleFindCommand`, `focusDetailSearch`, `navigateDetailSearch`, `cancelFocusedSearch`, `decreaseSelectedTextSize`, `filteredGroupedDocumentsByParentDirectory` (what the Mac sidebar shows), and every single-column branch — no test sets `usesSingleColumnNavigation`.
+      - `MarkdownAppCommandCenter`: six of the nine `perform…` methods are never called (project find, use selection, find next, find previous, larger and smaller text), and `ContentView.syncCommandCenter`, which binds each command to a view-model method, has no test. A transposed argument there would pass everything.
+      - `MarkdownSearchSession`: no test moves backward, so Find Previous, its wrap, and reversing direction mid-wrap are untested; so is `refresh` when the matches shrink.
+      - `SearchViewModel`: `detailSearchSuggestions` and `seedFromPasteboardIfEmpty`. The suggestion rules in `DocumentSearchIndex` and `MarkdownSearch` (minimum length, limit, folding, no repeats) rest on one `contains` assertion.
+      - `SelectableSourceTextView`: the tested `SourceSelectionUpdate.resolve` is called only from the iOS view. The Mac view clamps the selection inline, and that has no test.
+      - `MarkdownSelectionClipboard`: `writeSelection` and `writePlainText`.
+      - `MarkdownImageURL`: an image source with a folder in it (`images/x.png`, `../x.png`), and an upper-case extension, which the bundled sample's `lilsyd.JPG` has.
+      - `MarkdownBlockCopyText`: tab and mixed indentation, a fence indented up to three spaces, a quote's continuation line without its `>`.
+    - The seam between Swift and the page's scripts. Each side is tested alone, so a rename or a reordered argument on one side passes every suite and the preview fails without an error.
+      - The message-handler names `copyBlock`, `previewSelectionChanged` and `previewScrollChanged` are private to `MarkdownPreviewWebView.swift`; only `requestImageAccess` is checked end to end.
+      - `MarkdownCopyWebView.selectionInvocation`, which writes the six arguments of `applySelection`, is private and untested. The per-feature WebKit test added the same day writes those arguments itself, so it covers the script and `PreviewScriptCall.applySelection`, not that function.
+      - The link policy is inline in the navigation delegate, with no function to test.
+    - Tests that do not test what their name says:
+      - `MarkdownImageURLTests/refusesDisallowedExtensionsWhenServing` passes a URL with no key, so it is refused at the key check and never reaches the extension check it is named for. No test presents the right key with a disallowed extension.
+      - `SearchViewModelTests/findQueryIsAdoptedOnceAFieldIsFocused` and `findQueryPresentBeforeLaunchIsAdoptedOnFirstFocus` have the same body; the "present before launch" case is never set up.
+      - `DocumentSessionStoreTests/restoreKeepsPersistedSelectionOnCompactWidth`: the restore ignores its `isCompactWidth` argument, so compact width is not what is tested.
+      - `MarkdownPreviewWebViewTests`' one test of `contiguousSelectionRanges` asserts that there is one range, not which.
+    - Code with no callers in the app:
+      - `MarkdownBlockQuoteView`, and `DetailPreviewPane` — each is referenced only from `#Preview` blocks.
+      - `DirectoryContainment.directory(containing:from:)` and `directory(_:contains:)`: nine of that suite's thirteen tests are of functions the app never calls. `MarkdownImageURL.mimeType(forPathExtension:)` is the same.
+      - `DirectoryAccessStore.hasAccess` is used only inside a log message.
+    - The scripts' tests have the smallest gaps: a selection whose ends are elements, not text nodes (select-all, triple-click); `preventDefault` and `stopPropagation` in the two button handlers; the `touchend` and `pointerup` listeners.
   - Audit what the existing suites actually cover. The gaps found so far were large: before the nested-list work there were no tests at all for list parsing or list HTML, despite lists being a core feature. Assume other features are in the same state until checked, and write down what is covered and what is not.
   - Add a unit test per individual markdown feature: generate a small `.md` fragment exercising exactly that feature, render it, and assert the generated HTML is correct.
     - Cover at least: headings (ATX and setext), paragraphs, bulleted lists, numbered lists, nested and mixed lists, checklists, blockquotes, fenced code, inline code, emphasis and strong, links, images, horizontal rules, and tables (including alignment, inline code in cells, and explicit line breaks).

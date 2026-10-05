@@ -20,6 +20,17 @@
 //    - ordered lists number each item with `value` instead of putting `start`
 //      on the list, so non-sequential numbering survives as written.
 //
+//  Three more follow from how the preview uses the markup, and show up in the
+//  exact strings asserted below:
+//    - nothing is written between block-level tags, where the spec's reference
+//      output has a newline, because the preview counts text nodes;
+//    - a code block's content has no trailing newline;
+//    - raw HTML is escaped rather than passed through, which is what stops a
+//      document putting markup of its own into the preview.
+//
+//  A case for something the renderer does not do yet is asserted here all the
+//  same, and fails until it does. At present every case passes.
+//
 
 import Foundation
 import Testing
@@ -119,6 +130,18 @@ struct ATXHeadingTests {
     @Test func emptyHeadingIsAllowed() async throws {
         #expect(blockHTML("#") == "<h1></h1>")
     }
+
+    @Test func closingSequenceNeedsASpaceBeforeIt() async throws {
+        #expect(blockHTML("# foo#") == "<h1>foo#</h1>")
+    }
+
+    @Test func escapedClosingHashIsContent() async throws {
+        #expect(blockHTML("# foo \\#") == "<h1>foo #</h1>")
+    }
+
+    @Test func headingCanInterruptAParagraph() async throws {
+        #expect(allBlockHTML("foo\n# bar\nbaz") == ["<p>foo</p>", "<h1>bar</h1>", "<p>baz</p>"])
+    }
 }
 
 @Suite("Setext headings (spec 4.3)")
@@ -145,6 +168,23 @@ struct SetextHeadingTests {
     @Test func multiLineContentIsJoined() async throws {
         // A setext heading's content may span several lines.
         #expect(blockHTML("foo\nbar\n===") == "<h1>foo\nbar</h1>")
+    }
+
+    @Test func underlineCannotFollowABlankLine() async throws {
+        #expect(allBlockHTML("foo\n\n===") == ["<p>foo</p>", "<p>===</p>"])
+    }
+
+    @Test func underlineMayBeIndentedAndHaveTrailingSpaces() async throws {
+        #expect(blockHTML("foo\n   ===  ") == "<h1>foo</h1>")
+    }
+
+    @Test func underlineWithInteriorSpacesIsNotAnUnderline() async throws {
+        #expect(blockHTML("foo\n= =") == "<p>foo\n= =</p>")
+    }
+
+    @Test func aListItemIsNotSetextContent() async throws {
+        // The dashes under a list item are a thematic break, not an underline.
+        #expect(allBlockHTML("- foo\n---") == ["<ul><li>foo</li></ul>", "<hr />"])
     }
 }
 
@@ -176,6 +216,61 @@ struct ParagraphTests {
     @Test func trailingBackslashMakesAHardBreak() async throws {
         #expect(blockHTML("foo\\\nbar") == "<p>foo<br />\nbar</p>")
     }
+
+    @Test func oneTrailingSpaceIsNotAHardBreak() async throws {
+        #expect(blockHTML("foo \nbar") == "<p>foo\nbar</p>")
+    }
+
+    @Test func trailingSpacesAtTheEndOfAParagraphAreDropped() async throws {
+        // A hard break needs a line after it; at the end of the block the
+        // spaces are just trailing whitespace.
+        #expect(blockHTML("foo  ") == "<p>foo</p>")
+    }
+
+    @Test func backslashAtTheEndOfAParagraphIsLiteral() async throws {
+        #expect(blockHTML("foo\\") == "<p>foo\\</p>")
+    }
+
+    @Test func severalBlankLinesAreOneSeparator() async throws {
+        #expect(allBlockHTML("foo\n\n\n\nbar") == ["<p>foo</p>", "<p>bar</p>"])
+    }
+
+    @Test func windowsLineEndingsAreLineEndings() async throws {
+        // Spec 2.1: a line ending is a newline, a carriage return, or the two
+        // together. A file saved with CRLF endings is the same document.
+        #expect(allBlockHTML("# foo\r\n\r\nbar\r\nbaz\r\n") == ["<h1>foo</h1>", "<p>bar\nbaz</p>"])
+    }
+
+    @Test func aCarriageReturnAloneIsALineEnding() async throws {
+        #expect(allBlockHTML("# foo\r\rbar\rbaz") == ["<h1>foo</h1>", "<p>bar\nbaz</p>"])
+    }
+
+    @Test func lineEndingsMayBeMixedInOneFile() async throws {
+        // Each line ends however it ends; nothing is decided for the file as a
+        // whole.
+        #expect(
+            allBlockHTML("# foo\r\n\nbar\rbaz\nqux\r\n\r- a\n- b\r\n")
+                == ["<h1>foo</h1>", "<p>bar\nbaz\nqux</p>", "<ul><li>a</li><li>b</li></ul>"]
+        )
+    }
+
+    @Test func windowsLineEndingsWorkInsideEveryKindOfBlock() async throws {
+        let source = [
+            "- a", "- b", "",
+            "> quoted", "> again", "",
+            "```", "let x = 1", "```", "",
+            "| h |", "| - |", "| 1 |", "",
+        ].joined(separator: "\r\n")
+
+        #expect(
+            allBlockHTML(source) == [
+                "<ul><li>a</li><li>b</li></ul>",
+                "<blockquote><p>quoted\nagain</p></blockquote>",
+                "<pre><code>let x = 1</code></pre>",
+                "<div class=\"table-wrap\"><table><thead><tr><th class=\"a-left\">h</th></tr></thead><tbody><tr><td class=\"a-left\">1</td></tr></tbody></table></div>",
+            ]
+        )
+    }
 }
 
 @Suite("Thematic breaks (spec 4.1)")
@@ -202,6 +297,28 @@ struct ThematicBreakTests {
 
     @Test func mixedCharactersAreNotABreak() async throws {
         #expect(blockHTML("*-*") != "<hr />")
+    }
+
+    @Test func otherCharactersAreNotBreakMarkers() async throws {
+        #expect(blockHTML("+++") == "<p>+++</p>")
+        #expect(blockHTML("===") == "<p>===</p>")
+    }
+
+    @Test func anythingElseOnTheLineMakesItText() async throws {
+        #expect(blockHTML("_ _ _ _ a") == "<p>_ _ _ _ a</p>")
+        #expect(blockHTML("a------") == "<p>a------</p>")
+        #expect(blockHTML("---a---") == "<p>---a---</p>")
+    }
+
+    @Test func breakCanInterruptAParagraph() async throws {
+        #expect(allBlockHTML("foo\n***\nbar") == ["<p>foo</p>", "<hr />", "<p>bar</p>"])
+    }
+
+    @Test func breakBetweenListItemsSplitsTheList() async throws {
+        #expect(
+            allBlockHTML("- foo\n***\n- bar")
+                == ["<ul><li>foo</li></ul>", "<hr />", "<ul><li>bar</li></ul>"]
+        )
     }
 }
 
@@ -235,6 +352,144 @@ struct FencedCodeTests {
     @Test func fenceMayBeIndentedUpToThreeSpaces() async throws {
         #expect(blockHTML("  ```\nfoo\n  ```") == "<pre><code>foo</code></pre>")
     }
+
+    @Test func contentIndentedLikeTheFenceLosesThatIndentation() async throws {
+        // Each content line gives up as much indentation as the opening fence
+        // has, which is what lets a fenced block sit under a list item.
+        #expect(blockHTML("  ```\n  foo\n    bar\n  ```") == "<pre><code>foo\n  bar</code></pre>")
+    }
+
+    @Test func contentIndentedLessThanTheFenceLosesWhatItHas() async throws {
+        #expect(blockHTML("   ```\n   aaa\n    aaa\n  aaa\n   ```") == "<pre><code>aaa\n aaa\naaa</code></pre>")
+    }
+
+    @Test func emptyFenceIsAnEmptyBlock() async throws {
+        #expect(blockHTML("```\n```") == "<pre><code></code></pre>")
+    }
+
+    @Test func closingFenceMustBeAtLeastAsLongAsTheOpener() async throws {
+        #expect(blockHTML("````\naaa\n```\n``````") == "<pre><code>aaa\n```</code></pre>")
+    }
+
+    @Test func aFenceOfTheOtherCharacterDoesNotClose() async throws {
+        #expect(blockHTML("```\naaa\n~~~\n```") == "<pre><code>aaa\n~~~</code></pre>")
+    }
+
+    @Test func aFenceLineWithAnInfoStringDoesNotClose() async throws {
+        #expect(blockHTML("```\nfoo\n``` bar\n```") == "<pre><code>foo\n``` bar</code></pre>")
+    }
+
+    @Test func unclosedFenceRunsToTheEndOfTheDocument() async throws {
+        #expect(allBlockHTML("```\nfoo\n\nbar") == ["<pre><code>foo\n\nbar</code></pre>"])
+    }
+
+    @Test func blankLinesAndIndentationInsideAreKept() async throws {
+        #expect(blockHTML("```\n\n  indented\n\n```") == "<pre><code>\n  indented\n</code></pre>")
+    }
+
+    @Test func onlyTheFirstWordOfTheInfoStringNamesTheLanguage() async throws {
+        #expect(
+            blockHTML("```swift startline=3\nlet x = 1\n```")
+                == "<pre><code class=\"language-swift\">let x = 1</code></pre>"
+        )
+    }
+
+    @Test func languageClassIsAttributeEscaped() async throws {
+        #expect(blockHTML("```a\"b\nx\n```") == "<pre><code class=\"language-a&quot;b\">x</code></pre>")
+    }
+
+    @Test func backtickInfoStringCannotContainABacktick() async throws {
+        // Which is what keeps a line of inline code from opening a block.
+        #expect(blockHTML("``` aa ```\nfoo") == "<p><code>aa</code>\nfoo</p>")
+    }
+
+    @Test func tildeInfoStringMayContainBackticks() async throws {
+        #expect(blockHTML("~~~ aa ``` ~~~\nfoo\n~~~") == "<pre><code class=\"language-aa\">foo</code></pre>")
+    }
+
+    @Test func fenceCanInterruptAParagraph() async throws {
+        #expect(
+            allBlockHTML("foo\n```\nbar\n```\nbaz")
+                == ["<p>foo</p>", "<pre><code>bar</code></pre>", "<p>baz</p>"]
+        )
+    }
+}
+
+@Suite("Indented code blocks (spec 4.4)")
+struct IndentedCodeTests {
+
+    @Test func fourSpacesMakeACodeBlock() async throws {
+        #expect(blockHTML("    foo") == "<pre><code>foo</code></pre>")
+    }
+
+    @Test func aTabIndentsAsFarAsFourSpaces() async throws {
+        #expect(blockHTML("\tfoo") == "<pre><code>foo</code></pre>")
+    }
+
+    @Test func contentIsNotParsedAsMarkdown() async throws {
+        #expect(blockHTML("    *hi*\n\n    - one") == "<pre><code>*hi*\n\n- one</code></pre>")
+    }
+
+    @Test func indentationBeyondFourSpacesIsContent() async throws {
+        #expect(blockHTML("    foo\n      bar") == "<pre><code>foo\n  bar</code></pre>")
+    }
+
+    @Test func indentedLineCannotInterruptAParagraph() async throws {
+        // It is a continuation of the paragraph instead.
+        #expect(blockHTML("foo\n    bar") == "<p>foo\nbar</p>")
+    }
+
+    @Test func whatWouldBeAnotherBlockIsCodeWhenIndented() async throws {
+        #expect(blockHTML("    # not a heading") == "<pre><code># not a heading</code></pre>")
+        #expect(blockHTML("    - not a list") == "<pre><code>- not a list</code></pre>")
+        #expect(blockHTML("    > not a quote") == "<pre><code>&gt; not a quote</code></pre>")
+    }
+
+    @Test func anIndentedHeadingUnderAParagraphIsItsNextLine() async throws {
+        #expect(blockHTML("foo\n    # bar") == "<p>foo\n# bar</p>")
+    }
+
+    @Test func blankLinesInsideAreKeptAndTheOnesAfterAreNot() async throws {
+        #expect(
+            allBlockHTML("    a\n\n\n    b\n\n\nc")
+                == ["<pre><code>a\n\n\nb</code></pre>", "<p>c</p>"]
+        )
+    }
+
+    @Test func theBlockEndsAtALineThatIsNotIndented() async throws {
+        #expect(allBlockHTML("    foo\nbar") == ["<pre><code>foo</code></pre>", "<p>bar</p>"])
+    }
+
+    @Test func tabsBeyondTheFirstAreContent() async throws {
+        #expect(blockHTML("\tfoo\n\t\tbar") == "<pre><code>foo\n\tbar</code></pre>")
+    }
+
+    @Test func indentedCodeInsideAListItemAndAQuote() async throws {
+        // Indented four columns past where the item's own content starts.
+        #expect(
+            allBlockHTML("- foo\n\n      bar")
+                == ["<ul><li><p>foo</p><pre><code>bar</code></pre></li></ul>"]
+        )
+        #expect(blockHTML(">     foo") == "<blockquote><pre><code>foo</code></pre></blockquote>")
+    }
+
+    @Test func anItemMayBeginWithIndentedCode() async throws {
+        // Spec example 273. With five or more spaces after the marker, the
+        // item's content starts one column after it and the rest is indentation.
+        #expect(
+            allBlockHTML("1.      indented code\n\n   paragraph\n\n       more code")
+                == ["<ol><li value=\"1\"><pre><code> indented code</code></pre><p>paragraph</p><pre><code>more code</code></pre></li></ol>"]
+        )
+    }
+
+    @Test func aMarkerIndentedFourColumnsIsNotAListItem() async throws {
+        // Spec example 312: the last line is too far in to be an item, and too
+        // close to be inside the one before, so it is that item's next line.
+        #expect(
+            allBlockHTML("- a\n - b\n  - c\n   - d\n    - e")
+                == ["<ul><li>a</li><li>b</li><li>c</li><li>d\n- e</li></ul>"]
+        )
+    }
 }
 
 @Suite("Block quotes (spec 5.1)")
@@ -266,6 +521,74 @@ struct BlockQuoteTests {
         // A quote holds block structure, not just one paragraph.
         #expect(blockHTML("> # foo") == "<blockquote><h1>foo</h1></blockquote>")
         #expect(blockHTML("> - foo") == "<blockquote><ul><li>foo</li></ul></blockquote>")
+    }
+
+    @Test func upToThreeLeadingSpacesAreAllowed() async throws {
+        #expect(blockHTML("   > foo") == "<blockquote><p>foo</p></blockquote>")
+    }
+
+    @Test func lazyContinuationLineStaysInTheQuote() async throws {
+        // The marker may be left off a line that continues a paragraph.
+        #expect(allBlockHTML("> foo\nbar") == ["<blockquote><p>foo\nbar</p></blockquote>"])
+    }
+
+    @Test func aLazyLineAfterSeveralQuotedOnes() async throws {
+        #expect(allBlockHTML("> foo\n> bar\nbaz") == ["<blockquote><p>foo\nbar\nbaz</p></blockquote>"])
+    }
+
+    @Test func aLazyLineContinuesAListInsideTheQuote() async throws {
+        #expect(allBlockHTML("> - a\nb") == ["<blockquote><ul><li>a\nb</li></ul></blockquote>"])
+    }
+
+    @Test func onlyAParagraphCanBeContinuedLazily() async throws {
+        #expect(allBlockHTML("> # foo\nbar") == ["<blockquote><h1>foo</h1></blockquote>", "<p>bar</p>"])
+        #expect(allBlockHTML("> ```\n> code\n> ```\nbar") == ["<blockquote><pre><code>code</code></pre></blockquote>", "<p>bar</p>"])
+    }
+
+    @Test func aLineThatStartsABlockIsNotALazyLine() async throws {
+        #expect(allBlockHTML("> foo\n- bar") == ["<blockquote><p>foo</p></blockquote>", "<ul><li>bar</li></ul>"])
+        #expect(allBlockHTML("> foo\n---") == ["<blockquote><p>foo</p></blockquote>", "<hr />"])
+        #expect(allBlockHTML("> foo\n# bar") == ["<blockquote><p>foo</p></blockquote>", "<h1>bar</h1>"])
+    }
+
+    @Test func blankLineSeparatesQuotes() async throws {
+        #expect(
+            allBlockHTML("> foo\n\n> bar")
+                == ["<blockquote><p>foo</p></blockquote>", "<blockquote><p>bar</p></blockquote>"]
+        )
+    }
+
+    @Test func bareMarkerLineSeparatesParagraphsInOneQuote() async throws {
+        #expect(blockHTML("> foo\n>\n> bar") == "<blockquote><p>foo</p><p>bar</p></blockquote>")
+    }
+
+    @Test func quoteCanInterruptAParagraph() async throws {
+        #expect(allBlockHTML("foo\n> bar") == ["<p>foo</p>", "<blockquote><p>bar</p></blockquote>"])
+    }
+
+    @Test func hardBreakInsideAQuote() async throws {
+        #expect(blockHTML("> foo  \n> bar") == "<blockquote><p>foo<br />\nbar</p></blockquote>")
+    }
+
+    @Test func quotesContainFencedCode() async throws {
+        #expect(
+            blockHTML("> ```\n> let x = 1\n> ```")
+                == "<blockquote><pre><code>let x = 1</code></pre></blockquote>"
+        )
+    }
+
+    @Test func quotesContainNestedLists() async throws {
+        #expect(
+            blockHTML("> - foo\n>   - bar\n> - baz")
+                == "<blockquote><ul><li>foo<ul><li>bar</li></ul></li><li>baz</li></ul></blockquote>"
+        )
+    }
+
+    @Test func quotesContainTables() async throws {
+        #expect(
+            blockHTML("> | a |\n> | --- |\n> | 1 |")
+                == "<blockquote><div class=\"table-wrap\"><table><thead><tr><th class=\"a-left\">a</th></tr></thead><tbody><tr><td class=\"a-left\">1</td></tr></tbody></table></div></blockquote>"
+        )
     }
 }
 
@@ -330,6 +653,170 @@ struct ListTests {
         // content is then wrapped in <p>.
         #expect(blockHTML("- foo\n\n- bar") == "<ul><li><p>foo</p></li><li><p>bar</p></li></ul>")
     }
+
+    @Test func markerNeedsAFollowingSpace() async throws {
+        #expect(blockHTML("-foo") == "<p>-foo</p>")
+        #expect(blockHTML("1.foo") == "<p>1.foo</p>")
+    }
+
+    @Test func extraSpacesAfterTheMarkerAreNotContent() async throws {
+        #expect(blockHTML("-   foo") == "<ul><li>foo</li></ul>")
+    }
+
+    @Test func aTabMayFollowTheMarker() async throws {
+        #expect(blockHTML("-\tfoo") == "<ul><li>foo</li></ul>")
+    }
+
+    @Test func emptyItemIsAllowed() async throws {
+        #expect(blockHTML("- foo\n-\n- bar") == "<ul><li>foo</li><li></li><li>bar</li></ul>")
+    }
+
+    @Test func aMarkerAloneIsAnEmptyItem() async throws {
+        #expect(blockHTML("*") == "<ul><li></li></ul>")
+    }
+
+    @Test func emptyNumberedItemIsAllowed() async throws {
+        #expect(
+            blockHTML("1. foo\n2.\n3. bar")
+                == "<ol><li value=\"1\">foo</li><li value=\"2\"></li><li value=\"3\">bar</li></ol>"
+        )
+    }
+
+    @Test func anEmptyItemCannotInterruptAParagraph() async throws {
+        #expect(blockHTML("foo\n*") == "<p>foo\n*</p>")
+        #expect(blockHTML("foo\n1.") == "<p>foo\n1.</p>")
+    }
+
+    @Test func leadingZerosInTheNumberAreIgnored() async throws {
+        #expect(blockHTML("003. foo") == "<ol><li value=\"3\">foo</li></ol>")
+    }
+
+    @Test func aBulletListCanInterruptAParagraph() async throws {
+        #expect(allBlockHTML("foo\n- bar") == ["<p>foo</p>", "<ul><li>bar</li></ul>"])
+    }
+
+    @Test func onlyANumberedListStartingAtOneCanInterruptAParagraph() async throws {
+        // Otherwise a wrapped sentence whose next line happens to begin with a
+        // number and a period turns into a list.
+        #expect(
+            blockHTML("The number of windows in my house is\n14.  The number of doors is 6.")
+                == "<p>The number of windows in my house is\n14.  The number of doors is 6.</p>"
+        )
+    }
+
+    @Test func aNumberedListStartingAtOneCanInterruptAParagraph() async throws {
+        #expect(allBlockHTML("foo\n1. bar") == ["<p>foo</p>", "<ol><li value=\"1\">bar</li></ol>"])
+    }
+
+    @Test func blankLineThenUnindentedTextEndsTheList() async throws {
+        #expect(allBlockHTML("- foo\n\nbar") == ["<ul><li>foo</li></ul>", "<p>bar</p>"])
+    }
+
+    @Test func itemTextContinuesOnAnIndentedLine() async throws {
+        // A hard-wrapped item: the second line is the same paragraph.
+        #expect(allBlockHTML("- foo\n  bar") == ["<ul><li>foo\nbar</li></ul>"])
+    }
+
+    @Test func lazyContinuationLineStaysInTheItem() async throws {
+        #expect(allBlockHTML("- foo\nbar") == ["<ul><li>foo\nbar</li></ul>"])
+    }
+
+    @Test func itemsMayHoldSeveralParagraphs() async throws {
+        #expect(allBlockHTML("- foo\n\n  bar") == ["<ul><li><p>foo</p><p>bar</p></li></ul>"])
+    }
+
+    @Test func itemsContainOtherBlocks() async throws {
+        #expect(
+            allBlockHTML("- a\n  > b\n  ```\n  c\n  ```\n- d")
+                == ["<ul><li>a<blockquote><p>b</p></blockquote><pre><code>c</code></pre></li><li>d</li></ul>"]
+        )
+    }
+
+    @Test func aHardBreakInsideAnItem() async throws {
+        #expect(allBlockHTML("- foo  \n  bar") == ["<ul><li>foo<br />\nbar</li></ul>"])
+    }
+
+    @Test func aContinuationLineInANestedItem() async throws {
+        #expect(allBlockHTML("- a\n  - b\n    c\n- d") == ["<ul><li>a<ul><li>b\nc</li></ul></li><li>d</li></ul>"])
+    }
+
+    @Test func aLazyLineContinuesTheInnermostItem() async throws {
+        #expect(allBlockHTML("- a\n  - b\nc") == ["<ul><li>a<ul><li>b\nc</li></ul></li></ul>"])
+    }
+
+    @Test func aMarkerLineIsNeverALazyLine() async throws {
+        // Indented into the item, "2." is under the item's paragraph, which it
+        // may not interrupt, so it is that paragraph's next line.
+        #expect(allBlockHTML("- a\n  2. b") == ["<ul><li>a\n2. b</li></ul>"])
+        // Not indented, it is outside the item, where there is no paragraph to
+        // interrupt, and it starts a list.
+        #expect(allBlockHTML("- a\n2. b") == ["<ul><li>a</li></ul>", "<ol><li value=\"2\">b</li></ol>"])
+        #expect(allBlockHTML("> a\n2. b") == ["<blockquote><p>a</p></blockquote>", "<ol><li value=\"2\">b</li></ol>"])
+    }
+
+    @Test func aBlockAfterABlankLineMakesTheItemLoose() async throws {
+        #expect(
+            allBlockHTML("- foo\n\n  ```\n  bar\n  ```")
+                == ["<ul><li><p>foo</p><pre><code>bar</code></pre></li></ul>"]
+        )
+    }
+
+    @Test func aNestedListIsLooseOrTightOnItsOwn() async throws {
+        #expect(
+            allBlockHTML("- a\n  - b\n\n  - c\n- d")
+                == ["<ul><li>a<ul><li><p>b</p></li><li><p>c</p></li></ul></li><li>d</li></ul>"]
+        )
+    }
+
+    @Test func anItemMayStartWithOneBlankLine() async throws {
+        #expect(allBlockHTML("-\n  foo") == ["<ul><li>foo</li></ul>"])
+        // Two, and the item is empty and the text is not part of it.
+        #expect(allBlockHTML("-\n\n  foo") == ["<ul><li></li></ul>", "<p>foo</p>"])
+    }
+
+    @Test func whereAnItemsTextStartsSetsHowFarItsContentIsIndented() async throws {
+        #expect(allBlockHTML("-   foo\n\n    bar") == ["<ul><li><p>foo</p><p>bar</p></li></ul>"])
+        // Three columns is short of the four "1.  " takes up, so the bullet is
+        // not inside the numbered item.
+        #expect(
+            allBlockHTML("1.  foo\n   - bar")
+                == ["<ol><li value=\"1\">foo</li></ol>", "<ul><li>bar</li></ul>"]
+        )
+    }
+
+    @Test func anItemMayBeginWithAnotherBlock() async throws {
+        #expect(blockHTML("- # foo") == "<ul><li><h1>foo</h1></li></ul>")
+        #expect(blockHTML("- - foo") == "<ul><li><ul><li>foo</li></ul></li></ul>")
+        #expect(blockHTML("1. > foo") == "<ol><li value=\"1\"><blockquote><p>foo</p></blockquote></li></ol>")
+    }
+
+    @Test func changingBulletCharacterStartsANewList() async throws {
+        #expect(allBlockHTML("- foo\n+ bar") == ["<ul><li>foo</li></ul>", "<ul><li>bar</li></ul>"])
+    }
+
+    @Test func changingBulletCharacterInANestedListStartsANewNestedList() async throws {
+        #expect(
+            blockHTML("- a\n  - b\n  + c\n- d")
+                == "<ul><li>a<ul><li>b</li></ul><ul><li>c</li></ul></li><li>d</li></ul>"
+        )
+    }
+
+    @Test func aBlankLineBeforeANewListDoesNotLoosenTheOneBefore() async throws {
+        // A list is loose when a blank line separates two of its own items. One
+        // between the end of a list and the start of the next is neither's.
+        #expect(allBlockHTML("- foo\n\n+ bar") == ["<ul><li>foo</li></ul>", "<ul><li>bar</li></ul>"])
+        #expect(
+            allBlockHTML("- foo\n\n1. bar")
+                == ["<ul><li>foo</li></ul>", "<ol><li value=\"1\">bar</li></ol>"]
+        )
+    }
+
+    @Test func changingNumberDelimiterStartsANewList() async throws {
+        #expect(
+            allBlockHTML("1. foo\n2) bar")
+                == ["<ol><li value=\"1\">foo</li></ol>", "<ol><li value=\"2\">bar</li></ol>"]
+        )
+    }
 }
 
 @Suite("Task list items (GitHub extension, not CommonMark)")
@@ -354,6 +841,35 @@ struct TaskListTests {
 
     @Test func taskItemsNest() async throws {
         #expect(blockHTML("- [ ] foo\n  - [x] bar").contains("</label><ul><li class=\"task\">"))
+    }
+
+    @Test func nestedTaskItemsRenderInsideTheirParent() async throws {
+        #expect(
+            blockHTML("- [ ] foo\n  - [x] bar")
+                == "<ul><li class=\"task\"><label><input type=\"checkbox\" disabled /><span>foo</span></label><ul><li class=\"task\"><label><input type=\"checkbox\" disabled checked /><span>bar</span></label></li></ul></li></ul>"
+        )
+    }
+
+    @Test func taskAndOrdinaryItemsMixInOneList() async throws {
+        #expect(
+            blockHTML("- [x] foo\n- bar")
+                == "<ul><li class=\"task\"><label><input type=\"checkbox\" disabled checked /><span>foo</span></label></li><li>bar</li></ul>"
+        )
+    }
+
+    @Test func aTaskItemMayContinueOnTheNextLine() async throws {
+        #expect(
+            blockHTML("- [ ] foo\n  bar")
+                == "<ul><li class=\"task\"><label><input type=\"checkbox\" disabled /><span>foo\nbar</span></label></li></ul>"
+        )
+    }
+
+    @Test func boxWithoutAFollowingSpaceIsText() async throws {
+        #expect(blockHTML("- [x]foo") == "<ul><li>[x]foo</li></ul>")
+    }
+
+    @Test func anyOtherCharacterInTheBoxIsText() async throws {
+        #expect(blockHTML("- [y] foo") == "<ul><li>[y] foo</li></ul>")
     }
 }
 
@@ -384,6 +900,33 @@ struct CodeSpanTests {
 
     @Test func unmatchedBacktickIsLiteral() async throws {
         #expect(blockHTML("`foo") == "<p>`foo</p>")
+    }
+
+    @Test func interiorSpacesAreKept() async throws {
+        #expect(blockHTML("`a  b`") == "<p><code>a  b</code></p>")
+    }
+
+    @Test func lineEndingInsideIsASpace() async throws {
+        #expect(blockHTML("`foo\nbar`") == "<p><code>foo bar</code></p>")
+    }
+
+    @Test func lineEndingsBecomeSpacesBeforeThePaddingIsStripped() async throws {
+        // Spec example 335: the line endings at each end become the single
+        // spaces that are then stripped, and the two spaces after "bar" stay.
+        #expect(blockHTML("``\nfoo\nbar  \nbaz\n``") == "<p><code>foo bar   baz</code></p>")
+    }
+
+    @Test func backslashIsLiteralInside() async throws {
+        // So the span ends at the first backtick, escaped-looking or not.
+        #expect(blockHTML("`foo\\`bar`") == "<p><code>foo\\</code>bar`</p>")
+    }
+
+    @Test func entityIsNotDecodedInside() async throws {
+        #expect(blockHTML("`&amp;`") == "<p><code>&amp;amp;</code></p>")
+    }
+
+    @Test func codeSpanOutranksEmphasis() async throws {
+        #expect(blockHTML("*foo`*`") == "<p>*foo<code>*</code></p>")
     }
 }
 
@@ -439,6 +982,60 @@ struct EmphasisTests {
     @Test func unmatchedDelimiterIsLiteral() async throws {
         #expect(blockHTML("*foo") == "<p>*foo</p>")
     }
+
+    @Test func intrawordDoubleAsteriskIsStrong() async throws {
+        #expect(blockHTML("foo**bar**baz") == "<p>foo<strong>bar</strong>baz</p>")
+    }
+
+    @Test func underscoreEmphasisNextToPunctuation() async throws {
+        #expect(blockHTML("(_foo_)") == "<p>(<em>foo</em>)</p>")
+    }
+
+    @Test func underscoreClosingInsideAWordIsNotEmphasis() async throws {
+        #expect(blockHTML("_foo_bar") == "<p>_foo_bar</p>")
+    }
+
+    @Test func asterisksWithSpacesAroundThemAreLiteral() async throws {
+        // Arithmetic, not emphasis.
+        #expect(blockHTML("a * b * c") == "<p>a * b * c</p>")
+    }
+
+    @Test func emphasisSpansASoftBreak() async throws {
+        #expect(blockHTML("*foo\nbar*") == "<p><em>foo\nbar</em></p>")
+    }
+
+    @Test func emphasisWrapsOtherInlines() async throws {
+        #expect(
+            blockHTML("*[foo](/url)* **`x`**")
+                == "<p><em><a href=\"/url\">foo</a></em> <strong><code>x</code></strong></p>"
+        )
+    }
+
+    // Spec examples 414 to 418, which with 413 below pin how runs of different
+    // lengths pair up.
+
+    @Test func aRunThatCannotPairStaysAsText() async throws {
+        #expect(blockHTML("*foo**bar*") == "<p><em>foo**bar</em></p>")
+    }
+
+    @Test func aRunOfThreeOpensStrongInsideEmphasis() async throws {
+        #expect(blockHTML("***foo** bar*") == "<p><em><strong>foo</strong> bar</em></p>")
+    }
+
+    @Test func aRunOfThreeClosesStrongInsideEmphasis() async throws {
+        #expect(blockHTML("*foo **bar***") == "<p><em>foo <strong>bar</strong></em></p>")
+        #expect(blockHTML("*foo**bar***") == "<p><em>foo<strong>bar</strong></em></p>")
+    }
+
+    @Test func runsOfThreeInsideAWord() async throws {
+        #expect(blockHTML("foo***bar***baz") == "<p>foo<em><strong>bar</strong></em>baz</p>")
+    }
+
+    @Test func strongInsideEmphasisInsideAWord() async throws {
+        // Spec example 413, the "multiple of three" rule: the inner `**` runs
+        // can both open and close, so they may not pair with the outer `*`.
+        #expect(blockHTML("*foo**bar**baz*") == "<p><em>foo<strong>bar</strong>baz</em></p>")
+    }
 }
 
 @Suite("Links (spec 6.3)")
@@ -467,6 +1064,320 @@ struct LinkTests {
     @Test func unclosedLinkIsLiteral() async throws {
         #expect(blockHTML("[foo](/url") == "<p>[foo](/url</p>")
     }
+
+    @Test func spaceBetweenTextAndDestinationIsNotALink() async throws {
+        #expect(blockHTML("[foo] (/url)") == "<p>[foo] (/url)</p>")
+    }
+
+    @Test func singleQuotedTitle() async throws {
+        #expect(blockHTML("[foo](/url 'title')") == "<p><a href=\"/url\" title=\"title\">foo</a></p>")
+    }
+
+    @Test func titleIsAttributeEscaped() async throws {
+        #expect(
+            blockHTML("[foo](/url \"a <b> & c\")")
+                == "<p><a href=\"/url\" title=\"a &lt;b&gt; &amp; c\">foo</a></p>"
+        )
+    }
+
+    @Test func ampersandInTheDestinationIsEscaped() async throws {
+        #expect(blockHTML("[foo](/url?a=1&b=2)") == "<p><a href=\"/url?a=1&amp;b=2\">foo</a></p>")
+    }
+
+    @Test func codeSpanInTheLinkText() async throws {
+        #expect(blockHTML("[`foo`](/url)") == "<p><a href=\"/url\"><code>foo</code></a></p>")
+    }
+
+    @Test func balancedParenthesesInTheDestination() async throws {
+        // The shape of every Wikipedia disambiguation link.
+        #expect(blockHTML("[foo](/wiki/Foo_(bar))") == "<p><a href=\"/wiki/Foo_(bar)\">foo</a></p>")
+    }
+
+    @Test func bracketsInTheLinkText() async throws {
+        #expect(blockHTML("[foo [bar]](/url)") == "<p><a href=\"/url\">foo [bar]</a></p>")
+    }
+
+    @Test func parenthesizedTitle() async throws {
+        #expect(blockHTML("[foo](/url (title))") == "<p><a href=\"/url\" title=\"title\">foo</a></p>")
+    }
+
+    @Test func titleMayContainAParenthesis() async throws {
+        #expect(blockHTML("[foo](/url \"a) b\")") == "<p><a href=\"/url\" title=\"a) b\">foo</a></p>")
+    }
+
+    @Test func unbalancedParenthesisInTheDestinationIsNotALink() async throws {
+        #expect(blockHTML("[foo](/url(x)") == "<p>[foo](/url(x)</p>")
+    }
+
+    @Test func escapedBracketInTheLinkText() async throws {
+        #expect(blockHTML("[foo\\]](/url)") == "<p><a href=\"/url\">foo]</a></p>")
+    }
+
+    @Test func codeSpanOutranksTheLinkTextsBrackets() async throws {
+        #expect(blockHTML("[not a `link](/foo`)") == "<p>[not a <code>link](/foo</code>)</p>")
+    }
+
+    @Test func linksDoNotNest() async throws {
+        // The inner link is the link; the brackets around it are text.
+        #expect(blockHTML("[foo [bar](/a)](/b)") == "<p>[foo <a href=\"/a\">bar</a>](/b)</p>")
+    }
+
+    @Test func imageInsideALink() async throws {
+        // A badge: an image that is itself the link's text.
+        #expect(
+            blockHTML("[![alt](/img.png)](/url)")
+                == "<p><a href=\"/url\"><img src=\"/img.png\" alt=\"alt\" /></a></p>"
+        )
+    }
+}
+
+@Suite("Autolinks (spec 6.5)")
+struct AutolinkTests {
+
+    @Test func uriInAngleBracketsIsALink() async throws {
+        #expect(
+            blockHTML("<https://example.com/a?b=c>")
+                == "<p><a href=\"https://example.com/a?b=c\">https://example.com/a?b=c</a></p>"
+        )
+    }
+
+    @Test func emailAddressInAngleBracketsIsAMailtoLink() async throws {
+        #expect(
+            blockHTML("<foo@example.com>")
+                == "<p><a href=\"mailto:foo@example.com\">foo@example.com</a></p>"
+        )
+    }
+
+    @Test func anythingElseInAngleBracketsIsText() async throws {
+        #expect(blockHTML("<not a link>") == "<p>&lt;not a link&gt;</p>")
+    }
+
+    @Test func aSpaceInsideMeansItIsNotAnAutolink() async throws {
+        #expect(blockHTML("<https://foo.bar/baz bim>") == "<p>&lt;https://foo.bar/baz bim&gt;</p>")
+        #expect(blockHTML("< https://foo.bar >") == "<p>&lt; https://foo.bar &gt;</p>")
+    }
+
+    @Test func aSchemeIsAtLeastTwoCharacters() async throws {
+        #expect(blockHTML("<m:abc>") == "<p>&lt;m:abc&gt;</p>")
+        #expect(blockHTML("<made-up-scheme://foo,bar>") == "<p><a href=\"made-up-scheme://foo,bar\">made-up-scheme://foo,bar</a></p>")
+    }
+
+    @Test func nothingInsideAnAutolinkIsMarkup() async throws {
+        // Not emphasis, and not an escape: the address is taken as written.
+        #expect(
+            blockHTML("<https://example.com/a_b_c*d*>")
+                == "<p><a href=\"https://example.com/a_b_c*d*\">https://example.com/a_b_c*d*</a></p>"
+        )
+        #expect(
+            blockHTML("<https://example.com/\\[\\>")
+                == "<p><a href=\"https://example.com/%5C%5B%5C\">https://example.com/\\[\\</a></p>"
+        )
+    }
+
+    @Test func anAmpersandInTheAddressIsEscaped() async throws {
+        #expect(
+            blockHTML("<https://a.b/?x=1&y=2>")
+                == "<p><a href=\"https://a.b/?x=1&amp;y=2\">https://a.b/?x=1&amp;y=2</a></p>"
+        )
+    }
+
+    @Test func anAutolinkOutranksEmphasisAndLinkText() async throws {
+        #expect(
+            blockHTML("*<https://a.b/*>*")
+                == "<p><em><a href=\"https://a.b/*\">https://a.b/*</a></em></p>"
+        )
+        // Spec example 526: the bracket inside the address does not end the
+        // link text, so there is no link around it.
+        #expect(
+            blockHTML("[foo<https://example.com/?search=](uri)>")
+                == "<p>[foo<a href=\"https://example.com/?search=%5D(uri)\">https://example.com/?search=](uri)</a></p>"
+        )
+    }
+
+    @Test func aBackslashMeansItIsNotAnEmailAutolink() async throws {
+        #expect(blockHTML("<foo\\+@bar.example.com>") == "<p>&lt;foo+@bar.example.com&gt;</p>")
+    }
+
+    @Test func anEmailAddressMayHaveSubdomainsAndPunctuation() async throws {
+        #expect(
+            blockHTML("<foo+special@Bar.baz-bar0.com>")
+                == "<p><a href=\"mailto:foo+special@Bar.baz-bar0.com\">foo+special@Bar.baz-bar0.com</a></p>"
+        )
+    }
+}
+
+@Suite("Link reference definitions (spec 4.7, 6.3)")
+struct ReferenceLinkTests {
+
+    @Test func fullReference() async throws {
+        // The definition itself renders nothing.
+        #expect(
+            allBlockHTML("[foo][bar]\n\n[bar]: /url \"title\"")
+                == ["<p><a href=\"/url\" title=\"title\">foo</a></p>"]
+        )
+    }
+
+    @Test func collapsedReference() async throws {
+        #expect(allBlockHTML("[foo][]\n\n[foo]: /url") == ["<p><a href=\"/url\">foo</a></p>"])
+    }
+
+    @Test func shortcutReference() async throws {
+        #expect(allBlockHTML("[foo]\n\n[foo]: /url") == ["<p><a href=\"/url\">foo</a></p>"])
+    }
+
+    @Test func labelsMatchWithoutRegardToCase() async throws {
+        #expect(allBlockHTML("[Foo]\n\n[FOO]: /url") == ["<p><a href=\"/url\">Foo</a></p>"])
+    }
+
+    @Test func referenceImage() async throws {
+        #expect(
+            allBlockHTML("![foo][bar]\n\n[bar]: /img.png")
+                == ["<p><img src=\"/img.png\" alt=\"foo\" /></p>"]
+        )
+    }
+
+    @Test func undefinedReferenceIsText() async throws {
+        #expect(blockHTML("[foo][bar]") == "<p>[foo][bar]</p>")
+    }
+
+    // MARK: Using a reference
+
+    @Test func theDefinitionMayComeFirst() async throws {
+        #expect(allBlockHTML("[foo]: /url\n\n[foo]") == ["<p><a href=\"/url\">foo</a></p>"])
+    }
+
+    @Test func labelsMatchWithoutRegardToSpacing() async throws {
+        #expect(allBlockHTML("[Foo   Bar]: /url\n\n[foo bar]") == ["<p><a href=\"/url\">foo bar</a></p>"])
+    }
+
+    @Test func theTextOfAReferenceIsInlineRendered() async throws {
+        #expect(
+            allBlockHTML("[*foo* `bar`][x]\n\n[x]: /url")
+                == ["<p><a href=\"/url\"><em>foo</em> <code>bar</code></a></p>"]
+        )
+    }
+
+    @Test func anInlineDestinationWinsOverADefinition() async throws {
+        #expect(allBlockHTML("[foo](/inline)\n\n[foo]: /defined") == ["<p><a href=\"/inline\">foo</a></p>"])
+    }
+
+    @Test func theFirstDefinitionOfALabelWins() async throws {
+        #expect(allBlockHTML("[foo]: /first\n[foo]: /second\n\n[foo]") == ["<p><a href=\"/first\">foo</a></p>"])
+    }
+
+    @Test func aLabelAfterTheTextIsWhatIsLookedUp() async throws {
+        // Spec examples 571 to 573. Text followed by a label is a reference to
+        // that label, never a shortcut for its own.
+        #expect(allBlockHTML("[foo][bar][baz]\n\n[baz]: /url") == ["<p>[foo]<a href=\"/url\">bar</a></p>"])
+        #expect(
+            allBlockHTML("[foo][bar][baz]\n\n[baz]: /url1\n[bar]: /url2")
+                == ["<p><a href=\"/url2\">foo</a><a href=\"/url1\">baz</a></p>"]
+        )
+        #expect(
+            allBlockHTML("[foo][bar][baz]\n\n[baz]: /url1\n[foo]: /url2")
+                == ["<p>[foo]<a href=\"/url1\">bar</a></p>"]
+        )
+    }
+
+    @Test func anEscapedBracketIsNotAReference() async throws {
+        #expect(allBlockHTML("\\[foo]\n\n[foo]: /url") == ["<p>[foo]</p>"])
+    }
+
+    @Test func collapsedAndShortcutImages() async throws {
+        #expect(allBlockHTML("![foo][]\n\n[foo]: /img.png \"t\"") == ["<p><img src=\"/img.png\" alt=\"foo\" title=\"t\" /></p>"])
+        #expect(allBlockHTML("![foo]\n\n[foo]: /img.png") == ["<p><img src=\"/img.png\" alt=\"foo\" /></p>"])
+    }
+
+    @Test func referencesWorkInEveryKindOfBlock() async throws {
+        let source = """
+        # [foo]
+
+        - [foo]
+
+        > [foo]
+
+        | [foo] |
+        | --- |
+        | [foo] |
+
+        [foo]: /url
+        """
+
+        #expect(
+            allBlockHTML(source) == [
+                "<h1><a href=\"/url\">foo</a></h1>",
+                "<ul><li><a href=\"/url\">foo</a></li></ul>",
+                "<blockquote><p><a href=\"/url\">foo</a></p></blockquote>",
+                "<div class=\"table-wrap\"><table><thead><tr><th class=\"a-left\"><a href=\"/url\">foo</a></th></tr></thead><tbody><tr><td class=\"a-left\"><a href=\"/url\">foo</a></td></tr></tbody></table></div>",
+            ]
+        )
+    }
+
+    @Test func aDefinitionInsideAQuoteCountsEverywhere() async throws {
+        #expect(
+            allBlockHTML("[foo]\n\n> [foo]: /url")
+                == ["<p><a href=\"/url\">foo</a></p>", "<blockquote></blockquote>"]
+        )
+    }
+
+    @Test func aScriptDestinationIsRefusedHereToo() async throws {
+        #expect(allBlockHTML("[foo]\n\n[foo]: javascript:alert(1)") == ["<p><a>foo</a></p>"])
+    }
+
+    // MARK: Writing a definition
+
+    @Test func titleMayBeInAnyOfTheThreeForms() async throws {
+        #expect(allBlockHTML("[foo]: /url 'the title'\n\n[foo]") == ["<p><a href=\"/url\" title=\"the title\">foo</a></p>"])
+        #expect(allBlockHTML("[foo]: /url (the title)\n\n[foo]") == ["<p><a href=\"/url\" title=\"the title\">foo</a></p>"])
+    }
+
+    @Test func titleMayBeOnTheNextLine() async throws {
+        #expect(
+            allBlockHTML("[foo]: /url\n  \"the title\"\n\n[foo]")
+                == ["<p><a href=\"/url\" title=\"the title\">foo</a></p>"]
+        )
+    }
+
+    @Test func destinationMayBeOnTheNextLine() async throws {
+        #expect(allBlockHTML("[foo]:\n/url\n\n[foo]") == ["<p><a href=\"/url\">foo</a></p>"])
+    }
+
+    @Test func destinationInAngleBracketsMayHoldSpaces() async throws {
+        #expect(allBlockHTML("[foo]: <my url>\n\n[foo]") == ["<p><a href=\"my%20url\">foo</a></p>"])
+    }
+
+    @Test func anythingAfterTheTitleMeansItIsNotADefinition() async throws {
+        #expect(
+            allBlockHTML("[foo]: /url \"title\" ok")
+                == ["<p>[foo]: /url &quot;title&quot; ok</p>"]
+        )
+    }
+
+    @Test func aTitleThatIsNotOneLeavesADefinitionWithoutATitle() async throws {
+        // Spec example 209: the second line is text, not a title.
+        #expect(allBlockHTML("[foo]: /url\n\"title\" ok") == ["<p>&quot;title&quot; ok</p>"])
+    }
+
+    @Test func aDefinitionCannotInterruptAParagraph() async throws {
+        #expect(
+            allBlockHTML("Foo\n[bar]: /baz\n\n[bar]")
+                == ["<p>Foo\n[bar]: /baz</p>", "<p>[bar]</p>"]
+        )
+    }
+
+    @Test func textMayFollowADefinitionInTheSameParagraph() async throws {
+        #expect(allBlockHTML("[foo]: /url\nbar [foo]") == ["<p>bar <a href=\"/url\">foo</a></p>"])
+    }
+
+    @Test func aDefinitionIsNotASetextHeading() async throws {
+        // Spec example 216: with the definition taken out there is nothing for
+        // the underline to underline, so it is text.
+        #expect(allBlockHTML("[foo]: /url\n===\n[foo]") == ["<p>===\n<a href=\"/url\">foo</a></p>"])
+    }
+
+    @Test func aLabelNeedsSomethingInIt() async throws {
+        #expect(allBlockHTML("[ ]: /url\n\n[ ]") == ["<p>[ ]: /url</p>", "<p>[ ]</p>"])
+    }
 }
 
 @Suite("Images (spec 6.4)")
@@ -487,6 +1398,33 @@ struct ImageTests {
 
     @Test func emptyAltIsAllowed() async throws {
         #expect(blockHTML("![](/url)") == "<p><img src=\"/url\" alt=\"\" /></p>")
+    }
+
+    @Test func imageSitsInlineInText() async throws {
+        #expect(blockHTML("foo ![bar](/url) baz") == "<p>foo <img src=\"/url\" alt=\"bar\" /> baz</p>")
+    }
+
+    @Test func altTextIsAttributeEscaped() async throws {
+        // A description cannot close the attribute and start one of its own.
+        #expect(
+            blockHTML("![a \"b\" <c>](/url)")
+                == "<p><img src=\"/url\" alt=\"a &quot;b&quot; &lt;c&gt;\" /></p>"
+        )
+    }
+
+    @Test func sourceIsAttributeEscaped() async throws {
+        #expect(blockHTML("![x](/a\"b)") == "<p><img src=\"/a&quot;b\" alt=\"x\" /></p>")
+    }
+
+    @Test func descriptionAndSourceMayHoldBracketsAndParentheses() async throws {
+        #expect(
+            blockHTML("![a [b]](/img_(1).png)")
+                == "<p><img src=\"/img_(1).png\" alt=\"a [b]\" /></p>"
+        )
+    }
+
+    @Test func angleBracketSourceMayContainSpaces() async throws {
+        #expect(blockHTML("![x](<my pic.png>)") == "<p><img src=\"my%20pic.png\" alt=\"x\" /></p>")
     }
 }
 
@@ -519,6 +1457,111 @@ struct EscapeTests {
 
     @Test func rawAngleBracketsAreEscaped() async throws {
         #expect(blockHTML("a < b & c") == "<p>a &lt; b &amp; c</p>")
+    }
+
+    @Test func escapedBackslashIsOneBackslash() async throws {
+        #expect(blockHTML("\\\\*foo*") == "<p>\\<em>foo</em></p>")
+    }
+
+    @Test func escapedBlockMarkersAreText() async throws {
+        #expect(blockHTML("\\# foo") == "<p># foo</p>")
+        #expect(blockHTML("\\- foo") == "<p>- foo</p>")
+        #expect(blockHTML("1\\. foo") == "<p>1. foo</p>")
+        #expect(blockHTML("\\> foo") == "<p>&gt; foo</p>")
+    }
+
+    @Test func numericEntitiesAreDecoded() async throws {
+        #expect(blockHTML("&#35; &#x22; &#X41;") == "<p># &quot; A</p>")
+    }
+
+    @Test func commonNamedEntitiesAreDecoded() async throws {
+        #expect(blockHTML("&copy; &mdash; a&nbsp;b") == "<p>© — a\u{00A0}b</p>")
+    }
+
+    @Test func unknownOrUnterminatedEntityIsLiteral() async throws {
+        #expect(blockHTML("&nosuch; &amp") == "<p>&amp;nosuch; &amp;amp</p>")
+    }
+}
+
+// Deliberate deviation from CommonMark: the spec passes raw HTML through
+// (sections 4.6 and 6.6). This app escapes all of it, so a document cannot put
+// markup of its own into the preview, and `MarkdownImageURL` relies on that to
+// keep a document from forging an image URL. These assert the app's intent.
+@Suite("Raw HTML is escaped (deliberate deviation from spec 4.6, 6.6)")
+struct RawHTMLTests {
+
+    @Test func inlineTagsAreEscaped() async throws {
+        #expect(blockHTML("a <b>bold</b> c") == "<p>a &lt;b&gt;bold&lt;/b&gt; c</p>")
+    }
+
+    @Test func scriptBlockIsEscaped() async throws {
+        #expect(blockHTML("<script>alert(1)</script>") == "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>")
+    }
+
+    @Test func htmlBlockIsAParagraphOfEscapedText() async throws {
+        #expect(blockHTML("<div>\n*foo*\n</div>") == "<p>&lt;div&gt;\n<em>foo</em>\n&lt;/div&gt;</p>")
+    }
+
+    @Test func commentIsEscaped() async throws {
+        #expect(blockHTML("<!-- note -->") == "<p>&lt;!-- note --&gt;</p>")
+    }
+
+    @Test func imageTagWithAnEventHandlerIsEscaped() async throws {
+        #expect(
+            blockHTML("<img src=\"x\" onerror=\"alert(1)\">")
+                == "<p>&lt;img src=&quot;x&quot; onerror=&quot;alert(1)&quot;&gt;</p>"
+        )
+    }
+}
+
+// Deliberate deviation from CommonMark, which has nothing to say about what a
+// link may point at. A `javascript:` destination is script: clicking it runs in
+// the preview's page, without the app's link handling ever being asked. That is
+// the one way a document could get script into the preview, so the renderer
+// writes such a link without its `href`. The text is still there; it is not a
+// link. These assert the app's intent.
+@Suite("Script links are not links (deliberate deviation)")
+struct ScriptLinkTests {
+
+    @Test func aScriptDestinationIsLeftOffTheLink() async throws {
+        #expect(blockHTML("[foo](javascript:alert(1))") == "<p><a>foo</a></p>")
+        #expect(blockHTML("[foo](vbscript:msgbox(1))") == "<p><a>foo</a></p>")
+    }
+
+    @Test func theTitleIsKept() async throws {
+        #expect(blockHTML("[foo](javascript:alert(1) \"title\")") == "<p><a title=\"title\">foo</a></p>")
+    }
+
+    @Test func theSchemeIsRecognizedHoweverItIsWritten() async throws {
+        // A browser reads a scheme without regard to case, and ignores tabs
+        // and line endings inside it.
+        #expect(blockHTML("[foo](JaVaScRiPt:alert(1))") == "<p><a>foo</a></p>")
+        #expect(blockHTML("[foo](<java\tscript:alert(1)>)") == "<p><a>foo</a></p>")
+    }
+
+    @Test func spacesBeforeTheSchemeMakeItAnOrdinaryAddress() async throws {
+        // A destination in angle brackets has its spaces written as %20, and
+        // "%20%20javascript:" is not a scheme to a browser: it is a relative
+        // address, and harmless. So this one keeps its href.
+        #expect(
+            blockHTML("[foo](<  javascript:alert(1)>)")
+                == "<p><a href=\"%20%20javascript:alert(1)\">foo</a></p>"
+        )
+    }
+
+    @Test func aScriptAutolinkIsNotALink() async throws {
+        #expect(blockHTML("<javascript:alert(1)>") == "<p><a>javascript:alert(1)</a></p>")
+        #expect(blockHTML("<JAVASCRIPT:alert(1)>") == "<p><a>JAVASCRIPT:alert(1)</a></p>")
+    }
+
+    @Test func otherDestinationsAreUntouched() async throws {
+        #expect(blockHTML("[foo](/docs/javascript:intro)") == "<p><a href=\"/docs/javascript:intro\">foo</a></p>")
+        #expect(blockHTML("[foo](javascripts.html)") == "<p><a href=\"javascripts.html\">foo</a></p>")
+        #expect(blockHTML("[foo](mailto:a@b.c)") == "<p><a href=\"mailto:a@b.c\">foo</a></p>")
+    }
+
+    @Test func aLinkAroundAScriptLinkIsStillNotTwoLinks() async throws {
+        #expect(blockHTML("[foo [bar](javascript:alert(1))](/url)") == "<p>[foo <a>bar</a>](/url)</p>")
     }
 }
 
@@ -592,5 +1635,68 @@ struct TableTests {
         """
 
         #expect(blockHTML(source).contains("<td class=\"a-left\"></td>"))
+    }
+
+    private let simpleTableHTML = "<div class=\"table-wrap\"><table><thead><tr><th class=\"a-left\">a</th><th class=\"a-left\">b</th></tr></thead><tbody><tr><td class=\"a-left\">1</td><td class=\"a-left\">2</td></tr></tbody></table></div>"
+
+    @Test func pipesAtTheEdgesAreOptional() async throws {
+        #expect(blockHTML("a | b\n--- | ---\n1 | 2") == simpleTableHTML)
+    }
+
+    @Test func delimiterRowNeedsNoSpaces() async throws {
+        #expect(blockHTML("|a|b|\n|---|---|\n|1|2|") == simpleTableHTML)
+    }
+
+    @Test func alignmentAppliesToBodyCellsToo() async throws {
+        #expect(
+            blockHTML("| l | c | r |\n| :-- | :-: | --: |\n| 1 | 2 | 3 |")
+                == "<div class=\"table-wrap\"><table><thead><tr><th class=\"a-left\">l</th><th class=\"a-center\">c</th><th class=\"a-right\">r</th></tr></thead><tbody><tr><td class=\"a-left\">1</td><td class=\"a-center\">2</td><td class=\"a-right\">3</td></tr></tbody></table></div>"
+        )
+    }
+
+    @Test func headerAndDelimiterRowsMustHaveTheSameNumberOfCells() async throws {
+        #expect(blockHTML("| a | b |\n| --- |\n| 1 | 2 |") == "<p>| a | b |\n| --- |\n| 1 | 2 |</p>")
+    }
+
+    @Test func rowsLongerThanTheHeaderAreTruncated() async throws {
+        #expect(
+            blockHTML("| a |\n| --- |\n| 1 | 2 |")
+                == "<div class=\"table-wrap\"><table><thead><tr><th class=\"a-left\">a</th></tr></thead><tbody><tr><td class=\"a-left\">1</td></tr></tbody></table></div>"
+        )
+    }
+
+    @Test func emptyCellInTheMiddleIsKept() async throws {
+        #expect(
+            blockHTML("| a | b | c |\n| --- | --- | --- |\n| 1 |  | 3 |")
+                .contains("<tr><td class=\"a-left\">1</td><td class=\"a-left\"></td><td class=\"a-left\">3</td></tr>")
+        )
+    }
+
+    @Test func aBlankLineEndsTheTable() async throws {
+        #expect(allBlockHTML("| a | b |\n| --- | --- |\n| 1 | 2 |\n\nfoo") == [simpleTableHTML, "<p>foo</p>"])
+    }
+
+    @Test func cellsHoldLinksAndEmphasis() async throws {
+        #expect(
+            blockHTML("| a |\n| --- |\n| *x* [y](/url) **z** |")
+                .contains("<td class=\"a-left\"><em>x</em> <a href=\"/url\">y</a> <strong>z</strong></td>")
+        )
+    }
+
+    @Test func escapedPipeInsideACodeSpanStaysInTheCell() async throws {
+        #expect(blockHTML("| a |\n| --- |\n| `x \\| y` |").contains("<td class=\"a-left\"><code>x | y</code></td>"))
+    }
+
+    @Test func otherBackslashEscapesReachTheCellIntact() async throws {
+        // Only `\|` belongs to the table; any other escape is the cell's own
+        // inline content, so an escaped asterisk is still not emphasis.
+        #expect(blockHTML("| a |\n| --- |\n| \\*x\\* |").contains("<td class=\"a-left\">*x*</td>"))
+    }
+
+    @Test func backslashInsideACodeSpanIsKept() async throws {
+        #expect(
+            blockHTML("| a |\n| --- |\n| `C:\\dir` |")
+                .contains("<td class=\"a-left\"><code>C:\\dir</code></td>")
+        )
     }
 }

@@ -54,12 +54,15 @@ enum PreviewSelectionReflection {
         // typically also covers the blank lines between blocks, which belong to
         // no block, so overlap is the test rather than containment.
         var overlapping: [Block] = []
-        for block in MarkdownBlockParser.parse(source) {
+        let document = MarkdownBlockParser.parseDocument(source)
+        for block in document.blocks {
             guard let blockRange = sourceLineTable.range(for: block.lineRange) else { continue }
             let blockEnd = blockRange.location + blockRange.length
             guard blockRange.location < selectionEnd, clampedRange.location < blockEnd else { continue }
             let blockSource = sourceNSString.substring(with: blockRange.nsRange)
-            overlapping.append((blockRange, MarkdownPreviewTextOffsetMapping(sourceText: blockSource)))
+            overlapping.append(
+                (blockRange, MarkdownPreviewTextOffsetMapping(sourceText: blockSource, definitions: document.definitions))
+            )
         }
 
         guard let firstBlock = overlapping.first, let lastBlock = overlapping.last else { return nil }

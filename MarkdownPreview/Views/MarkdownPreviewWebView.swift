@@ -563,6 +563,9 @@ enum PreviewSelectionBridge {
 
         let nsSource = source as NSString
         let sourceLength = nsSource.length
+        // Each block is read on its own, but a reference in it is a link only
+        // by a definition elsewhere in the document.
+        let definitions = MarkdownLinkDefinitions(source: source)
         return displayRanges.compactMap { displayRange -> MarkdownSelectionRange? in
             guard displayRange.blockStart >= 0,
                   displayRange.blockEnd <= sourceLength,
@@ -575,7 +578,7 @@ enum PreviewSelectionBridge {
                 length: displayRange.blockEnd - displayRange.blockStart
             )
             let blockSource = nsSource.substring(with: blockRange)
-            let mapping = MarkdownPreviewTextOffsetMapping(sourceText: blockSource)
+            let mapping = MarkdownPreviewTextOffsetMapping(sourceText: blockSource, definitions: definitions)
             let localDisplayRange = MarkdownSelectionRange(
                 location: displayRange.displayLocation,
                 length: displayRange.displayLength

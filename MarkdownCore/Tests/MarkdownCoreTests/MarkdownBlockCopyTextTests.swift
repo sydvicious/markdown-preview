@@ -82,6 +82,17 @@ struct MarkdownBlockCopyTextTests {
         )
     }
 
+    /// What is copied is the code as the preview shows it, and the preview
+    /// takes off the indentation a block shares with its fence.
+    @Test func aFencedBlockLosesTheIndentationItSharesWithItsFence() {
+        let source = "  ```\n  let x = 1\n    let y = 2\n ragged\n  ```"
+
+        #expect(
+            MarkdownBlockCopyText.copyText(fromBlockSource: source, kind: .code)
+                == "let x = 1\n  let y = 2\nragged"
+        )
+    }
+
     @Test func indentedCodeLosesItsIndent() {
         let source = "    let x = 1\n    let y = 2"
 
@@ -107,6 +118,22 @@ struct MarkdownBlockCopyTextTests {
         #expect(
             MarkdownBlockCopyText.copyText(fromBlockSource: source, kind: .code)
                 == "let tick = \"`\""
+        )
+    }
+
+    // MARK: - Windows line endings
+
+    @Test func aQuoteWithWindowsLineEndingsLosesItsMarkersOnEveryLine() {
+        #expect(
+            MarkdownBlockCopyText.copyText(fromBlockSource: "> first\r\n> second", kind: .blockquote)
+                == "first\nsecond"
+        )
+    }
+
+    @Test func aFencedBlockWithWindowsLineEndingsLosesItsFences() {
+        #expect(
+            MarkdownBlockCopyText.copyText(fromBlockSource: "```swift\r\nlet x = 1\r\nlet y = 2\r\n```", kind: .code)
+                == "let x = 1\nlet y = 2"
         )
     }
 

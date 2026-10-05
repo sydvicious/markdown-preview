@@ -19,8 +19,12 @@ final class DocumentSearchIndex {
     }
 
     func rebuild(with documents: [MarkdownFile]) {
+        // A list that names one file twice is indexed once, keeping the first.
+        // `Dictionary(uniqueKeysWithValues:)` traps on a repeated key, and this
+        // runs while the saved session is restored, so a repeat there was a
+        // crash at every launch.
         entriesByDocumentID = Dictionary(
-            uniqueKeysWithValues: documents.map { file in
+            documents.map { file in
                 let documentID = file.url.standardizedFileURL.path
                 return (
                     documentID,
@@ -30,7 +34,8 @@ final class DocumentSearchIndex {
                         mapping: MarkdownTextOffsetMapping(sourceText: file.contents)
                     )
                 )
-            }
+            },
+            uniquingKeysWith: { first, _ in first }
         )
     }
 
