@@ -14,6 +14,12 @@ This document tracks planned work for MarkdownPreviewApp.
   - When focus is in the file list's Search field, `Command-G` should search in the current file. When it reaches the bottom of that file, it should open the next file in the list and highlight the search text there.
   - When focus is in either Search field, Esc should put focus back in the detail view. It should still clear the search text too, as it does today.
 
+### (macOS) Silence "Could not create a sandbox extension" in the console.
+  - Every preview load of a document outside a granted folder logs `Could not create a sandbox extension for '<the document's folder>'`. Harmless: nothing relies on the access it is failing to grant.
+  - Cause: the preview passes the document's folder to `loadHTMLString(_:baseURL:)` as a `file:` URL so relative links resolve. WebKit then tries to give its rendering process read access to that folder, which the sandboxed app does not hold — it has the document, not the folder. Images are unaffected, because the app reads them and serves them through the `mdimage://` scheme.
+  - Fix: give WebKit a base URL in the app's own scheme instead of a `file:` folder.
+  - The catch: relative links between documents, such as `[notes](other.md)`, resolve through that base URL, so the link handling (`decidePolicyFor` in `MarkdownPreviewWebView`) has to translate them back to file URLs before opening them. That wants a test, and checking in the running app.
+
 ### Async file loading off `@Main`.
   - Read source files in a separate task, not on `@Main`.
   - If loading takes longer than 0.5 seconds, show a spinner with "Loading...".
