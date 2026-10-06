@@ -549,6 +549,23 @@ final class DocumentSessionStore: ObservableObject {
         let document = openedDocuments[index]
 
         guard let url = resolveBookmarkURL(from: document.bookmarkData) else {
+            Self.log.info("[track] Bookmark for \(document.id, privacy: .public) did not resolve")
+            handleMissingDocument(
+                document,
+                alertIfMissing: alertIfMissing,
+                isCompactWidth: isCompactWidth
+            )
+            return
+        }
+
+        // One security scope for both questions. This runs for every listed
+        // document on every tick, and the scope is not taken twice over.
+        let (inTrash, currentModificationDate) = withSecurityScope(of: url, resolvedFrom: document.bookmarkData) {
+            (isInTrashWithinAccess(url), modificationDateWithinAccess(for: url))
+        }
+
+        guard !inTrash else {
+            Self.log.info("[track] \(document.id, privacy: .public) is in the Trash")
             handleMissingDocument(
                 document,
                 alertIfMissing: alertIfMissing,
@@ -561,7 +578,12 @@ final class DocumentSessionStore: ObservableObject {
             // The bookmark followed the file somewhere else. It only counts as
             // a move if the file can be read there; a bookmark can also resolve
             // to a path with nothing at it.
+            Self.log.info("""
+                [track] Bookmark for \(document.id, privacy: .public) resolves to \
+                \(url.standardizedFileURL.path, privacy: .public)
+                """)
             guard let loaded = loadDocument(at: url, resolvedFrom: document.bookmarkData) else {
+                Self.log.info("[track] Could not read it at \(url.standardizedFileURL.path, privacy: .public)")
                 handleMissingDocument(
                     document,
                     alertIfMissing: alertIfMissing,
@@ -578,6 +600,7 @@ final class DocumentSessionStore: ObservableObject {
             let bookmarkData = withSecurityScope(of: url, resolvedFrom: document.bookmarkData) {
                 try? makeBookmarkData(for: url)
             }
+            Self.log.info("[track] Following it there; newBookmark=\(bookmarkData != nil)")
             documentDidMove(
                 from: document.id,
                 to: loaded.file,
@@ -587,7 +610,7 @@ final class DocumentSessionStore: ObservableObject {
             return
         }
 
-        if let modificationDate = currentModificationDate(for: url, resolvedFrom: document.bookmarkData) {
+        if let modificationDate = currentModificationDate {
             let knownDate = knownModificationDates[document.id]
             if knownDate != nil, modificationDate <= knownDate! {
                 return
@@ -595,6 +618,7 @@ final class DocumentSessionStore: ObservableObject {
         }
 
         guard let loaded = loadDocument(at: url, resolvedFrom: document.bookmarkData) else {
+            Self.log.info("[track] Could not read \(document.id, privacy: .public), where its bookmark still says it is")
             handleMissingDocument(
                 document,
                 alertIfMissing: alertIfMissing,
@@ -679,6 +703,23 @@ final class DocumentSessionStore: ObservableObject {
     private func resolvedID(of document: OpenedDocument) -> String? {
         guard !document.bookmarkData.isEmpty else { return nil }
         return resolveBookmarkURL(from: document.bookmarkData)?.standardizedFileURL.path
+    }
+
+    /// Whether the system says `url` is in the Trash, for callers that hold its
+    /// security scope.
+    ///
+    /// A bookmark follows its file there as it does anywhere else, and the
+    /// file can still be read. To the reader it is gone, so it is handled as a
+    /// missing file is. If the system cannot say, the file is taken not to be
+    /// in the Trash.
+    private func isInTrashWithinAccess(_ url: URL) -> Bool {
+        var relationship: FileManager.URLRelationship = .other
+        do {
+            try FileManager.default.getRelationship(&relationship, of: .trashDirectory, in: [], toItemAt: url)
+        } catch {
+            return false
+        }
+        return relationship == .contains
     }
 
     private func handleMissingDocument(
@@ -802,22 +843,13 @@ final class DocumentSessionStore: ObservableObject {
         }
     }
 
-    /// The document's modification date, taking the URL's security scope for the
-    /// read.
+    /// The document's modification date, for callers that hold the URL's
+    /// security scope.
     ///
-    /// Reading a resource value is itself privileged. `reloadDocumentIfNeeded`
-    /// polls this for every open document without holding a scope of its own, and
-    /// sandboxed that read returns nil — which does not fail loudly, it defeats
-    /// the "unchanged, so skip" check and silently re-reads every open document
-    /// on every tick.
-    private func currentModificationDate(for url: URL, resolvedFrom bookmarkData: Data) -> Date? {
-        withSecurityScope(of: url, resolvedFrom: bookmarkData) {
-            modificationDateWithinAccess(for: url)
-        }
-    }
-
-    /// The same read for callers that already hold the scope, so it is not taken
-    /// twice over.
+    /// Reading a resource value is itself privileged. Sandboxed, and without
+    /// the scope, the read returns nil — which does not fail loudly: in
+    /// `reloadDocumentIfNeeded` it defeats the "unchanged, so skip" check and
+    /// silently re-reads every open document on every tick.
     private func modificationDateWithinAccess(for url: URL) -> Date? {
         let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
         return values?.contentModificationDate
@@ -860,6 +892,10 @@ final class DocumentSessionStore: ObservableObject {
 
         for entry in persisted {
             guard let loaded = loadFromBookmarkData(entry.bookmarkData) else { continue }
+            let inTrash = withSecurityScope(of: loaded.file.url, resolvedFrom: entry.bookmarkData) {
+                isInTrashWithinAccess(loaded.file.url)
+            }
+            guard !inTrash else { continue }
             let resolvedID = loaded.file.url.standardizedFileURL.path
             idMap[entry.id] = resolvedID
             // Two entries can resolve to one file. A list saved before entries

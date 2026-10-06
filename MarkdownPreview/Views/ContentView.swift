@@ -243,6 +243,16 @@ struct ContentView: View {
                 store.checkAllDocumentsForChanges(isCompactWidth: usesSingleColumnNavigation)
             }
         }
+        #elseif os(macOS)
+        // The Mac goes by the app coming to the front, which is when its name
+        // is in the menu bar, and not by the scene phase: a file moved in the
+        // Finder should be where it is now by the time the reader is back.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if !disableLiveFileMonitoring {
+                store.checkActiveDocumentForChanges(isCompactWidth: usesSingleColumnNavigation)
+                store.checkAllDocumentsForChanges(isCompactWidth: usesSingleColumnNavigation)
+            }
+        }
         #endif
         .onReceive(fileOpenState.$pendingURLs.filter { !$0.isEmpty }) { urls in
             viewModel.openPendingURLs(urls, isCompactWidth: usesSingleColumnNavigation)

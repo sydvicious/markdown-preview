@@ -5,6 +5,8 @@
 
 ## 0.10
 
+- A document moved to the Trash is treated as a deleted one is: the one on screen is reported as no longer available and then removed from the list, and any other is removed from the list. It used to stay listed, under the Trash folder.
+- (macOS) The list is checked for files that moved, changed or went missing whenever the app comes to the front, as well as on its timers. Coming back from the Finder used to mean waiting up to ten seconds.
 - Tests: the WebKit tests run one at a time, after a page has been loaded to start WebKit up. Run together, each spent most of its minute waiting on the others for the main actor; and the first page a process loads is slow, in an iPhone simulator sometimes slower than the minute a test is allowed. A page that stalls now ends its test with a report of how far the load got.
 - A file that is not UTF-8, or UTF-16 beginning with a byte-order mark, is refused when it is opened, with an error about its text encoding. A Latin-1 or MacRoman file, or one that is not text at all, used to open as a page of CJK characters. UTF-16 with no byte-order mark is no longer read.
 - A file that cannot be opened is reported with what stopped it. Every failed read used to be reported as a missing file.

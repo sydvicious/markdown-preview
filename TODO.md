@@ -23,12 +23,6 @@ This document tracks planned work for MarkdownPreviewApp.
   - Symptom driving this: opening a new file visibly freezes the GUI. The whole open path — read, parse, HTML build — currently runs on `@Main`, so the window stops responding until it finishes.
   - Schedule this work after the YMMV-related refactor work.
 
-### (macOS) Check moved documents in the signed, sandboxed app.
-  - A document that is moved or renamed while it is in the list is followed to where it is now, and is given a new bookmark there (`DocumentSessionStore.documentDidMove`). The tests for this (`MovedDocumentTests`) run in the unsigned test host, which has no sandbox, so making that bookmark has never been tried where it could be refused.
-  - To check: open a document, move it in Finder, and see that the list shows it under its new folder; that a save made after the move still reaches the preview; and that opening it from its new place does not list it twice.
-  - If the new bookmark is refused there, the entry keeps the one made at the old path, and the first save after the move that replaces the file will report the document missing. That would want its own fix.
-  - The same goes for restoring a saved list that names one file twice, which a list saved by a build before 0.10 can do: it has only run in the test host.
-
 ## Features
 
 ### Investigate using Liquid Glass controls.
