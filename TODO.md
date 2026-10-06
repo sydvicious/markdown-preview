@@ -14,12 +14,6 @@ This document tracks planned work for MarkdownPreviewApp.
   - When focus is in the file list's Search field, `Command-G` should search in the current file. When it reaches the bottom of that file, it should open the next file in the list and highlight the search text there.
   - When focus is in either Search field, Esc should put focus back in the detail view. It should still clear the search text too, as it does today.
 
-### (macOS) Silence "Could not create a sandbox extension" in the console.
-  - Every preview load of a document outside a granted folder logs `Could not create a sandbox extension for '<the document's folder>'`. Harmless: nothing relies on the access it is failing to grant.
-  - Cause: the preview passes the document's folder to `loadHTMLString(_:baseURL:)` as a `file:` URL so relative links resolve. WebKit then tries to give its rendering process read access to that folder, which the sandboxed app does not hold — it has the document, not the folder. Images are unaffected, because the app reads them and serves them through the `mdimage://` scheme.
-  - Fix: give WebKit a base URL in the app's own scheme instead of a `file:` folder.
-  - The catch: relative links between documents, such as `[notes](other.md)`, resolve through that base URL, so the link handling (`decidePolicyFor` in `MarkdownPreviewWebView`) has to translate them back to file URLs before opening them. That wants a test, and checking in the running app.
-
 ### Async file loading off `@Main`.
   - Read source files in a separate task, not on `@Main`.
   - If loading takes longer than 0.5 seconds, show a spinner with "Loading...".
@@ -107,9 +101,6 @@ This document tracks planned work for MarkdownPreviewApp.
   - iOS and iPadOS have no About box and nowhere else to put this content, so the document in the list on first launch is the whole mechanism there, not a supplement to something else. The alternatives considered were a bottom sheet on first launch — explicitly not wanted — or doing nothing at all. If the bundled document does not work out, doing nothing is the fallback; do not reach for the sheet.
   - On macOS the About box is to be simple, with a button that opens the welcome document. That work lives with the document-based redesign, which is where the macOS menu structure gets built (see the App menu under "macOS redesign as a document-based app"); the bundled welcome document itself does not wait on it.
 
-### Revisit app icon text.
-  - Consider changing the icon text from `MD` to `.md` so it more clearly suggests opening markdown files directly.
-
 ### Investigate menus.
   - iPadOS generates a menu bar automatically from the app's commands, and it comes out wrong: there are **two View menus**, plus other problems worth cataloguing once looked at properly.
   - The duplication is the obvious lead. The app defines a `CommandMenu("View")` in `MarkdownPreviewCommands` (`MarkdownPreview/MarkdownPreviewApp.swift`) for the text-size commands, while iPadOS also synthesizes its own standard View menu — so both appear. The same likely applies to the `Find` and `Search` menus, which may duplicate or displace system equivalents; `Search` in particular exists only to host Escape as Cancel Search, which is not really a menu-worthy command.
@@ -127,6 +118,7 @@ This document tracks planned work for MarkdownPreviewApp.
     - Treat any new user-visible string as a cost to be justified, not a default. This applies to empty states, confirmation copy, and error messages as much as to labels.
     - Accessibility labels and field placeholders are where the strings will unavoidably live, and that is accepted: an icon-only interface leans harder on them, and both are user-facing text that must be localized. Budget for localizing them even though they are not visible clutter — see "Accessibility testing."
   - Localize all user-facing strings across iOS, iPadOS, and macOS.
+  - Fully localize `SAMPLE.md`, the welcome document. It is prose in a bundled file, not a string table, so every supported language needs its own complete copy, and the app has to seed the copy for the user's language.
   - Verify layout/text behavior for longer localized strings. Scope this to wherever visible text survived the principle above — the fewer such places, the cheaper this step gets.
   - Right-to-left languages need a real pass eventually, since RTL affects layout direction and icon mirroring rather than just string length. **Low priority** given the expected number of RTL users for this app. Accessibility comes first.
 
