@@ -342,9 +342,13 @@ final class DocumentSessionStore: ObservableObject {
             throw error
         }
 
-        guard let loaded = loadFromBookmarkData(bookmarkData) else {
+        guard let resolvedURL = resolveBookmarkURL(from: bookmarkData) else {
             throw CocoaError(.fileNoSuchFile)
         }
+        // Whatever stopped the read goes up as it is. A file that is there and
+        // is not text the app reads is not a missing file, and saying it is
+        // sends the reader looking for one.
+        let loaded = try readDocument(at: resolvedURL, resolvedFrom: bookmarkData)
         upsertDocument(loaded.file, bookmarkData: bookmarkData, modificationDate: loaded.modificationDate)
     }
 
@@ -750,18 +754,18 @@ final class DocumentSessionStore: ObservableObject {
     private func withSecurityScope<T>(
         of url: URL,
         resolvedFrom bookmarkData: Data,
-        perform body: () -> T
-    ) -> T {
+        perform body: () throws -> T
+    ) rethrows -> T {
         guard !bookmarksWithRefusedScope.contains(bookmarkData) else {
-            return body()
+            return try body()
         }
         guard securityScope.start(url) else {
             bookmarksWithRefusedScope.insert(bookmarkData)
             logRefusedScope(for: url)
-            return body()
+            return try body()
         }
         defer { securityScope.stop(url) }
-        return body()
+        return try body()
     }
 
     /// One line per refused bookmark per launch, saying what would tell a dead
@@ -783,14 +787,18 @@ final class DocumentSessionStore: ObservableObject {
         at url: URL,
         resolvedFrom bookmarkData: Data
     ) -> (file: MarkdownFile, modificationDate: Date?)? {
-        withSecurityScope(of: url, resolvedFrom: bookmarkData) {
-            do {
-                let file = try MarkdownFile.load(from: url)
-                let modificationDate = modificationDateWithinAccess(for: url)
-                return (file, modificationDate)
-            } catch {
-                return nil
-            }
+        try? readDocument(at: url, resolvedFrom: bookmarkData)
+    }
+
+    /// Reads the document, passing up whatever stopped it being read.
+    private func readDocument(
+        at url: URL,
+        resolvedFrom bookmarkData: Data
+    ) throws -> (file: MarkdownFile, modificationDate: Date?) {
+        try withSecurityScope(of: url, resolvedFrom: bookmarkData) {
+            let file = try MarkdownFile.load(from: url)
+            let modificationDate = modificationDateWithinAccess(for: url)
+            return (file, modificationDate)
         }
     }
 

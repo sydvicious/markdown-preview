@@ -5,6 +5,12 @@
 
 ## 0.10
 
+- Tests: the WebKit tests run one at a time, after a page has been loaded to start WebKit up. Run together, each spent most of its minute waiting on the others for the main actor; and the first page a process loads is slow, in an iPhone simulator sometimes slower than the minute a test is allowed. A page that stalls now ends its test with a report of how far the load got.
+- A file that is not UTF-8, or UTF-16 beginning with a byte-order mark, is refused when it is opened, with an error about its text encoding. A Latin-1 or MacRoman file, or one that is not text at all, used to open as a page of CJK characters. UTF-16 with no byte-order mark is no longer read.
+- A file that cannot be opened is reported with what stopped it. Every failed read used to be reported as a missing file.
+- The preview's image handler no longer answers a request for an image that WebKit has stopped. WebKit raises an exception when one is answered; this was found by a test and never seen to happen.
+- Folder grants: a file that is not there is found inside its granted folder when the path to it runs through a link, and a folder granted under two spellings, with and without a trailing slash or through a link, is listed once.
+- Tests for the four source files that had none: `DirectoryAccessStore`, `MarkdownFile`, `MarkdownImageSchemeHandler` and `MarkdownSelectionRange`. `MarkdownImageSchemeHandler` is now given its `DirectoryAccessStore` when it is made, so a test can hand it one of its own. The bugs they exposed are fixed in the entries above.
 - Removed code nothing in the app called: `MarkdownBlockQuoteView`, left over from the SwiftUI renderer; `DirectoryContainment.directory(containing:from:)` and `directory(_:contains:)`, superseded by `directory(covering:from:)`; and `MarkdownImageURL.mimeType(forPathExtension:)`, since the type served is the one found in the file's bytes. The containment tests that still apply now run against `directory(covering:from:)`.
 - (macOS) Tests: the find pasteboard tests wait for the write they are checking, where they used to sleep 400ms and hope it had been made. In a full run it sometimes had not, and `userInputIsPublishedToTheFindPasteboard` read whatever the machine had on the pasteboard.
 - A scroll restore checks that each scroll took, and asks again if the page is not where it was sent. It lasts forty tries, a couple of seconds on screen, where it used to last two seconds by the clock.

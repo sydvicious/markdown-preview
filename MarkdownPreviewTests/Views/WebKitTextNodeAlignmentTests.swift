@@ -9,6 +9,19 @@ import WebKit
 import MarkdownCore
 @testable import MarkdownPreview
 
+/// Has `WebKitTextNodeAlignmentTests` load a page once, before its tests start
+/// and outside the time any of them is allowed.
+struct WebKitWarmUp: SuiteTrait, TestScoping {
+    func provideScope(
+        for test: Test,
+        testCase: Test.Case?,
+        performing function: @Sendable () async throws -> Void
+    ) async throws {
+        await WebKitTextNodeAlignmentTests.warmUpWebKit()
+        try await function()
+    }
+}
+
 /// Closes the last gap in the soft-break verification: whether WebKit agrees
 /// with the whitespace model the rest of the selection machinery assumes.
 ///
@@ -22,7 +35,16 @@ import MarkdownCore
 /// deliberate exception to "no GUI tests" — nothing here drives an interface,
 /// it interrogates a rendering engine whose behaviour we would otherwise have to
 /// take on faith.
+///
+/// The tests run one at a time. Each makes a web view and waits for its page,
+/// all on the main actor, and each has a minute to do it in. Run together,
+/// a hundred and more of them wait on one another, so the minute was being
+/// spent in the queue: on an iPhone simulator every one took forty seconds
+/// whatever it loaded, and the last to finish now and then ran out of time.
+///
+/// A page is loaded before the first of them starts; see `warmUpWebKit()`.
 @MainActor
+@Suite(.serialized, WebKitWarmUp())
 struct WebKitTextNodeAlignmentTests {
 
     /// Collects the text WebKit exposes for the document's first block, through
@@ -41,25 +63,98 @@ struct WebKitTextNodeAlignmentTests {
     })();
     """
 
+    /// Waits for a page to load, and keeps a record of how the load went, so
+    /// that one that stalls can say where.
     private final class LoadObserver: NSObject, WKNavigationDelegate {
-        private var continuation: CheckedContinuation<Void, Error>?
-        private var finished = false
+        /// A load that did not finish, with what had happened to it by then.
+        struct LoadFailure: Error, CustomStringConvertible {
+            let reason: String
+            let timeline: String
 
+            var description: String { "\(reason). \(timeline)" }
+        }
+
+        private let clock = ContinuousClock()
+        private let began = ContinuousClock().now
+        private var steps: [String] = []
+        private var result: Result<Void, Error>?
+        private var continuation: CheckedContinuation<Void, Error>?
+
+        /// What WebKit has reported about the load and when, counted from when
+        /// the observer was made, which is just before the page is asked for.
+        var timeline: String {
+            let reported = steps.isEmpty ? "WebKit has reported nothing" : steps.joined(separator: ", ")
+            return "The load: \(reported); now \(Self.seconds(clock.now - began)) after it was asked for"
+        }
+
+        private static func seconds(_ duration: Duration) -> String {
+            let components = duration.components
+            let seconds = Double(components.seconds) + Double(components.attoseconds) / 1e18
+            return String(format: "%.2f s", seconds)
+        }
+
+        private func mark(_ step: String) {
+            steps.append("\(step) at \(Self.seconds(clock.now - began))")
+        }
+
+        /// Returns when the page has loaded, and throws if it fails to.
+        ///
+        /// A test that runs out of time is cancelled, and this stops waiting
+        /// when that happens: the test then fails saying how far the load had
+        /// got, where it used to sit until the page arrived, saying nothing.
         func wait() async throws {
-            if finished { return }
-            try await withCheckedThrowingContinuation { continuation in
-                self.continuation = continuation
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    if let result {
+                        continuation.resume(with: result)
+                    } else {
+                        self.continuation = continuation
+                    }
+                }
+            } onCancel: {
+                Task { @MainActor in
+                    self.giveUp(
+                        because: "The test was stopped before the page finished loading, as one that runs out of time is"
+                    )
+                }
+            }
+
+            if clock.now - began > .seconds(10) {
+                print("[WebKit tests] A page was slow to load. \(timeline)")
             }
         }
 
+        /// The same, giving up once `limit` has passed.
+        func wait(upTo limit: Duration) async throws {
+            let timeout = Task { @MainActor in
+                guard (try? await Task.sleep(for: limit)) != nil else { return }
+                self.giveUp(because: "The page had not finished loading after \(Self.seconds(limit))")
+            }
+            defer { timeout.cancel() }
+            try await wait()
+        }
+
+        private func giveUp(because reason: String) {
+            complete(with: .failure(LoadFailure(reason: reason, timeline: timeline)))
+        }
+
         private func complete(with result: Result<Void, Error>) {
-            guard !finished else { return }
-            finished = true
+            guard self.result == nil else { return }
+            self.result = result
             continuation?.resume(with: result)
             continuation = nil
         }
 
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            mark("started")
+        }
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            mark("committed")
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            mark("finished")
             complete(with: .success(()))
         }
 
@@ -68,7 +163,8 @@ struct WebKitTextNodeAlignmentTests {
             didFail navigation: WKNavigation!,
             withError error: Error
         ) {
-            complete(with: .failure(error))
+            mark("failed")
+            giveUp(because: "The page failed to load: \(error.localizedDescription)")
         }
 
         func webView(
@@ -76,8 +172,134 @@ struct WebKitTextNodeAlignmentTests {
             didFailProvisionalNavigation navigation: WKNavigation!,
             withError error: Error
         ) {
-            complete(with: .failure(error))
+            mark("failed before it committed")
+            giveUp(because: "The page failed to load: \(error.localizedDescription)")
         }
+
+        /// WebKit reports neither a finish nor a failure for a page whose
+        /// process dies under it, so without this the wait would never end.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            mark("web content process died")
+            giveUp(because: "WebKit's web content process died while the page was loading")
+        }
+    }
+
+    /// Loads a page before any test here has started.
+    ///
+    /// The first page a process asks WebKit for is the slow one: the engine has
+    /// processes of its own to start. In an iPhone simulator that first load
+    /// has taken more than the minute a test is allowed, when every load after
+    /// it took about a second. Made here, it is charged to no test. A load that
+    /// stalls is tried again in a new web view; if none finishes, the tests go
+    /// ahead and say for themselves what happened.
+    static func warmUpWebKit() async {
+        var attempts: [String] = []
+        defer { warmUpReport = attempts.joined(separator: " ") }
+
+        for attempt in 1...5 {
+            let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+            let observer = LoadObserver()
+            webView.navigationDelegate = observer
+            webView.loadHTMLString("<p>Warming up.</p>", baseURL: nil)
+
+            do {
+                try await observer.wait(upTo: .seconds(90))
+                attempts.append("Warm-up load \(attempt) finished. \(observer.timeline).")
+                print("[WebKit tests] \(attempts.last ?? "")")
+                return
+            } catch {
+                attempts.append("Warm-up load \(attempt) did not finish. \(error).")
+                print("[WebKit tests] \(attempts.last ?? "")")
+            }
+        }
+    }
+
+    /// How the warm-up went, one sentence per try, or nil if it has not run.
+    private(set) static var warmUpReport: String?
+
+    // MARK: - The harness itself
+
+    /// Answers nothing, so a page asked of it never arrives.
+    private final class SilentSchemeHandler: NSObject, WKURLSchemeHandler {
+        func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {}
+        func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {}
+    }
+
+    /// A web view that has been asked for a page it will never be given.
+    private func webViewWaitingForAPageThatNeverArrives() throws -> (WKWebView, LoadObserver) {
+        let configuration = WKWebViewConfiguration()
+        configuration.setURLSchemeHandler(SilentSchemeHandler(), forURLScheme: "never")
+        let webView = WKWebView(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            configuration: configuration
+        )
+        let observer = LoadObserver()
+        webView.navigationDelegate = observer
+        webView.load(URLRequest(url: try #require(URL(string: "never://page"))))
+        return (webView, observer)
+    }
+
+    // The warm-up is what keeps WebKit's slow first load out of a test's
+    // minute, so it has to have run, and to have got a page, before any test
+    // here starts. If it did not, this says how each try went.
+    @Test(.timeLimit(.minutes(1)))
+    func aPageWasLoadedBeforeTheseTestsStarted() {
+        let report = Self.warmUpReport ?? "The warm-up did not run."
+
+        #expect(report.contains("finished at"), "\(report)")
+    }
+
+    // What a stalled load reports is only ever seen when something has gone
+    // wrong, so it is checked here, where the stall is arranged.
+    @Test(.timeLimit(.minutes(1)))
+    func aLoadThatStallsIsGivenUpOnAndSaysHowFarItGot() async throws {
+        let (webView, observer) = try webViewWaitingForAPageThatNeverArrives()
+
+        let failure = await #expect(throws: LoadObserver.LoadFailure.self) {
+            try await observer.wait(upTo: .seconds(2))
+        }
+
+        let report = try #require(failure).description
+        #expect(report.contains("had not finished loading after 2.00 s"), "\(report)")
+        #expect(report.contains("started at"), "\(report)")
+        #expect(!report.contains("finished at"), "\(report)")
+        webView.stopLoading()
+    }
+
+    // A test that runs out of time is cancelled. The wait has to end then, or
+    // the test goes on sitting there and the tests after it wait for it.
+    @Test(.timeLimit(.minutes(1)))
+    func aTestThatIsStoppedStopsWaitingForItsPage() async throws {
+        let (webView, observer) = try webViewWaitingForAPageThatNeverArrives()
+
+        let waiting = Task { @MainActor in
+            try await observer.wait()
+        }
+        waiting.cancel()
+        let outcome = await waiting.result
+
+        guard case .failure(let error) = outcome else {
+            Issue.record("the wait ended as if the page had loaded")
+            return
+        }
+        let report = try #require(error as? LoadObserver.LoadFailure).description
+        #expect(report.contains("The test was stopped before the page finished loading"), "\(report)")
+        webView.stopLoading()
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func aPageThatLoadsSaysWhenEachStepOfItHappened() async throws {
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        let observer = LoadObserver()
+        webView.navigationDelegate = observer
+        webView.loadHTMLString("<p>Here.</p>", baseURL: nil)
+
+        try await observer.wait()
+
+        let timeline = observer.timeline
+        #expect(timeline.contains("started at"), "\(timeline)")
+        #expect(timeline.contains("committed at"), "\(timeline)")
+        #expect(timeline.contains("finished at"), "\(timeline)")
     }
 
     /// Loads `source` as the preview renders it and returns what WebKit reports

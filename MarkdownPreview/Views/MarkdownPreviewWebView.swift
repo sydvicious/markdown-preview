@@ -89,7 +89,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         // Local images are served from the app process; the web content process
         // cannot read files itself. Must be set before the web view is created.
         configuration.setURLSchemeHandler(
-            MarkdownImageSchemeHandler(),
+            MarkdownImageSchemeHandler(accessStore: .shared),
             forURLScheme: MarkdownImageURL.scheme
         )
         for script in MarkdownWebResources.Script.allCases {
@@ -244,7 +244,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         // Local images are served from the app process; the web content process
         // cannot read files itself. Must be set before the web view is created.
         configuration.setURLSchemeHandler(
-            MarkdownImageSchemeHandler(),
+            MarkdownImageSchemeHandler(accessStore: .shared),
             forURLScheme: MarkdownImageURL.scheme
         )
         for script in MarkdownWebResources.Script.allCases {

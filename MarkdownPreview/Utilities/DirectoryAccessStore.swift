@@ -92,7 +92,7 @@ final class DirectoryAccessStore: ObservableObject {
         }
 
         // Take effect now, whatever happens to the bookmark below.
-        if !sessionDirectories.contains(directory) {
+        if !Self.lists(directory, in: sessionDirectories) {
             sessionDirectories.append(directory)
         }
 
@@ -173,12 +173,19 @@ final class DirectoryAccessStore: ObservableObject {
         // Keep anything granted this launch even if its bookmark did not
         // resolve, so a persistence failure does not revoke live access.
         var combined = resolved
-        for directory in sessionDirectories where !combined.contains(directory) {
+        for directory in sessionDirectories where !Self.lists(directory, in: combined) {
             combined.append(directory)
         }
 
         grantedDirectories = combined
         userDefaults.set(refreshed, forKey: Self.defaultsKey)
+    }
+
+    /// Whether `directories` already has `directory` in it, under any spelling.
+    /// A folder may be granted with or without a trailing slash, or through a
+    /// link, and the bookmark made for it resolves to yet another spelling.
+    private static func lists(_ directory: URL, in directories: [URL]) -> Bool {
+        directories.contains { DirectoryContainment.isSameLocation($0, directory) }
     }
 
     private func persist() {

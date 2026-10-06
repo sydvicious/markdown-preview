@@ -150,11 +150,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Close the gaps the test audit found.
   - The gaps, from reading the tests against the sources; nothing was run to find them. "No test" means the name appears nowhere in either test directory, which was checked by search. Anything said about behavior is from reading the code and is marked so.
-    - Files with no tests at all:
-      - `DirectoryAccessStore` — the format-version discard, restoring and pruning bookmarks, granting. It takes a `UserDefaults`, so it can be tested the way `DocumentSessionStore` is.
-      - `MarkdownFile` — the UTF-16 fallback and the undecodable-bytes error; only the UTF-8 path is reached, through other suites.
-      - `MarkdownImageSchemeHandler` — the refuse / unreadable / not-an-image chain. `WKURLSchemeTask` is a protocol, so a stand-in works; the hard-wired `DirectoryAccessStore.shared` is what is in the way.
-      - `MarkdownSelectionRange` — every offset in the app goes through it. Tests use it as a helper; none is about it.
     - Untested logic in files that do have tests:
       - `DocumentSessionStore`: `checkAllDocumentsForChanges` for a document that changed or went missing (only a move is tested), `acknowledgeMissingActiveDocument`, `handleMissingDocument`, `hasPersistedDocumentList` (the gate for seeding the welcome document), and removal at compact width.
       - `ContentViewModel`: `handleFindCommand`, `focusDetailSearch`, `navigateDetailSearch`, `cancelFocusedSearch`, `decreaseSelectedTextSize`, `filteredGroupedDocumentsByParentDirectory` (what the Mac sidebar shows), and every single-column branch — no test sets `usesSingleColumnNavigation`.
@@ -176,9 +171,27 @@ This document tracks planned work for MarkdownPreviewApp.
     - `PreviewSelectionSynchronizer`: a preview showing the preview and the source together, to select in by hand.
   - Markdown features with nothing to assert yet, to cover when they exist: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.
   - Land any future suite complete and runnable even where it exposes bugs. Do not gate landing the tests on fixing what they find, and do not delete or weaken a test to make the suite green.
-    - Let the known-failing cases fail the test run (`Cmd-U` / `swift test`). A failing run is the honest signal that the app does not yet behave correctly; do not skip, disable, or wrap them in `withKnownIssue` to get a clean run. The suite goes green when the bugs are fixed, not before. There is no CI yet — if one is added later (see "Get ready for TestFlight"), the same rule applies to it.
+    - A release, and a feature called complete, have no failing tests. While work is under way an intermediate commit may have them, and a failure that goes on for a while is converted to an expected failure. A test that shows a known bug, or a feature left unbuilt on purpose, is marked an expected failure (`withKnownIssue`): it does not fail the run, and it does fail the run once it starts passing, which is the signal to take the marking off.
+    - A test that fails while the code is behaving correctly is not a valid test; change or remove it.
     - Updating a test because the intended behavior changed is a different thing and is expected. What is not allowed is softening an assertion to hide a defect.
     - File each exposed bug as its own entry under "Bugs" so the failing test and the bug are linked.
+
+### Run the tests from the command line, without launching the app.
+  - A command-line test binary that exercises the test suite, so the GUI app does not launch to run it.
+  - It makes a clean break between the GUI tests and the rest.
+  - It gives confidence that the model and the views are separate.
+  - Where things stand: `MarkdownCore` runs with `swift test`. `MarkdownPreviewTests` is hosted by the app (`TEST_HOST`), so every run of it launches the app, for the stores, view models and utilities as much as for the views.
+
+### Simulators for Claude to run the tests on.
+  - Create a simulator for iPhone and another for iPad, for Claude to use to run tests with.
+  - Where things stand: Claude builds the app and its tests for iOS to see that they compile, and does not run them. The simulators on this Mac are Syd's, and Claude leaves them alone.
+  - To check once they exist: that `xcodebuild` runs the tests on the simulator it is given, and does not make clones of it to test in parallel.
+
+### A script to run all of the non-GUI tests, on every platform.
+  - One script that runs all of the non-GUI tests for all platforms: Mac, iOS and JavaScript.
+  - Depends on "Simulators for Claude to run the tests on", for the iOS runs.
+  - Once it exists, add it to the release process, and eventually to CI/CD.
+  - Where things stand: three things are run by hand. `swift test` in `MarkdownCore`, `xcodebuild` for the app's tests, and `npm test` for the scripts'.
 
 ### Adopt Swift 6 "MainActor by default" concurrency.
   - Move the targets to the Swift 6 language mode and enable Default Actor Isolation = MainActor (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`). Currently on Swift 5 mode with no default actor isolation.

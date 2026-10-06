@@ -27,6 +27,23 @@ final class MarkdownImageSchemeHandler: NSObject, WKURLSchemeHandler {
         case unreadable
     }
 
+    private let accessStore: DirectoryAccessStore
+
+    /// Tasks that have been started and neither answered nor stopped.
+    ///
+    /// An image is read a turn of the main actor after its task starts, and
+    /// WebKit may stop the task in between. It raises an exception on any call
+    /// made to a task it has stopped, so only a task still listed here is
+    /// answered.
+    private var pendingTasks: Set<ObjectIdentifier> = []
+
+    /// `accessStore` holds the folder grants an image is read under. The app
+    /// passes the one it has; a test passes its own, so it neither depends on
+    /// the grants the user has made nor disturbs them.
+    init(accessStore: DirectoryAccessStore) {
+        self.accessStore = accessStore
+    }
+
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
         // The extension governs what may be asked for; the content governs what
         // is served, so a file merely named `.png` is refused below.
@@ -37,8 +54,16 @@ final class MarkdownImageSchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
 
+        let taskID = ObjectIdentifier(urlSchemeTask)
+        pendingTasks.insert(taskID)
+
         Task { @MainActor in
-            let store = DirectoryAccessStore.shared
+            // Everything from here to the answer happens without giving up the
+            // main actor, so a task still pending now cannot be stopped before
+            // it has been answered.
+            guard pendingTasks.remove(taskID) != nil else { return }
+
+            let store = accessStore
             let data = store.withAccess(to: fileURL, perform: {
                 Self.readImageData(at: fileURL)
             })
@@ -51,7 +76,7 @@ final class MarkdownImageSchemeHandler: NSObject, WKURLSchemeHandler {
 
             guard let format = MarkdownImageURL.detectedFormat(of: data) else {
                 Self.log.error("\(fileURL.lastPathComponent) is not an image: \(data.count, privacy: .public) bytes read, no recognised signature")
-                urlSchemeTask.didFailWithError(LoadError.unreadable)
+                urlSchemeTask.didFailWithError(LoadError.notAnImage)
                 return
             }
 
@@ -71,7 +96,7 @@ final class MarkdownImageSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
-        // Reads are synchronous once started.
+        pendingTasks.remove(ObjectIdentifier(urlSchemeTask))
     }
 
     /// Reads an image, coping with the file living in iCloud and not yet being

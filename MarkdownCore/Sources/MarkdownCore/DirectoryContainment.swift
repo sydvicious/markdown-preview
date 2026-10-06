@@ -37,13 +37,38 @@ public enum DirectoryContainment {
         return Array(file.prefix(directory.count)) == directory
     }
 
+    /// Whether two URLs name the same place, however each is spelled.
+    public static func isSameLocation(_ first: URL, _ second: URL) -> Bool {
+        pathComponents(of: first) == pathComponents(of: second)
+    }
+
     /// Path components with symlinks resolved and the root's empty component
     /// dropped, so comparison is not thrown off by "/a/b" versus "/a/b/" or by
     /// "/tmp" versus "/private/tmp".
     private static func pathComponents(of url: URL) -> [String] {
-        url.resolvingSymlinksInPath()
-            .standardizedFileURL
+        resolvingLinks(in: url.standardizedFileURL)
             .pathComponents
             .filter { $0 != "/" }
+    }
+
+    /// `url` with the links in its path followed.
+    ///
+    /// `resolvingSymlinksInPath()` follows them only for a path something is
+    /// at. A granted folder is there and a file asked about may not be, so the
+    /// folder's path would be rewritten and the file's left alone, and a file
+    /// named inside the folder would no longer look as if it were. So the
+    /// nearest part of the path that is there is resolved, and what was below
+    /// it is put back.
+    private static func resolvingLinks(in url: URL) -> URL {
+        var existing = url
+        var missing: [String] = []
+
+        while existing.pathComponents.count > 1,
+              !FileManager.default.fileExists(atPath: existing.path) {
+            missing.insert(existing.lastPathComponent, at: 0)
+            existing = existing.deletingLastPathComponent()
+        }
+
+        return missing.reduce(existing.resolvingSymlinksInPath()) { $0.appendingPathComponent($1) }
     }
 }

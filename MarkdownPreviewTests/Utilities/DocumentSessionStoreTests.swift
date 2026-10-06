@@ -576,4 +576,22 @@ struct DocumentSessionStoreTests {
             && restoredStore.selectedDocumentID == resolvedID
             && restoredStore.documentMatchesListSearch(resolvedID, query: "Notes")
     }
+
+    // A file the app cannot read as text is still there. Reporting it as
+    // missing sends the reader looking for a file that has not gone anywhere.
+    @MainActor
+    @Test func openingAFileThatIsNotTextSaysSoAndDoesNotCallItMissing() async throws {
+        let temporaryDirectory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let fileURL = temporaryDirectory.appendingPathComponent("latin1.md")
+        try #require("Un café, s'il vous plaît.".data(using: .isoLatin1)).write(to: fileURL)
+
+        let store = DocumentSessionStore(disablePersistenceRestore: true)
+        let error = #expect(throws: CocoaError.self) {
+            try store.openDocument(at: fileURL)
+        }
+
+        #expect(error?.code == .fileReadInapplicableStringEncoding)
+        #expect(store.openedDocuments.isEmpty)
+    }
 }

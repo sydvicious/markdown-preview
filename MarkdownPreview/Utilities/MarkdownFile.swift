@@ -20,12 +20,26 @@ struct MarkdownFile: Identifiable, Equatable {
     /// time here would repeat a refused request the store has learned not to make.
     static func load(from url: URL) throws -> MarkdownFile {
         let data = try readData(from: url)
-        guard let text = String(data: data, encoding: .utf8) ??
-            String(data: data, encoding: .unicode) ??
-            String(data: data, encoding: .ascii) else {
+        guard let text = decodedText(from: data) else {
             throw CocoaError(.fileReadInapplicableStringEncoding)
         }
         return MarkdownFile(url: url, contents: text)
+    }
+
+    /// The text `data` holds, or nil if it is not text the app reads.
+    ///
+    /// That is UTF-8, or UTF-16 beginning with a byte-order mark. The mark is
+    /// required because, asked to read UTF-16 without one, Foundation makes
+    /// characters of nearly any bytes: a Latin-1 file, or an image, came back
+    /// as a page of CJK characters and nothing was ever refused.
+    private static func decodedText(from data: Data) -> String? {
+        if let text = String(data: data, encoding: .utf8) {
+            return text
+        }
+
+        let byteOrderMarks: [[UInt8]] = [[0xFF, 0xFE], [0xFE, 0xFF]]
+        guard byteOrderMarks.contains(where: { data.starts(with: $0) }) else { return nil }
+        return String(data: data, encoding: .utf16)
     }
 
     private static func readData(from url: URL) throws -> Data {
