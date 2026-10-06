@@ -5,6 +5,7 @@
 
 ## 0.10
 
+- Removed code nothing in the app called: `MarkdownBlockQuoteView`, left over from the SwiftUI renderer; `DirectoryContainment.directory(containing:from:)` and `directory(_:contains:)`, superseded by `directory(covering:from:)`; and `MarkdownImageURL.mimeType(forPathExtension:)`, since the type served is the one found in the file's bytes. The containment tests that still apply now run against `directory(covering:from:)`.
 - (macOS) Tests: the find pasteboard tests wait for the write they are checking, where they used to sleep 400ms and hope it had been made. In a full run it sometimes had not, and `userInputIsPublishedToTheFindPasteboard` read whatever the machine had on the pasteboard.
 - A scroll restore checks that each scroll took, and asks again if the page is not where it was sent. It lasts forty tries, a couple of seconds on screen, where it used to last two seconds by the clock.
 - A scroll restore never asks the page to go further than it can scroll at that moment. On iOS a request for more could be carried out later, once the page had grown, after the reader had moved the page themselves and the restore had stopped trying.

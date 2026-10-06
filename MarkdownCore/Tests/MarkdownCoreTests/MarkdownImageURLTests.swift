@@ -105,13 +105,6 @@ struct MarkdownImageURLTests {
         #expect(MarkdownImageURL.fileURL(for: url) == nil)
     }
 
-    @Test func mimeTypesCoverTheAllowedExtensions() async throws {
-        #expect(MarkdownImageURL.mimeType(forPathExtension: "PNG") == "image/png")
-        #expect(MarkdownImageURL.mimeType(forPathExtension: "jpeg") == "image/jpeg")
-        #expect(MarkdownImageURL.mimeType(forPathExtension: "svg") == "image/svg+xml")
-        #expect(MarkdownImageURL.mimeType(forPathExtension: "xyz") == "application/octet-stream")
-    }
-
     @Test func aNilBaseURLLeavesTheHTMLUnchanged() async throws {
         let source = "<img src=\"photo.png\" />"
         #expect(MarkdownImageURL.rewritingLocalImages(in: source, relativeTo: nil) == source)

@@ -56,10 +56,14 @@ This document tracks planned work for MarkdownPreviewApp.
   - Observed example (behavior only): Indeed's "Job Search" app claims `.doc` for resume uploads and wins that association aggressively — proof the behavior we want for `.md` is achievable. Do **not** reference Indeed's proprietary sources or Info.plist for this; work from Apple's public documentation on document-type declarations, exported/imported UTIs, and handler rank.
 
 ### Share sheet (iOS) and printing.
-  - **iOS/iPadOS: add a share sheet.** Wire a `ShareLink` / `UIActivityViewController` on the current document so the standard system share sheet is available. This earns its keep beyond sharing: the iOS share sheet carries the system **Print** activity for free, so printing on iOS comes along without a bespoke print path, and the sheet is the natural home for future "send a copy" / export actions. Decide what gets shared — the source `.md` file URL (simplest; shares the original document as-is) versus rendered output (HTML/RTF/PDF), which overlaps with "Export documents to HTML and RTF" and should reuse that path rather than growing a second one.
+  - **iOS/iPadOS: add a share sheet.** Wire a `ShareLink` / `UIActivityViewController` on the current document so the standard system share sheet is available. This earns its keep beyond sharing: the iOS share sheet carries the system **Print** activity for free, so printing on iOS comes along without a bespoke print path. What gets shared is the source `.md` file URL: the original document, as-is.
   - **macOS: printing is a separate path, but the iOS work may carry most of it.** The Mac has no share-sheet Print activity, so it needs its own trigger: an `NSPrintOperation` over the preview `WKWebView` (`WKWebView` vends a print operation), wired to a File → Print (Cmd-P) command. What the iOS work should get for free is everything behind that trigger — deciding what a printed page contains and rendering it, which both platforms want to match the preview and so likely comes from the same HTML the preview already builds. Do the iOS side first and see how much of the Mac path is left; the expectation is that only the command wiring is genuinely Mac-specific.
     - **1.0 needs an interim printing solution on the Mac — approach TBD.** The File → Print menu item was originally scoped as part of the document-based redesign, which is now deferred to a later version (see the File menu under "macOS redesign as a document-based app"). 1.0 ships the current Mac UI, so printing needs some path that works in the menus as they stand today, without waiting for the redesign to give it a permanent home. Decide what that interim path is; expect the redesign to replace it rather than inherit it.
     - Not implemented yet — the app currently has no print path or share sheet on either platform.
+
+### Export.
+  - Writes the document out as it was read. That is the entire feature.
+  - 1.0 needs it two ways: an Export… item in the File menu on Mac and iPad, and the share sheet on iOS and iPadOS (see "Share sheet (iOS) and printing").
 
 ### Open remote URLs without downloading.
   - If `.onOpenURL` receives an `http(s)` link to a markdown file, fetch into memory and open in a new window.
@@ -78,7 +82,6 @@ This document tracks planned work for MarkdownPreviewApp.
     - Deliberately excluded: `<a>` (its `href` can be `javascript:`), `<img>` (goes through the `mdimage://` path, not raw HTML), `<span>`/`<div>` (a styling hook with no semantics worth the attribute surface), and every block/script/embed tag.
     - Attributes are the real risk, not the tag names. An allowed tag with `onclick`, `onmouseover`, `style`, or an `id`/`href` is still an injection vector. Strip all attributes on allowed tags to start — none of the tags above need one to be useful except `<abbr title>`, so decide whether that single attribute is worth a value-sanitized exception or whether `<abbr>` renders bare.
     - Keep the nonce guarantee intact: even with these tags allowed, no allowed tag can emit an `mdimage://` URL, so a document still cannot forge one. Verify this holds for whatever exception `<abbr title>` gets.
-  - Consider the other output paths too: RTF (via `NSAttributedString`) and any future HTML export would each need to handle — or deliberately re-escape — the same raw HTML, so the policy has to be defined in `MarkdownCore`, not just at the preview.
 
 ### Support a subset of raw HTML tags: `<br>` and `<img>`.
   - Scope is deliberately just these two tags to start — the concrete cases Syd wants — carved out of the broader "Support inline HTML" allow-list rather than shipping that whole set at once. Everything not on the list stays escaped exactly as today. This shares that section's machinery and security model; read it first.
@@ -86,7 +89,6 @@ This document tracks planned work for MarkdownPreviewApp.
   - **`<img>`** reverses the exclusion recorded under "Support inline HTML" ("`<img>` goes through the `mdimage://` path, not raw HTML"). The point of allowing it is that a document can use the familiar HTML form, and — unlike markdown's `![alt](src "title")` — get sizing via `width`/`height`. It must reuse the existing image pipeline, not grow a second one: rewrite the `src` through `MarkdownImageURL` → `mdimage://` and let `MarkdownImageSchemeHandler` serve the bytes, exactly as `![]()` already does, so local/relative/iCloud/remote-`https` resolution and the sandbox folder-grant flow all come for free.
   - **`<img>` is the exact forge vector the launch nonce was built for.** The nonce and the "escape all raw HTML" rule exist together precisely so a document *cannot* hand the scheme handler a `mdimage://` URL it minted itself; allowing a raw `<img>` is the first time a document gets to put a `src` in front of that handler, so the nonce stops being a latent guarantee and becomes the live defense. The handler already refuses any `mdimage://` URL without the current-launch nonce — verify that still holds when the URL originates from a raw `<img src>` and that the document can only ever reach the handler through the rewrite (which stamps the nonce), never by writing an `mdimage://` literal itself.
   - Attributes are the whole risk. Allow only a safe set on `<img>` — `src`, `alt`, `title`, `width`, `height` — and strip everything else. `onerror`/`onload` (and every other `on*`) and `style` must be dropped: `<img src=x onerror=…>` is the textbook injection and is the reason `<img>` was excluded in the first place. `src` is not passed through verbatim — it goes through the same resolve-and-rewrite as markdown images, so `javascript:`/`data:`/arbitrary schemes never reach the web view; a `src` that does not resolve to a real, readable image file (or an allowed remote `http(s)` URL) is refused the same way an unresolved `![]()` is.
-  - Define the policy in `MarkdownCore` so the RTF (`NSAttributedString`) and future HTML-export paths inherit it rather than re-deriving it — same requirement noted for the broader inline-HTML work. For export specifically, a raw `<img>` needs the same `data:`-URI inlining as markdown images (see "Export documents to HTML and RTF").
   - Testable in `MarkdownCore` without the app: a raw `<br>` becomes a break tag while `<br onclick=…>`-style noise stays escaped; a raw `<img src="photo.jpg">` rewrites to a nonced `mdimage://` URL with the same resolution rules as `![]()`; `onerror`/`style`/unknown attributes are stripped; a forged `mdimage://` literal in the source stays escaped and never reaches the handler.
 
 ### Open images in their natural app on click.
@@ -153,31 +155,25 @@ This document tracks planned work for MarkdownPreviewApp.
       - `MarkdownFile` — the UTF-16 fallback and the undecodable-bytes error; only the UTF-8 path is reached, through other suites.
       - `MarkdownImageSchemeHandler` — the refuse / unreadable / not-an-image chain. `WKURLSchemeTask` is a protocol, so a stand-in works; the hard-wired `DirectoryAccessStore.shared` is what is in the way.
       - `MarkdownSelectionRange` — every offset in the app goes through it. Tests use it as a helper; none is about it.
-      - `PreviewSelectionSynchronizer` and the none / missing / unreadable image decision, both in `MarkdownPreviewView.swift`.
     - Untested logic in files that do have tests:
       - `DocumentSessionStore`: `checkAllDocumentsForChanges` for a document that changed or went missing (only a move is tested), `acknowledgeMissingActiveDocument`, `handleMissingDocument`, `hasPersistedDocumentList` (the gate for seeding the welcome document), and removal at compact width.
       - `ContentViewModel`: `handleFindCommand`, `focusDetailSearch`, `navigateDetailSearch`, `cancelFocusedSearch`, `decreaseSelectedTextSize`, `filteredGroupedDocumentsByParentDirectory` (what the Mac sidebar shows), and every single-column branch — no test sets `usesSingleColumnNavigation`.
-      - `MarkdownAppCommandCenter`: six of the nine `perform…` methods are never called (project find, use selection, find next, find previous, larger and smaller text), and `ContentView.syncCommandCenter`, which binds each command to a view-model method, has no test. A transposed argument there would pass everything.
+      - `MarkdownAppCommandCenter`: six of the nine `perform…` methods are never called (project find, use selection, find next, find previous, larger and smaller text).
       - `MarkdownSearchSession`: no test moves backward, so Find Previous, its wrap, and reversing direction mid-wrap are untested; so is `refresh` when the matches shrink.
       - `SearchViewModel`: `detailSearchSuggestions` and `seedFromPasteboardIfEmpty`. The suggestion rules in `DocumentSearchIndex` and `MarkdownSearch` (minimum length, limit, folding, no repeats) rest on one `contains` assertion.
-      - `SelectableSourceTextView`: the tested `SourceSelectionUpdate.resolve` is called only from the iOS view. The Mac view clamps the selection inline, and that has no test.
       - `MarkdownSelectionClipboard`: `writeSelection` and `writePlainText`.
       - `MarkdownImageURL`: an image source with a folder in it (`images/x.png`, `../x.png`), and an upper-case extension, which the bundled sample's `lilsyd.JPG` has.
       - `MarkdownBlockCopyText`: tab and mixed indentation, a fence indented up to three spaces, a quote's continuation line without its `>`.
-    - The seam between Swift and the page's scripts. Each side is tested alone, so a rename or a reordered argument on one side passes every suite and the preview fails without an error.
-      - The message-handler names `copyBlock`, `previewSelectionChanged` and `previewScrollChanged` are private to `MarkdownPreviewWebView.swift`; only `requestImageAccess` is checked end to end.
-      - `MarkdownCopyWebView.selectionInvocation`, which writes the six arguments of `applySelection`, is private and untested. The per-feature WebKit test writes those arguments itself, so it covers the script and `PreviewScriptCall.applySelection`, not that function.
-      - The link policy is inline in the navigation delegate, with no function to test.
     - Tests that do not test what their name says:
       - `MarkdownImageURLTests/refusesDisallowedExtensionsWhenServing` passes a URL with no key, so it is refused at the key check and never reaches the extension check it is named for. No test presents the right key with a disallowed extension.
       - `SearchViewModelTests/findQueryIsAdoptedOnceAFieldIsFocused` and `findQueryPresentBeforeLaunchIsAdoptedOnFirstFocus` have the same body; the "present before launch" case is never set up.
       - `DocumentSessionStoreTests/restoreKeepsPersistedSelectionOnCompactWidth`: the restore ignores its `isCompactWidth` argument, so compact width is not what is tested.
       - `MarkdownPreviewWebViewTests`' one test of `contiguousSelectionRanges` asserts that there is one range, not which.
-    - Code with no callers in the app:
-      - `MarkdownBlockQuoteView`, and `DetailPreviewPane` — each is referenced only from `#Preview` blocks.
-      - `DirectoryContainment.directory(containing:from:)` and `directory(_:contains:)`: nine of that suite's thirteen tests are of functions the app never calls. `MarkdownImageURL.mimeType(forPathExtension:)` is the same.
-      - `DirectoryAccessStore.hasAccess` is used only inside a log message.
     - The scripts' tests have the smallest gaps: a selection whose ends are elements, not text nodes (select-all, triple-click); `preventDefault` and `stopPropagation` in the two button handlers; the `touchend` and `pointerup` listeners.
+  - No UI tests. Syd is not willing to write or maintain any more of them than there already are, particularly since the Mac app is going to have a complete redesign at some point. The one exception is a specific GUI bug that has to be verified and cannot easily be reproduced by hand. In their place, working previews to play with: both need mocks and discipline, but a preview adapts as the interface changes, where GUI tests are much harder to maintain.
+  - Working previews in place of tests, for `MarkdownPreviewView.swift`:
+    - The image decision: one preview each for a document whose images load, are missing, and are unreadable.
+    - `PreviewSelectionSynchronizer`: a preview showing the preview and the source together, to select in by hand.
   - Markdown features with nothing to assert yet, to cover when they exist: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.
   - Land any future suite complete and runnable even where it exposes bugs. Do not gate landing the tests on fixing what they find, and do not delete or weaken a test to make the suite green.
     - Let the known-failing cases fail the test run (`Cmd-U` / `swift test`). A failing run is the honest signal that the app does not yet behave correctly; do not skip, disable, or wrap them in `withKnownIssue` to get a clean run. The suite goes green when the bugs are fixed, not before. There is no CI yet — if one is added later (see "Get ready for TestFlight"), the same rule applies to it.
@@ -212,44 +208,21 @@ This document tracks planned work for MarkdownPreviewApp.
   - Replace in-app file list with system Recents.
   - Opening a file (for example, double-click in Finder) opens a new window for that doc.
   - Build a sensible menu structure for the document-based app. A standard Mac app has an About box and File and Edit menus, and has since 1984; Window and Help joined them in Mac OS X. This is the baseline users expect, not a checklist to trim because the app is a simple viewer — a Mac app without them reads as unfinished.
-    - The app is a viewer, not an editor. File and Edit carry only operations that do not imply changing the document's content — no Save, no Undo, no Cut or Paste, and no editing affordances that would suggest the file can be modified in place. "Export…" is the intended way to write anything out, and it is a 2.0 feature.
+    - The app is a viewer, not an editor. File and Edit carry only operations that do not imply changing the document's content — no Save, no Undo, no Cut or Paste, and no editing affordances that would suggest the file can be modified in place. "Export…" is the intended way to write anything out.
     - App menu: About — a simple About box with a button that opens the welcome document (see "Ship a welcome document in the app bundle") — and Quit (Cmd-Q).
       - The About box work sits here rather than with the welcome document because it needs the macOS menu structure this redesign builds. The bundled document itself ships independently of this section.
       - Supersedes the `©2026 Syd Polk` menu entry under "Add list toolbar menu" if that entry was standing in for an about box; decide which of the two is wanted.
-    - File menu: Open (Cmd-O), Open Recent, Close (Cmd-W), Print (Cmd-P). Printing is a future feature and is not implemented yet — see "Share sheet (iOS) and printing" for the macOS `NSPrintOperation` path. Export… for converting to HTML or RTF is a 2.0 feature (see "Export documents to HTML and RTF").
+    - File menu: Open (Cmd-O), Open Recent, Close (Cmd-W), Print (Cmd-P). Printing is a future feature and is not implemented yet — see "Share sheet (iOS) and printing" for the macOS `NSPrintOperation` path. Export… writes the document out as it was read (see "Export").
     - Edit menu: Copy (Cmd-C), Select All (Cmd-A), and the Find commands. Read-only operations only, so the menu stays honest about what the app does.
     - Window menu: the standard document-window entries that `DocumentGroup` provides.
     - Help menu: reopening the welcome document belongs here. Because the container copy persists and stays updated, "reopen" means re-adding that copy to the list (the iPhone equivalent is a gesture — see "Ship a welcome document"). A "Show Release Notes" item also belongs here: the sample is not a changelog, and a user who has removed it from the list won't see its updates until they re-add it, so release notes are the reliable place to surface what changed in a build.
     - "New from clipboard" is a 2.0 feature, so File → New and File → Save stay out of the menus for now. When it lands, revisit how it fits the read-only principle: creating a document from the clipboard is not editing an existing file, but Save does write, and it may belong as Export or Save As on a document that was never a file to begin with.
   - Menus apply to iPad, not only macOS. iPadOS 26 has a full system menu bar, populated from the same SwiftUI `Commands`, and the app already vends Find/View/Search command menus that surface there. Design the iPad menu bar deliberately as part of the iOS-package interface — mirror the Mac's read-only-honest structure (File/Edit/View/Help as they apply; still no Save/Undo/Cut/Paste) rather than shipping only whatever the shared `Commands` happen to expose. The File menu items in particular apply to iPad as well as macOS.
 
-### Add a small XCUITest suite for key flows.
-  - Cover a few high-value end-to-end flows using existing accessibility identifiers (open file → appears in list, list search filters the list, remove from list, Preview⇄Source switch). Keep it compact; AI to author and maintain. Skip brittle targets (WKWebView selection, find-pasteboard sync, native context menus).
-  - Wait until BOTH: (1) the document-based macOS app redesign has landed (the UI is changing), and (2) iOS simulators work under Xcode 27 — on-device-only iteration is too slow for a GUI suite right now.
-  - There is no UI-test target; create a fresh UI Testing Bundle target (File → New → Target) when adding these.
-
 ### New from clipboard. (2.0)
-  - Deferred to 2.0. Until then the app stays a pure viewer, and File and Edit carry no operations that create or write documents.
+  - Deferred to 2.0. Until then the app stays a viewer: File and Edit carry no operations that create documents, and the only one that writes is Export, which writes a document out as it was read.
   - File -> New (Cmd-N): if clipboard has text, create a new unsaved document with that content.
   - File -> Save (Cmd-S): prompt to save as `.md`.
-
-### Export documents to HTML and RTF. (2.0)
-  - Deferred to 2.0, along with everything else that writes files. Until then the app only reads.
-  - File -> Export… : write the current document as HTML or RTF.
-  - Decide whether HTML export emits the full styled document that the preview uses or a bare fragment, and whether the stylesheet is inlined.
-  - Images need embedding as `data:` URIs for both formats. The preview's `mdimage://` scheme only works inside the app's own web view, so an exported file or an RTF built through `NSAttributedString` would show broken images without it. A `MarkdownImageInliner` doing exactly this was written and then removed for having no caller; it is in the git history — reinstate it rather than designing it again. It can reuse `MarkdownImageURL.resolveFile`, `.rewritingImageSources`, and `.mimeType`, which are still in `MarkdownCore` for the preview path.
-
-### Investigate a native visionOS (Vision Pro) app.
-  - Only pursue if visionOS / Vision Pro is still a relevant, shipping platform by the time there is something to ship on it.
-
-### Cross-platform widgets (instead of a first-class Apple Watch app).
-  - Ship a single WidgetKit widget bundle that renders on macOS, iOS/iPadOS, and watchOS (accessory / complication families) — chosen over a bespoke watchOS companion app because one shared codebase covers the watch essentially for free.
-  - Decide what the widgets surface: recent/pinned documents (tap to open), quick actions (open, new from clipboard), and maybe a small rendered snippet or title of a pinned document.
-  - Expose recent/pinned documents to the widget extension via an App Group / shared container. The app currently persists documents in its own `UserDefaults` + security-scoped bookmarks, so the extension needs a shared read path (bookmark access from an extension needs care).
-  - Deep-link from a widget into the app to open the tapped document (`widgetURL` → `.onOpenURL`; reuse or extend the existing file-open handling).
-  - Provide the standard widget families per platform (systemSmall/Medium on iOS/macOS; accessory/rectangular/circular for watchOS and the Lock Screen).
-  - Sequencing: this pairs naturally with the document-based macOS redesign (both treat recent documents as first-class), so the App Group / shared-container data layer overlaps — build them together or share the layer.
-  - Prototype the shared-container / bookmark data path first; that is the genuinely fiddly part, while the widget UI itself is straightforward.
 
 ## Admin and App Store Connect
 

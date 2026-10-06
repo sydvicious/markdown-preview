@@ -15,7 +15,7 @@ struct DirectoryContainmentTests {
 
     @Test func findsTheGrantedDirectoryHoldingTheFile() async throws {
         let found = DirectoryContainment.directory(
-            containing: url("/Users/syd/Docs/photo.jpg"),
+            covering: url("/Users/syd/Docs/photo.jpg"),
             from: [url("/Users/syd/Docs"), url("/Users/syd/Other")]
         )
 
@@ -24,7 +24,7 @@ struct DirectoryContainmentTests {
 
     @Test func findsAGrantHigherUpTheTree() async throws {
         let found = DirectoryContainment.directory(
-            containing: url("/Users/syd/Docs/Images/photo.jpg"),
+            covering: url("/Users/syd/Docs/Images/photo.jpg"),
             from: [url("/Users/syd")]
         )
 
@@ -34,7 +34,7 @@ struct DirectoryContainmentTests {
     @Test func prefersTheMostSpecificGrant() async throws {
         // The narrowest scope that still covers the file is the right one to open.
         let found = DirectoryContainment.directory(
-            containing: url("/Users/syd/Docs/Images/photo.jpg"),
+            covering: url("/Users/syd/Docs/Images/photo.jpg"),
             from: [url("/Users/syd"), url("/Users/syd/Docs/Images"), url("/Users/syd/Docs")]
         )
 
@@ -43,7 +43,7 @@ struct DirectoryContainmentTests {
 
     @Test func returnsNilWhenNoGrantCovers() async throws {
         let found = DirectoryContainment.directory(
-            containing: url("/Users/syd/Docs/photo.jpg"),
+            covering: url("/Users/syd/Docs/photo.jpg"),
             from: [url("/Users/syd/Other"), url("/tmp")]
         )
 
@@ -51,13 +51,13 @@ struct DirectoryContainmentTests {
     }
 
     @Test func returnsNilForAnEmptyGrantList() async throws {
-        #expect(DirectoryContainment.directory(containing: url("/a/b.jpg"), from: []) == nil)
+        #expect(DirectoryContainment.directory(covering: url("/a/b.jpg"), from: []) == nil)
     }
 
     @Test func isNotFooledByASharedNamePrefix() async throws {
         // "/Users/syd/Docs2" must not be treated as containing a file in "Docs".
         let found = DirectoryContainment.directory(
-            containing: url("/Users/syd/Docs/photo.jpg"),
+            covering: url("/Users/syd/Docs/photo.jpg"),
             from: [url("/Users/syd/Docs2")]
         )
 
@@ -66,20 +66,11 @@ struct DirectoryContainmentTests {
 
     @Test func trailingSlashesDoNotMatter() async throws {
         let found = DirectoryContainment.directory(
-            containing: url("/Users/syd/Docs/photo.jpg"),
+            covering: url("/Users/syd/Docs/photo.jpg"),
             from: [URL(fileURLWithPath: "/Users/syd/Docs", isDirectory: true)]
         )
 
         #expect(found != nil)
-    }
-
-    @Test func aDirectoryDoesNotContainItself() async throws {
-        #expect(!DirectoryContainment.directory(url("/a/b"), contains: url("/a/b")))
-    }
-
-    @Test func containsReportsNestedFiles() async throws {
-        #expect(DirectoryContainment.directory(url("/a"), contains: url("/a/b/c.jpg")))
-        #expect(!DirectoryContainment.directory(url("/a/b"), contains: url("/a/c.jpg")))
     }
 }
 

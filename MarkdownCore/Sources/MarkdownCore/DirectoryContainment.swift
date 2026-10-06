@@ -13,30 +13,13 @@ import Foundation
 /// This works out which grant applies.
 public enum DirectoryContainment {
 
-    /// The most specific granted directory that contains `fileURL`, or nil when
-    /// none does.
+    /// The most specific granted directory that covers `url`, or nil when none
+    /// does. `url` may be a file inside the grant or the granted directory
+    /// itself — resolving a document's own folder, say, where the grant and the
+    /// folder are the same path.
     ///
     /// Where grants nest, the deepest one wins: it is the narrowest scope that
-    /// still covers the file.
-    public static func directory(containing fileURL: URL, from directories: [URL]) -> URL? {
-        let target = pathComponents(of: fileURL)
-
-        return directories
-            .filter { contains(pathComponents(of: $0), target) }
-            .max { pathComponents(of: $0).count < pathComponents(of: $1).count }
-    }
-
-    /// Whether `directory` contains `fileURL` at any depth.
-    public static func directory(_ directory: URL, contains fileURL: URL) -> Bool {
-        contains(pathComponents(of: directory), pathComponents(of: fileURL))
-    }
-
-    /// The most specific granted directory that covers `url`, counting `url`
-    /// itself.
-    ///
-    /// Use this when the thing needing access may be a directory rather than a
-    /// file — resolving a document's own folder, say, where the grant and the
-    /// folder are the same path.
+    /// still covers it.
     public static func directory(covering url: URL, from directories: [URL]) -> URL? {
         let target = pathComponents(of: url)
 

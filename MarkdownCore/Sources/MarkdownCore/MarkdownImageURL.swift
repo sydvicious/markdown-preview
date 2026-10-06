@@ -270,20 +270,6 @@ public enum MarkdownImageURL {
         return nil
     }
 
-    public static func mimeType(forPathExtension pathExtension: String) -> String {
-        switch pathExtension.lowercased() {
-        case "png": return "image/png"
-        case "jpg", "jpeg": return "image/jpeg"
-        case "gif": return "image/gif"
-        case "svg": return "image/svg+xml"
-        case "webp": return "image/webp"
-        case "heic", "heif": return "image/heic"
-        case "bmp": return "image/bmp"
-        case "tif", "tiff": return "image/tiff"
-        default: return "application/octet-stream"
-        }
-    }
-
     // MARK: - Shared helpers
 
     /// The directory a relative image reference resolves against. Call sites pass

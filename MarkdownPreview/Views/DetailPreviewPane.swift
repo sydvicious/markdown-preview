@@ -5,6 +5,9 @@
 
 import SwiftUI
 
+/// Preview scaffolding: stands in for the detail pane, so that a `#Preview`
+/// can show a document's rendered or source view without the whole
+/// `ContentView`. The app itself never shows it, and is not meant to.
 struct DetailPreviewPane: View {
     enum Mode {
         case preview
