@@ -171,14 +171,8 @@ This document tracks planned work for MarkdownPreviewApp.
   - It gives confidence that the model and the views are separate.
   - Where things stand: `MarkdownCore` runs with `swift test`. `MarkdownPreviewTests` is hosted by the app (`TEST_HOST`), so every run of it launches the app, for the stores, view models and utilities as much as for the views.
 
-### Simulators for Claude to run the tests on.
-  - Create a simulator for iPhone and another for iPad, for Claude to use to run tests with.
-  - Where things stand: Claude builds the app and its tests for iOS to see that they compile, and does not run them. The simulators on this Mac are Syd's, and Claude leaves them alone.
-  - To check once they exist: that `xcodebuild` runs the tests on the simulator it is given, and does not make clones of it to test in parallel.
-
 ### A script to run all of the non-GUI tests, on every platform.
   - One script that runs all of the non-GUI tests for all platforms: Mac, iOS and JavaScript.
-  - Depends on "Simulators for Claude to run the tests on", for the iOS runs.
   - Once it exists, add it to the release process, and eventually to CI/CD.
   - Where things stand: three things are run by hand. `swift test` in `MarkdownCore`, `xcodebuild` for the app's tests, and `npm test` for the scripts'.
 
