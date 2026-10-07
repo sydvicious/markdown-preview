@@ -22,6 +22,14 @@ This document tracks planned work for MarkdownPreviewApp.
   - Moving just the read off `@Main` may turn out to be good enough, but the suspicion is that building the HTML is the slow half — measure both stages before deciding how far to take it.
   - Symptom driving this: opening a new file visibly freezes the GUI. The whole open path — read, parse, HTML build — currently runs on `@Main`, so the window stops responding until it finishes.
   - Schedule this work after the YMMV-related refactor work.
+  - Measure first: put `[perf]` timing lines in the console for each stage of an open (bookmark, read, decode, search index, HTML build, image checks, page load) and for the once-a-second check, then open the slow file from Xcode.
+  - What the code does today, from reading it. None of it is measured.
+    - Everything `DocumentSessionStore.openDocument` does is on the main actor: making and resolving the bookmark, the coordinated read, decoding, and `DocumentSearchIndex.upsert`, which builds a text-offset mapping of the whole document.
+    - `MarkdownFile.load` retries a file that is not there for up to 30 seconds, sleeping the thread between tries. That is for an iCloud file still downloading.
+    - `MarkdownPreviewView` builds the HTML in `body`: the parse, the render, and a check on disk for each image, every time the body runs. The web view reloads only when the HTML differs, but the build is paid for each time, and that is expected to include every change of selection.
+    - A document is parsed more than once for one open: for the search index, for the HTML, and again in `PreviewSelectionReflection` to place a selection.
+    - At launch `restorePersistedDocumentsIfNeeded` reads and indexes every listed document before anything is shown.
+    - The once-a-second check resolves the active document's bookmark and reads its dates on the main actor. Every ten seconds the same is done for every listed document.
 
 ### A line selected by triple-click in the preview does not stay a line.
   - Clicking three times on a line in the preview highlights the line and a strip below it, into the block after. Switching to Source and back highlights the line's words alone. The highlight should be the line alone from the click.
