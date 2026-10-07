@@ -145,8 +145,6 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Close the gaps the test audit found.
   - The gaps, from reading the tests against the sources; nothing was run to find them. "No test" means the name appears nowhere in either test directory, which was checked by search. Anything said about behavior is from reading the code and is marked so.
     - Untested logic in files that do have tests:
-      - `MarkdownAppCommandCenter`: six of the nine `perform…` methods are never called (project find, use selection, find next, find previous, larger and smaller text).
-      - `MarkdownSearchSession`: no test moves backward, so Find Previous, its wrap, and reversing direction mid-wrap are untested; so is `refresh` when the matches shrink.
       - `SearchViewModel`: `detailSearchSuggestions` and `seedFromPasteboardIfEmpty`. The suggestion rules in `DocumentSearchIndex` and `MarkdownSearch` (minimum length, limit, folding, no repeats) rest on one `contains` assertion.
       - `MarkdownSelectionClipboard`: `writeSelection` and `writePlainText`.
     - The scripts' tests have the smallest gaps: a selection whose ends are elements, not text nodes (select-all, triple-click); `preventDefault` and `stopPropagation` in the two button handlers; the `touchend` and `pointerup` listeners.
@@ -171,6 +169,10 @@ This document tracks planned work for MarkdownPreviewApp.
   - One script that runs all of the non-GUI tests for all platforms: Mac, iOS and JavaScript.
   - Once it exists, add it to the release process, and eventually to CI/CD.
   - Where things stand: three things are run by hand. `swift test` in `MarkdownCore`, `xcodebuild` for the app's tests, and `npm test` for the scripts'.
+
+### Set up CI/CD on the new Mac mini.
+  - Run a build server on the M5 Pro Mac mini, and set up a CI/CD system on it. Probably Jenkins; not decided.
+  - Depends on "A script to run all of the non-GUI tests, on every platform", which is what it would run.
 
 ### Adopt Swift 6 "MainActor by default" concurrency.
   - Move the targets to the Swift 6 language mode and enable Default Actor Isolation = MainActor (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`). Currently on Swift 5 mode with no default actor isolation.

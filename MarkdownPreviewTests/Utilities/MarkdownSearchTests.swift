@@ -5,6 +5,7 @@
 
 import Foundation
 import Testing
+import MarkdownCore
 @testable import MarkdownPreview
 
 struct MarkdownSearchTests {
@@ -38,6 +39,288 @@ struct MarkdownSearchTests {
         let wrappedAdvance = session.move(.forward)
         #expect(wrappedAdvance)
         #expect(session.resultPositionText == "1 of 2")
+    }
+}
+
+/// Moving between the matches of a search, and what a session does when the
+/// document it is searching changes under it.
+///
+/// At either end of the matches a move is refused the first time it is asked
+/// for, and wraps round the second time. The refusal is the reader's notice
+/// that they have reached the end.
+struct MarkdownSearchSessionTests {
+
+    /// Three matches, at 0, 11 and 23.
+    private static let text = "alpha beta alpha gamma alpha"
+
+    /// A session that has just searched `text` for "alpha", so it is at the
+    /// first of three matches.
+    private func makeSession(searching text: String = MarkdownSearchSessionTests.text) -> MarkdownSearchSession {
+        var session = MarkdownSearchSession()
+        session.updateQuery("alpha", in: text)
+        return session
+    }
+
+    @Test func aNewSearchStartsAtItsFirstMatch() {
+        let session = makeSession()
+
+        #expect(session.resultCount == 3)
+        #expect(session.resultPositionText == "1 of 3")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 0, length: 5))
+    }
+
+    @Test func theCurrentMatchFollowsThePosition() {
+        var session = makeSession()
+
+        session.move(.forward)
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 11, length: 5))
+
+        session.move(.forward)
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 23, length: 5))
+    }
+
+    // MARK: - Find Previous
+
+    @Test func findPreviousGoesToTheMatchBefore() {
+        var session = makeSession()
+        session.move(.forward)
+        session.move(.forward)
+
+        let moved = session.move(.backward)
+
+        #expect(moved)
+        #expect(session.resultPositionText == "2 of 3")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 11, length: 5))
+    }
+
+    /// The mirror of Find Next at the last match: refused once, and round to
+    /// the last match the second time.
+    @Test func findPreviousAtTheFirstMatchIsRefusedOnceAndThenWrapsToTheLast() {
+        var session = makeSession()
+
+        let refused = session.move(.backward)
+        #expect(!refused)
+        #expect(session.resultPositionText == "1 of 3")
+
+        let wrapped = session.move(.backward)
+        #expect(wrapped)
+        #expect(session.resultPositionText == "3 of 3")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 23, length: 5))
+    }
+
+    @Test func findPreviousAfterWrappingCarriesOnBackward() {
+        var session = makeSession()
+        session.move(.backward)
+        session.move(.backward)
+
+        let moved = session.move(.backward)
+
+        #expect(moved)
+        #expect(session.resultPositionText == "2 of 3")
+    }
+
+    // MARK: - Changing direction at an end
+
+    /// The refusal at the last match is a notice, not a promise. Going back
+    /// instead simply goes back, and the wrap that was waiting is forgotten:
+    /// coming forward to the end again is refused again.
+    @Test func goingBackAfterBeingRefusedAtTheLastMatchForgetsTheWrap() {
+        var session = makeSession()
+        session.move(.forward)
+        session.move(.forward)
+        let moved1 = session.move(.forward)
+        #expect(!moved1)
+
+        let back = session.move(.backward)
+        #expect(back)
+        #expect(session.resultPositionText == "2 of 3")
+
+        let forwardAgain = session.move(.forward)
+        #expect(forwardAgain)
+        #expect(session.resultPositionText == "3 of 3")
+
+        let refusedAgain = session.move(.forward)
+        #expect(!refusedAgain)
+        #expect(session.resultPositionText == "3 of 3")
+    }
+
+    @Test func goingForwardAfterBeingRefusedAtTheFirstMatchForgetsTheWrap() {
+        var session = makeSession()
+        let moved2 = session.move(.backward)
+        #expect(!moved2)
+
+        let forward = session.move(.forward)
+        #expect(forward)
+        #expect(session.resultPositionText == "2 of 3")
+
+        let backAgain = session.move(.backward)
+        #expect(backAgain)
+        #expect(session.resultPositionText == "1 of 3")
+
+        let refusedAgain = session.move(.backward)
+        #expect(!refusedAgain)
+        #expect(session.resultPositionText == "1 of 3")
+    }
+
+    /// With one match it is both the first and the last, so either direction
+    /// is refused once and then wraps, to the only place there is.
+    @Test(arguments: [MarkdownSearchDirection.forward, .backward])
+    func withOneMatchAMoveIsRefusedOnceAndThenWrapsToTheSameMatch(direction: MarkdownSearchDirection) {
+        var session = makeSession(searching: "one alpha only")
+
+        let refused = session.move(direction)
+        #expect(!refused)
+        #expect(session.resultPositionText == "1 of 1")
+
+        let wrapped = session.move(direction)
+        #expect(wrapped)
+        #expect(session.resultPositionText == "1 of 1")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 4, length: 5))
+    }
+
+    /// A wrap is earned by asking twice for the same thing. Asked for the other
+    /// direction in between, neither has been asked for twice.
+    @Test func withOneMatchAlternatingDirectionsNeverWraps() {
+        var session = makeSession(searching: "one alpha only")
+
+        let moved3 = session.move(.forward)
+        #expect(!moved3)
+        let moved4 = session.move(.backward)
+        #expect(!moved4)
+        let moved5 = session.move(.forward)
+        #expect(!moved5)
+        #expect(session.resultPositionText == "1 of 1")
+    }
+
+    // MARK: - Nothing to find
+
+    @Test(arguments: [MarkdownSearchDirection.forward, .backward])
+    func withNoMatchesAMoveGoesNowhere(direction: MarkdownSearchDirection) {
+        var session = MarkdownSearchSession()
+        session.updateQuery("zucchini", in: Self.text)
+
+        let moved = session.move(direction)
+
+        #expect(!moved)
+        #expect(session.resultCount == 0)
+        #expect(session.currentMatch == nil)
+        #expect(session.resultPositionText == nil)
+        // And asking again is not a second request to wrap.
+        let moved6 = session.move(direction)
+        #expect(!moved6)
+    }
+
+    @Test func anEmptySearchFindsNothing() {
+        var session = makeSession()
+
+        session.updateQuery("   ", in: Self.text)
+
+        #expect(session.resultCount == 0)
+        #expect(session.currentMatch == nil)
+        let moved7 = session.move(.forward)
+        #expect(!moved7)
+    }
+
+    // MARK: - A new search
+
+    @Test func aNewSearchStartsOverFromTheFirstMatchWithNoWrapWaiting() {
+        var session = makeSession()
+        session.move(.forward)
+        session.move(.forward)
+        let moved8 = session.move(.forward)
+        #expect(!moved8)
+
+        session.updateQuery("beta", in: Self.text)
+
+        #expect(session.query == "beta")
+        #expect(session.resultPositionText == "1 of 1")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 6, length: 4))
+        // The refusal that was waiting belonged to the search before.
+        let moved9 = session.move(.forward)
+        #expect(!moved9)
+    }
+
+    // MARK: - The document changes under the search
+
+    /// The reader was at the last of three matches and the document now has
+    /// two, so they are at the last of two.
+    @Test func whenTheMatchesShrinkPastThePositionItMovesToTheLastOneLeft() {
+        var session = makeSession()
+        session.move(.forward)
+        session.move(.forward)
+        #expect(session.resultPositionText == "3 of 3")
+
+        session.refresh(in: "alpha beta alpha")
+
+        #expect(session.resultCount == 2)
+        #expect(session.resultPositionText == "2 of 2")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 11, length: 5))
+    }
+
+    @Test func whenTheMatchesShrinkButThePositionIsStillThereItStays() {
+        var session = makeSession()
+        session.move(.forward)
+        #expect(session.resultPositionText == "2 of 3")
+
+        session.refresh(in: "alpha beta alpha")
+
+        #expect(session.resultPositionText == "2 of 2")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 11, length: 5))
+    }
+
+    @Test func whenEveryMatchGoesThereIsNoCurrentMatch() {
+        var session = makeSession()
+        session.move(.forward)
+
+        session.refresh(in: "beta gamma")
+
+        #expect(session.query == "alpha")
+        #expect(session.resultCount == 0)
+        #expect(session.currentMatch == nil)
+        #expect(session.resultPositionText == nil)
+        let moved10 = session.move(.forward)
+        #expect(!moved10)
+        let moved11 = session.move(.backward)
+        #expect(!moved11)
+    }
+
+    @Test func whenMatchesAreAddedThePositionStays() {
+        var session = makeSession(searching: "alpha beta alpha")
+        session.move(.forward)
+        #expect(session.resultPositionText == "2 of 2")
+
+        session.refresh(in: Self.text)
+
+        #expect(session.resultPositionText == "2 of 3")
+        // There is now somewhere further to go.
+        let moved12 = session.move(.forward)
+        #expect(moved12)
+        #expect(session.resultPositionText == "3 of 3")
+    }
+
+    /// A search that found nothing starts at the first match once the
+    /// document has one.
+    @Test func whenADocumentWithNoMatchesGainsSomeTheSearchStartsAtTheFirst() {
+        var session = makeSession(searching: "beta gamma")
+        #expect(session.resultCount == 0)
+
+        session.refresh(in: Self.text)
+
+        #expect(session.resultCount == 3)
+        #expect(session.resultPositionText == "1 of 3")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 0, length: 5))
+    }
+
+    /// The matches are found again in the new text, so a match that has moved
+    /// is selected where it now is.
+    @Test func aMatchThatMovedIsFoundWhereItIsNow() {
+        var session = makeSession()
+        session.move(.forward)
+
+        session.refresh(in: "A new first line.\n\n" + Self.text)
+
+        #expect(session.resultPositionText == "2 of 3")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 30, length: 5))
     }
 }
 
