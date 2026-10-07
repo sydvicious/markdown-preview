@@ -28,8 +28,9 @@ struct MarkdownSelectionClipboardPayload {
 enum MarkdownSelectionClipboard {
     /// - Parameter richTextHTML: the rendered HTML for the selection, when the
     ///   caller has it. The preview does, and it matters: the source ranges a
-    ///   preview selection maps back to cover the *visible* text only, so the
-    ///   `# ` of a heading is never inside them. Re-rendering that stripped text
+    ///   preview selection maps back to cover the *visible* text only, unless
+    ///   it is whole lines that were selected, so the `# ` of a heading is
+    ///   seldom inside them. Re-rendering that stripped text
     ///   produced rich text with every heading flattened to a paragraph. The
     ///   HTML already on screen is what the user selected, so it is what gets
     ///   converted. The source view has no HTML and falls back to re-rendering,

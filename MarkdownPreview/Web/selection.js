@@ -110,10 +110,13 @@
       }
 
       const textNodes = window.markdownPreview.acceptedTextNodesInBlock(block);
+      const blockContents = document.createRange();
+      blockContents.selectNodeContents(block);
       for (let rangeIndex = 0; rangeIndex < selection.rangeCount; rangeIndex += 1) {
         const selectionRange = selection.getRangeAt(rangeIndex);
         let displayStart = null;
         let displayEnd = null;
+        let lastSelectedNode = null;
 
         for (const entry of textNodes) {
           const selectedSpan = selectedSpanInTextNode(selectionRange, entry.node);
@@ -121,6 +124,7 @@
             continue;
           }
 
+          lastSelectedNode = entry.node;
           const spanStart = entry.start + selectedSpan.start;
           const spanEnd = entry.start + selectedSpan.end;
           displayStart = displayStart === null ? spanStart : Math.min(displayStart, spanStart);
@@ -128,12 +132,26 @@
         }
 
         if (displayStart !== null && displayEnd !== null && displayEnd > displayStart) {
-          selectedRanges.push({
+          const selectedRange = {
             blockStart,
             blockEnd,
             displayLocation: displayStart,
             displayLength: displayEnd - displayStart
-          });
+          };
+          // A selection that goes on after the last text it takes, into
+          // something else, has taken the end of the line with it. Clicking
+          // three times on a line does that: it runs on to the start of
+          // whatever comes next, the next block or the next item of a list.
+          // Dragging to the end of the line stops with the text. An end that
+          // is only outside the text, after the last child of its paragraph,
+          // has gone nowhere.
+          const endContainer = selectionRange.endContainer;
+          const leavesBlock = selectionRange.compareBoundaryPoints(Range.END_TO_END, blockContents) > 0;
+          const entersSomethingElse = !endContainer.contains(lastSelectedNode);
+          if (leavesBlock || entersSomethingElse) {
+            selectedRange.continuesPastText = true;
+          }
+          selectedRanges.push(selectedRange);
         }
       }
     }

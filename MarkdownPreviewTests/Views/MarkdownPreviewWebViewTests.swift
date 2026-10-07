@@ -523,6 +523,154 @@ struct MarkdownPreviewWebViewTests {
         #expect(PreviewSelectionBridge.displayRanges(from: notText.displayRangeResult) == expected)
     }
 
+    // MARK: - A selection that takes a whole line
+
+    /// Clicking three times on a line selects the line and its ending, as it
+    /// does in any text view, and the page says so: the selection it reports
+    /// goes on past the text it took. The copy is then the line as it is
+    /// written, from where it starts to where the next one does.
+    @Test func aLineSelectedWithItsEndingIsCopiedAsItIsWritten() {
+        let source = "### Async file loading off `@Main`.\n- Read source files.\n"
+        let payload = continuingPastItsText(
+            displayRangePayload(in: source, visibleText: "Async file loading off @Main.")
+        )
+
+        #expect(copiedMarkdown(for: payload, in: source) == "### Async file loading off `@Main`.\n")
+    }
+
+    /// A selection dragged to the end of a line stops there, and is the words
+    /// that were dragged over.
+    @Test func aSelectionThatStopsWithItsTextTakesNoLineEndingAndNoLineStart() {
+        let source = "### Async file loading off `@Main`.\n- Read source files.\n"
+        let payload = displayRangePayload(in: source, visibleText: "Async file loading off @Main.")
+
+        #expect(copiedMarkdown(for: payload, in: source) == "Async file loading off `@Main`.")
+    }
+
+    /// The last word the reader sees is not always the last thing on the line.
+    @Test func whatIsWrittenAfterTheLastWordOfTheLineComesWithItsEnding() {
+        let source = "A line that ends in **bold**\n\nNext."
+        let payload = continuingPastItsText(
+            displayRangePayload(in: source, visibleText: "A line that ends in bold")
+        )
+
+        #expect(copiedMarkdown(for: payload, in: source) == "A line that ends in **bold**\n")
+    }
+
+    @Test func aWindowsLineEndingIsTakenWhole() {
+        let source = "First line.\r\n\r\nSecond."
+        let payload = continuingPastItsText(displayRangePayload(in: source, visibleText: "First line."))
+
+        #expect(copiedMarkdown(for: payload, in: source) == "First line.\r\n")
+    }
+
+    /// The last line of a document may have no ending to take. It is a whole
+    /// line all the same.
+    @Test func theLastLineOfADocumentThatHasNoEndingIsStillAWholeLine() {
+        let source = "# Only line."
+        let wholeLine = continuingPastItsText(displayRangePayload(in: source, visibleText: "Only line."))
+        let dragged = displayRangePayload(in: source, visibleText: "Only line.")
+
+        #expect(copiedMarkdown(for: wholeLine, in: source) == "# Only line.")
+        #expect(copiedMarkdown(for: dragged, in: source) == "Only line.")
+    }
+
+    /// The line after the last line of a code block is its closing fence, which
+    /// is not something the reader selected.
+    @Test func theLastLineOfACodeBlockDoesNotTakeTheFenceWithIt() {
+        let source = "```\nlet a = 1\nlet b = 2\n```\n\nAfter."
+        let payload = continuingPastItsText(
+            displayRangePayloads(in: source, visibleTexts: ["let b = 2"], toTheEndOfTheBlock: true)
+        )
+
+        #expect(copiedMarkdown(for: payload, in: source) == "let b = 2\n")
+    }
+
+    /// The items of a list are one block, and each is a line of its own.
+    @Test func anItemInTheMiddleOfAListIsCopiedWithItsMarkerAndItsEnding() {
+        let source = "- one\n- two\n- three\n"
+        let wholeLine = continuingPastItsText(displayRangePayload(in: source, visibleText: "two"))
+        let dragged = displayRangePayload(in: source, visibleText: "two")
+
+        #expect(copiedMarkdown(for: wholeLine, in: source) == "- two\n")
+        #expect(copiedMarkdown(for: dragged, in: source) == "two")
+    }
+
+    @Test func aQuotedLineIsCopiedWithItsMarker() {
+        let source = "> Quoted line.\n\nAfter."
+        let payload = continuingPastItsText(displayRangePayload(in: source, visibleText: "Quoted line."))
+
+        #expect(copiedMarkdown(for: payload, in: source) == "> Quoted line.\n")
+    }
+
+    /// A selection can go on past its text in the middle of a line, from one
+    /// run of bold into the plain text after it. That is not the end of a line.
+    @Test func aSelectionThatGoesOnPastItsTextMidLineTakesNoLineEnding() {
+        let source = "Some **bold** words here\n\nNext."
+        let payload = continuingPastItsText(displayRangePayload(in: source, visibleText: "Some bold"))
+
+        #expect(copiedMarkdown(for: payload, in: source) == "Some **bold")
+    }
+
+    /// The line's ending was taken, but the line was not taken from its start.
+    @Test func aSelectionFromTheMiddleOfALineToItsEndingStartsWhereItWasMade() {
+        let source = "## Long title\n\nNext."
+        let payload = continuingPastItsText(displayRangePayload(in: source, visibleText: "title"))
+
+        #expect(copiedMarkdown(for: payload, in: source) == "title\n")
+    }
+
+    /// Dragged from the first word of a heading into the middle of the
+    /// paragraph after it. It does not end with a line, so it is not lines
+    /// that were selected, and it starts with the word it was started on.
+    @Test func aSelectionThatEndsMidLineStartsWhereItWasMade() {
+        let source = "## Title\n\nNext paragraph.\n"
+        let payload = continuingPastItsText(displayRangePayload(in: source, visibleText: "Title"))
+            + displayRangePayload(in: source, visibleText: "Next")
+
+        #expect(copiedMarkdown(for: payload, in: source) == "Title\n\nNext")
+    }
+
+    /// Several lines selected whole, as Select All does, or clicking three
+    /// times and dragging.
+    @Test func severalWholeLinesAreCopiedFromTheStartOfTheFirst() {
+        let source = "## Title\n\nNext paragraph.\n"
+        let payload = continuingPastItsText(
+            displayRangePayloads(in: source, visibleTexts: ["Title", "Next paragraph."])
+        )
+
+        #expect(copiedMarkdown(for: payload, in: source) == source)
+    }
+
+    @Test func aDisplayRangeSaysWhetherItsSelectionGoesOnPastItsText() {
+        var continuing = displayRange(blockStart: 0, blockEnd: 10, displayLocation: 2, displayLength: 4)
+        continuing["continuesPastText"] = NSNumber(value: true)
+        let silent = displayRange(blockStart: 12, blockEnd: 20, displayLocation: 0, displayLength: 3)
+        var notAYesOrNo = displayRange(blockStart: 22, blockEnd: 30, displayLocation: 1, displayLength: 2)
+        notAYesOrNo["continuesPastText"] = "yes"
+
+        #expect(PreviewSelectionBridge.displayRanges(from: [continuing, silent, notAYesOrNo]) == [
+            PreviewDisplaySelectionRange(
+                blockStart: 0, blockEnd: 10, displayLocation: 2, displayLength: 4, continuesPastText: true
+            ),
+            PreviewDisplaySelectionRange(blockStart: 12, blockEnd: 20, displayLocation: 0, displayLength: 3),
+            PreviewDisplaySelectionRange(blockStart: 22, blockEnd: 30, displayLocation: 1, displayLength: 2)
+        ])
+    }
+
+    /// What a copy of the selection the page reported puts on the pasteboard
+    /// as plain text.
+    private func copiedMarkdown(for payload: [[String: Any]], in source: String) -> String? {
+        MarkdownSelectionClipboard.selectedMarkdown(
+            in: source,
+            ranges: PreviewSelectionBridge.contiguousSelectionRanges(fromDisplayRangeResult: payload, source: source)
+        )
+    }
+
+    private func continuingPastItsText(_ payload: [[String: Any]]) -> [[String: Any]] {
+        payload.map { $0.merging(["continuesPastText": NSNumber(value: true)]) { _, new in new } }
+    }
+
     private func displayRange(
         blockStart: Int,
         blockEnd: Int,
@@ -541,7 +689,13 @@ struct MarkdownPreviewWebViewTests {
         displayRangePayloads(in: source, visibleTexts: [visibleText])
     }
 
-    private func displayRangePayloads(in source: String, visibleTexts: [String]) -> [[String: Any]] {
+    /// - Parameter toTheEndOfTheBlock: the range runs from the start of the
+    ///   text named to the end of everything its block shows.
+    private func displayRangePayloads(
+        in source: String,
+        visibleTexts: [String],
+        toTheEndOfTheBlock: Bool = false
+    ) -> [[String: Any]] {
         let blocks = MarkdownBlockParser.parse(source)
         let lineTable = MarkdownSourceLineTable(source: source)
 
@@ -557,7 +711,11 @@ struct MarkdownPreviewWebViewTests {
                     "blockStart": NSNumber(value: blockRange.location),
                     "blockEnd": NSNumber(value: blockRange.location + blockRange.length),
                     "displayLocation": NSNumber(value: displayRange.location),
-                    "displayLength": NSNumber(value: displayRange.length)
+                    "displayLength": NSNumber(
+                        value: toTheEndOfTheBlock
+                            ? (mapping.displayText as NSString).length - displayRange.location
+                            : displayRange.length
+                    )
                 ]
             }
 

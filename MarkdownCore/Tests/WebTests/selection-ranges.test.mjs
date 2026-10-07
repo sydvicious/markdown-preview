@@ -62,7 +62,7 @@ test('a selection across two blocks is one range in each', () => {
   select(window, blocks[0].lastChild, 1, blocks[1].firstChild, 6);
 
   assert.deepEqual(plain(preview.selectedDisplayRanges()), [
-    { blockStart: 0, blockEnd: 12, displayLocation: 11, displayLength: 4 },
+    { blockStart: 0, blockEnd: 12, displayLocation: 11, displayLength: 4, continuesPastText: true },
     { blockStart: 14, blockEnd: 30, displayLocation: 0, displayLength: 6 }
   ]);
 });
@@ -134,8 +134,8 @@ test('Select All is the whole of every block', () => {
   window.getSelection().selectAllChildren(document.querySelector('article'));
 
   assert.deepEqual(plain(preview.selectedDisplayRanges()), [
-    { blockStart: 0, blockEnd: 12, displayLocation: 0, displayLength: 15 },
-    { blockStart: 14, blockEnd: 30, displayLocation: 0, displayLength: 16 }
+    { blockStart: 0, blockEnd: 12, displayLocation: 0, displayLength: 15, continuesPastText: true },
+    { blockStart: 14, blockEnd: 30, displayLocation: 0, displayLength: 16, continuesPastText: true }
   ]);
 });
 
@@ -144,8 +144,8 @@ test('a selection from the page itself, not its article, is still every block', 
   window.getSelection().selectAllChildren(document.body);
 
   assert.deepEqual(plain(preview.selectedDisplayRanges()), [
-    { blockStart: 0, blockEnd: 12, displayLocation: 0, displayLength: 15 },
-    { blockStart: 14, blockEnd: 30, displayLocation: 0, displayLength: 16 }
+    { blockStart: 0, blockEnd: 12, displayLocation: 0, displayLength: 15, continuesPastText: true },
+    { blockStart: 14, blockEnd: 30, displayLocation: 0, displayLength: 16, continuesPastText: true }
   ]);
 });
 
@@ -160,10 +160,58 @@ test('a block selected from its first child to its last is the whole block', () 
 
 // A triple-click selects a paragraph by running the selection on to the start
 // of the next one. That next paragraph has nothing selected in it, and must
-// not be reported as if it had.
+// not be reported as if it had. What the selection did do is go on after the
+// last text it took, which is how the app knows the line was taken with its
+// ending: a selection dragged to the end of the line stops there, and takes no
+// ending.
 test('a triple-click that ends at the start of the next block is the first block alone', () => {
   const { window, preview, blocks } = page();
   select(window, blocks[0].firstChild, 0, blocks[1], 0);
+
+  assert.deepEqual(plain(preview.selectedDisplayRanges()), [
+    { blockStart: 0, blockEnd: 12, displayLocation: 0, displayLength: 15, continuesPastText: true }
+  ]);
+});
+
+test('a selection that ends just after its block goes on past its text', () => {
+  const { window, document, preview, blocks } = page();
+  select(window, blocks[0].firstChild, 0, document.querySelector('article'), 1);
+
+  assert.deepEqual(plain(preview.selectedDisplayRanges()), [
+    { blockStart: 0, blockEnd: 12, displayLocation: 0, displayLength: 15, continuesPastText: true }
+  ]);
+});
+
+// The items of a list are one block. Clicking three times on one of them runs
+// the selection on to the start of the next item, inside the same block.
+const list =
+  '<div class="md-block" data-source-start="0" data-source-end="17">' +
+  '<ul><li>one</li><li>two</li><li>three</li></ul></div>';
+
+test('a triple-click on a list item goes on past its text, inside the list', () => {
+  const { window, document, preview } = page(list);
+  const items = document.querySelectorAll('li');
+  select(window, items[1].firstChild, 0, items[2].firstChild, 0);
+
+  assert.deepEqual(plain(preview.selectedDisplayRanges()), [
+    { blockStart: 0, blockEnd: 17, displayLocation: 3, displayLength: 3, continuesPastText: true }
+  ]);
+});
+
+test('a selection dragged to the end of a list item stops with its text', () => {
+  const { window, document, preview } = page(list);
+  const item = document.querySelectorAll('li')[1].firstChild;
+  select(window, item, 0, item, item.textContent.length);
+
+  assert.deepEqual(plain(preview.selectedDisplayRanges()), [
+    { blockStart: 0, blockEnd: 17, displayLocation: 3, displayLength: 3 }
+  ]);
+});
+
+test('a selection that ends with the last of its block\'s text does not go on past it', () => {
+  const { window, preview, blocks } = page();
+  const last = blocks[0].lastChild;
+  select(window, blocks[0].firstChild, 0, last, last.textContent.length);
 
   assert.deepEqual(plain(preview.selectedDisplayRanges()), [
     { blockStart: 0, blockEnd: 12, displayLocation: 0, displayLength: 15 }
@@ -222,8 +270,8 @@ test('Select All does not count the label of a Copy button', () => {
   window.getSelection().selectAllChildren(document.querySelector('article'));
 
   assert.deepEqual(plain(preview.selectedDisplayRanges()), [
-    { blockStart: 0, blockEnd: 13, displayLocation: 0, displayLength: 11 },
-    { blockStart: 15, blockEnd: 31, displayLocation: 0, displayLength: 16 }
+    { blockStart: 0, blockEnd: 13, displayLocation: 0, displayLength: 11, continuesPastText: true },
+    { blockStart: 15, blockEnd: 31, displayLocation: 0, displayLength: 16, continuesPastText: true }
   ]);
 });
 
@@ -240,8 +288,8 @@ test('Select All does not count the whitespace a list is laid out with', () => {
   window.getSelection().selectAllChildren(document.querySelector('article'));
 
   assert.deepEqual(plain(preview.selectedDisplayRanges()), [
-    { blockStart: 0, blockEnd: 11, displayLocation: 0, displayLength: 6 },
-    { blockStart: 13, blockEnd: 29, displayLocation: 0, displayLength: 16 }
+    { blockStart: 0, blockEnd: 11, displayLocation: 0, displayLength: 6, continuesPastText: true },
+    { blockStart: 13, blockEnd: 29, displayLocation: 0, displayLength: 16, continuesPastText: true }
   ]);
 });
 
@@ -337,7 +385,7 @@ test('Select All is reported to the app as every block', async () => {
 
   assert.equal(messages.length, 1);
   assert.deepEqual(plain(messages[0].body.ranges), [
-    { blockStart: 0, blockEnd: 12, displayLocation: 0, displayLength: 15 },
-    { blockStart: 14, blockEnd: 30, displayLocation: 0, displayLength: 16 }
+    { blockStart: 0, blockEnd: 12, displayLocation: 0, displayLength: 15, continuesPastText: true },
+    { blockStart: 14, blockEnd: 30, displayLocation: 0, displayLength: 16, continuesPastText: true }
   ]);
 });

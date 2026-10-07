@@ -6,6 +6,11 @@
 import Foundation
 import Testing
 import MarkdownCore
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 struct MarkdownSelectionClipboardTests {
 
@@ -40,6 +45,24 @@ struct MarkdownSelectionClipboardTests {
         #expect(withHTML.rtf != nil)
         // The heading survives only when the rendered HTML is used.
         #expect(withHTML.rtf != withoutHTML.rtf)
+    }
+
+    /// A heading copied on its own pastes as its words and the end of its
+    /// line: nothing ahead of it, and nothing after.
+    @Test func richTextOfAHeadingAloneIsItsWordsAndNothingElse() throws {
+        let renderedHTML = """
+        <div class="md-block" data-source-start="16" data-source-end="51">\
+        <h3>Async file loading off <code>@Main</code>.</h3></div>
+        """
+
+        let rtf = try #require(MarkdownSelectionClipboard.rtf(fromHTML: renderedHTML))
+        let words = try NSAttributedString(
+            data: rtf,
+            options: [.documentType: NSAttributedString.DocumentType.rtf],
+            documentAttributes: nil
+        ).string
+
+        #expect(words == "Async file loading off @Main.\n")
     }
 
     @Test func emptyOrBlankSelectionHTMLProducesNoRichText() {

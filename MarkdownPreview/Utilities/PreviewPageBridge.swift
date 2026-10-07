@@ -52,6 +52,11 @@ struct PreviewDisplaySelectionRange: Equatable {
     var blockEnd: Int
     var displayLocation: Int
     var displayLength: Int
+    /// Whether the selection goes on after this text into something else: the
+    /// next block, or the next item of a list. One made by clicking three
+    /// times on a line does, and has taken the line's ending with it; one
+    /// dragged to the end of the line stops with the text.
+    var continuesPastText = false
 }
 
 struct PreviewCopyBlockMessage: Equatable {
@@ -200,8 +205,40 @@ enum PreviewSelectionBridge {
         fromDisplayRangeResult result: Any?,
         source: String
     ) -> [MarkdownSelectionRange] {
-        enclosingRange(of: sourceRanges(fromDisplayRangeResult: result, source: source))
-            .map { [$0] } ?? []
+        let mapped = mappedRanges(fromDisplayRangeResult: result, source: source)
+        guard let enclosing = enclosingRange(of: mapped.map(\.range)) else { return [] }
+        return [startingWithItsLine(enclosing, spanning: mapped, in: source as NSString)]
+    }
+
+    /// `enclosing` from the start of its first line, if what was selected is
+    /// whole lines: nothing the reader can see comes before it on its first
+    /// line, and it ends with a line.
+    ///
+    /// What is written before the first word of a line is the `#` of a
+    /// heading, the marker of a list item or a quote. A line clicked three
+    /// times is selected as a line, and is copied as one, the way it is from
+    /// the source view. Words dragged over from the start of a line to the
+    /// middle of one are still only those words.
+    private static func startingWithItsLine(
+        _ enclosing: MarkdownSelectionRange,
+        spanning mapped: [MappedRange],
+        in source: NSString
+    ) -> MarkdownSelectionRange {
+        guard let first = mapped.min(by: { $0.range.location < $1.range.location }),
+              let last = mapped.max(by: { $0.range.location + $0.range.length < $1.range.location + $1.range.length }),
+              first.isFirstOnItsLine else {
+            return enclosing
+        }
+
+        // The last line of the source may have no ending, and is a line all
+        // the same; what says so is that the selection went on past it.
+        let end = enclosing.location + enclosing.length
+        guard last.takesTheEndOfItsLine || source.startOfLine(containing: end) == end else {
+            return enclosing
+        }
+
+        let lineStart = source.startOfLine(containing: enclosing.location)
+        return MarkdownSelectionRange(location: lineStart, length: end - lineStart)
     }
 
     /// The single source range spanning `ranges`, from the earliest start to the
@@ -238,6 +275,20 @@ enum PreviewSelectionBridge {
     }
 
     static func sourceRanges(fromDisplayRangeResult result: Any?, source: String) -> [MarkdownSelectionRange] {
+        mappedRanges(fromDisplayRangeResult: result, source: source).map(\.range)
+    }
+
+    /// A range of a block's rendered text, as the stretch of source it shows.
+    private struct MappedRange {
+        var range: MarkdownSelectionRange
+        /// Nothing the reader can see comes before it on its line.
+        var isFirstOnItsLine: Bool
+        /// The selection went on past it, and nothing the reader can see comes
+        /// after it on its line.
+        var takesTheEndOfItsLine: Bool
+    }
+
+    private static func mappedRanges(fromDisplayRangeResult result: Any?, source: String) -> [MappedRange] {
         let displayRanges = displayRanges(from: result)
         guard !displayRanges.isEmpty else { return [] }
 
@@ -246,7 +297,7 @@ enum PreviewSelectionBridge {
         // Each block is read on its own, but a reference in it is a link only
         // by a definition elsewhere in the document.
         let definitions = MarkdownLinkDefinitions(source: source)
-        return displayRanges.compactMap { displayRange -> MarkdownSelectionRange? in
+        return displayRanges.compactMap { displayRange -> MappedRange? in
             guard displayRange.blockStart >= 0,
                   displayRange.blockEnd <= sourceLength,
                   displayRange.blockEnd > displayRange.blockStart else {
@@ -257,8 +308,8 @@ enum PreviewSelectionBridge {
                 location: displayRange.blockStart,
                 length: displayRange.blockEnd - displayRange.blockStart
             )
-            let blockSource = nsSource.substring(with: blockRange)
-            let mapping = MarkdownPreviewTextOffsetMapping(sourceText: blockSource, definitions: definitions)
+            let blockSource = nsSource.substring(with: blockRange) as NSString
+            let mapping = MarkdownPreviewTextOffsetMapping(sourceText: blockSource as String, definitions: definitions)
             let localDisplayRange = MarkdownSelectionRange(
                 location: displayRange.displayLocation,
                 length: displayRange.displayLength
@@ -268,9 +319,34 @@ enum PreviewSelectionBridge {
                 return nil
             }
 
-            return MarkdownSelectionRange(
-                location: displayRange.blockStart + localSourceRange.location,
-                length: localSourceRange.length
+            // A block starts where a line does, so a line of the block is a
+            // line of the source.
+            let localStart = localSourceRange.location
+            let localEnd = localStart + localSourceRange.length
+            let shown = mapping.runs.filter { $0.displayRange.length > 0 }.map(\.sourceRange)
+            func showsAnything(from lower: Int, to upper: Int) -> Bool {
+                shown.contains { $0.location < upper && $0.location + $0.length > lower }
+            }
+
+            let start = displayRange.blockStart + localStart
+            var end = displayRange.blockStart + localEnd
+            let takesTheEndOfItsLine = displayRange.continuesPastText
+                && !showsAnything(from: localEnd, to: blockSource.endOfLineText(from: localEnd))
+            // What is written between the last thing the reader can see and
+            // the end of the line, the `**` that closes bold or the address of
+            // a link, is on the line too, so it comes along with the ending.
+            //
+            // An end already at the start of a line stays where it is. The
+            // text of a code block ends with a line ending of its own, and the
+            // line after it is the closing fence.
+            if takesTheEndOfItsLine, nsSource.startOfLine(containing: end) != end {
+                end = nsSource.startOfLine(after: end) ?? sourceLength
+            }
+
+            return MappedRange(
+                range: MarkdownSelectionRange(location: start, length: end - start),
+                isFirstOnItsLine: !showsAnything(from: blockSource.startOfLine(containing: localStart), to: localStart),
+                takesTheEndOfItsLine: takesTheEndOfItsLine
             )
         }
     }
@@ -297,8 +373,51 @@ enum PreviewSelectionBridge {
                 blockStart: blockStartValue,
                 blockEnd: blockEndValue,
                 displayLocation: displayLocationValue,
-                displayLength: displayLengthValue
+                displayLength: displayLengthValue,
+                // Left out by the page when the selection stays in the block.
+                continuesPastText: (dictionary["continuesPastText"] as? Bool) ?? false
             )
         }
+    }
+}
+
+/// Lines as markdown has them: ended by a newline, a carriage return, or a
+/// carriage return and the newline after it, as `MarkdownSourceLineTable`
+/// splits them. These look only as far as the line they are asked about, where
+/// the table reads the whole source.
+private extension NSString {
+    private func isLineEnding(at index: Int) -> Bool {
+        let codeUnit = character(at: index)
+        return codeUnit == 10 || codeUnit == 13
+    }
+
+    /// Where the line that holds `offset` starts.
+    func startOfLine(containing offset: Int) -> Int {
+        var index = Swift.min(Swift.max(offset, 0), length)
+        while index > 0, !isLineEnding(at: index - 1) {
+            index -= 1
+        }
+        return index
+    }
+
+    /// Where the text of the line that holds `offset` ends, which is before
+    /// its line ending.
+    func endOfLineText(from offset: Int) -> Int {
+        var index = Swift.min(Swift.max(offset, 0), length)
+        while index < length, !isLineEnding(at: index) {
+            index += 1
+        }
+        return index
+    }
+
+    /// Where the line after the one that holds `offset` starts, or nil if
+    /// that line is the last and has no ending.
+    func startOfLine(after offset: Int) -> Int? {
+        let ending = endOfLineText(from: offset)
+        guard ending < length else { return nil }
+        let isCarriageReturnAndNewline = character(at: ending) == 13
+            && ending + 1 < length
+            && character(at: ending + 1) == 10
+        return ending + (isCarriageReturnAndNewline ? 2 : 1)
     }
 }

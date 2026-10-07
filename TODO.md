@@ -23,6 +23,14 @@ This document tracks planned work for MarkdownPreviewApp.
   - Symptom driving this: opening a new file visibly freezes the GUI. The whole open path — read, parse, HTML build — currently runs on `@Main`, so the window stops responding until it finishes.
   - Schedule this work after the YMMV-related refactor work.
 
+### A line selected by triple-click in the preview does not stay a line.
+  - Clicking three times on a line in the preview highlights the line and a strip below it, into the block after. Switching to Source and back highlights the line's words alone. The highlight should be the line alone from the click.
+  - After that trip through Source, a copy from the preview is expected to be the words and not the line: no `#` or list marker, and no line ending. Confirm it with a paste.
+  - When the mouse comes up on a selection that runs into the next block, or the next item of a list, and takes nothing from it, draw its end back to the last text it takes.
+  - Have the page remember that this exact selection is whole lines, so that a copy of it is still the line as it is written.
+  - When the app puts a whole-line selection into the page, as it does on the way back from Source, pass the same note with it.
+  - This changes the selection under WebKit, which only running the app can check: try a triple-click and drag, and touch selection on iPad.
+
 ## Features
 
 ### Investigate using Liquid Glass controls.
