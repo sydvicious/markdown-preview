@@ -72,10 +72,11 @@ public enum MarkdownImageURL {
     /// accurately.
     ///
     /// Existence alone cannot tell these apart: a sandboxed app refused a
-    /// directory sees its files as absent. So the directory listing is the
+    /// directory sees its files as absent. So a directory listing is the
     /// deciding evidence — if the folder can be listed and the name is not
     /// there, the file is genuinely missing; if the folder cannot be listed at
-    /// all, this is an access problem.
+    /// all, this is an access problem. The folder in question is the one the
+    /// source names, which may be below the document's or above it.
     public static func unresolvedLocalImages(
         in html: String,
         relativeTo baseURL: URL?,
@@ -87,19 +88,43 @@ public enum MarkdownImageURL {
             return []
         }
 
-        let listing = try? fileManager.contentsOfDirectory(atPath: directory.path)
+        // A document's images are mostly in one folder, so each folder is
+        // listed once however many sources name it.
+        var listings: [String: [String]?] = [:]
+        func listing(of folder: URL) -> [String]? {
+            if let known = listings[folder.path] { return known }
+            let listed = try? fileManager.contentsOfDirectory(atPath: folder.path)
+            listings[folder.path] = .some(listed)
+            return listed
+        }
 
         return sources.map { source in
-            guard let listing else {
-                // The folder itself is unreadable, so nothing can be said about
-                // the file beyond that access is missing.
-                return (source, .unreadable)
-            }
-
-            let name = (source.removingPercentEncoding ?? source)
-            let leaf = URL(fileURLWithPath: name).lastPathComponent
-            return (source, listing.contains(leaf) ? .unreadable : .missing)
+            let path = source.removingPercentEncoding ?? source
+            let fileURL = directory.appendingPathComponent(path).standardizedFileURL
+            return (source, unresolvedReason(for: fileURL, listing: listing))
         }
+    }
+
+    /// Whether a file that could not be resolved is missing or cannot be read.
+    ///
+    /// Walking up from the file, the first folder that can be listed decides
+    /// it. If that folder lists the next part of the path, that part is there
+    /// and what lies beyond it cannot be reached, which is an access problem.
+    /// If it does not, the file is genuinely missing. If no folder on the way
+    /// can be listed, nothing can be said beyond that access is missing.
+    private static func unresolvedReason(
+        for fileURL: URL,
+        listing: (URL) -> [String]?
+    ) -> UnresolvedReason {
+        var child = fileURL
+        while child.pathComponents.count > 1 {
+            let parent = child.deletingLastPathComponent()
+            if let names = listing(parent) {
+                return names.contains(child.lastPathComponent) ? .unreadable : .missing
+            }
+            child = parent
+        }
+        return .unreadable
     }
 
     /// The attribute that marks the button standing in for an unreadable image.

@@ -145,14 +145,10 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Close the gaps the test audit found.
   - The gaps, from reading the tests against the sources; nothing was run to find them. "No test" means the name appears nowhere in either test directory, which was checked by search. Anything said about behavior is from reading the code and is marked so.
     - Untested logic in files that do have tests:
-      - `DocumentSessionStore`: `checkAllDocumentsForChanges` for a document that changed or went missing (only a move is tested), `acknowledgeMissingActiveDocument`, `handleMissingDocument`, `hasPersistedDocumentList` (the gate for seeding the welcome document), and removal at compact width.
-      - `ContentViewModel`: `handleFindCommand`, `focusDetailSearch`, `navigateDetailSearch`, `cancelFocusedSearch`, `decreaseSelectedTextSize`, `filteredGroupedDocumentsByParentDirectory` (what the Mac sidebar shows), and every single-column branch — no test sets `usesSingleColumnNavigation`.
       - `MarkdownAppCommandCenter`: six of the nine `perform…` methods are never called (project find, use selection, find next, find previous, larger and smaller text).
       - `MarkdownSearchSession`: no test moves backward, so Find Previous, its wrap, and reversing direction mid-wrap are untested; so is `refresh` when the matches shrink.
       - `SearchViewModel`: `detailSearchSuggestions` and `seedFromPasteboardIfEmpty`. The suggestion rules in `DocumentSearchIndex` and `MarkdownSearch` (minimum length, limit, folding, no repeats) rest on one `contains` assertion.
       - `MarkdownSelectionClipboard`: `writeSelection` and `writePlainText`.
-      - `MarkdownImageURL`: an image source with a folder in it (`images/x.png`, `../x.png`), and an upper-case extension, which the bundled sample's `lilsyd.JPG` has.
-      - `MarkdownBlockCopyText`: tab and mixed indentation, a fence indented up to three spaces, a quote's continuation line without its `>`.
     - The scripts' tests have the smallest gaps: a selection whose ends are elements, not text nodes (select-all, triple-click); `preventDefault` and `stopPropagation` in the two button handlers; the `touchend` and `pointerup` listeners.
   - No UI tests. Syd is not willing to write or maintain any more of them than there already are, particularly since the Mac app is going to have a complete redesign at some point. The one exception is a specific GUI bug that has to be verified and cannot easily be reproduced by hand. In their place, working previews to play with: both need mocks and discipline, but a preview adapts as the interface changes, where GUI tests are much harder to maintain.
   - Working previews in place of tests, for `MarkdownPreviewView.swift`:

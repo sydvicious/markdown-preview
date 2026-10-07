@@ -5,6 +5,12 @@
 
 ## 0.10
 
+- (iOS/iPadOS) Removing the document on screen at a compact width goes back to the list. It used to leave the document column showing with no document in it, when the removal was made from the menu or the keyboard.
+- Tests for more of `ContentViewModel`: where Find goes, side by side and one column at a time; Find Next and Find Previous; cancelling a search; smaller text; what the Mac's sidebar shows under a search; and removing, opening and answering a missing document at both widths.
+- Tests for more of `DocumentSessionStore`: a document that changes, or whose file is deleted, on screen and off it; answering the report of a missing document; taking a document off the list at a compact and a regular width; and whether a list has ever been saved, which is what decides if the welcome document is added.
+- The Copy button on a fenced code block that is never closed keeps the block's last line when that line looks like a fence and does not close it: a shorter run, the other fence character, or a fence with text after it. It used to leave the line out.
+- The Allow… button that stands in for an image the app cannot read now appears for an image in a folder below the document or above it. Whether an image was missing or unreadable used to be judged in the document's own folder whatever folder the image was in, so such an image stayed a broken image, and a missing one could be offered the button if a file of the same name sat beside the document.
+- The Copy button on indented code: a line indented with spaces and then a tab is copied without that indentation, as the preview shows it. It used to be copied with the spaces and tab still on it.
 - Tests: four tests that did not check what their names said now do. The refusal of a file without an image extension is reached with the right key; a find term that was on the pasteboard before launch is set up that way; the restored selection is checked at both widths; and the preview's one contiguous selection is checked for which range it is, not only that there is one.
 - A document moved to the Trash is treated as a deleted one is: the one on screen is reported as no longer available and then removed from the list, and any other is removed from the list. It used to stay listed, under the Trash folder.
 - (macOS) The list is checked for files that moved, changed or went missing whenever the app comes to the front, as well as on its timers. Coming back from the Finder used to mean waiting up to ten seconds.

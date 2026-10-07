@@ -558,7 +558,14 @@ final class ContentViewModel: ObservableObject {
     }
 
     func removeDocumentFromList(id: String) {
-        let shouldShowSidebar = store.removeDocument(id: id, isCompactWidth: usesSingleColumnNavigation)
+        // One column at a time, removing the document that was showing leaves
+        // the document column with nothing in it, so the reader is taken back
+        // to the list, as when a missing document is taken off it.
+        let shouldShowSidebar = store.removeDocument(
+            id: id,
+            forceShowSidebarOnCompact: true,
+            isCompactWidth: usesSingleColumnNavigation
+        )
         if shouldShowSidebar {
             preferredCompactColumn = .sidebar
         }

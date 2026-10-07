@@ -548,3 +548,200 @@ struct UnreadableImageButtonTests {
         #expect(replacing(original, in: nil) == original)
     }
 }
+
+/// Image sources that name a folder as well as a file.
+struct ImageSourcesWithAFolderTests {
+
+    /// `Docs`, the folder the document is in, with `Docs/images` under it and
+    /// the folder `Docs` is in above it.
+    private struct Folders {
+        let root: URL
+        let docs: URL
+        let images: URL
+
+        init() throws {
+            // Spelled as the file system has it, so that a path worked out from
+            // it compares equal to one made here.
+            let made = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("ImageSourcesWithAFolderTests-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: made, withIntermediateDirectories: true)
+            root = made.resolvingSymlinksInPath().standardizedFileURL
+            docs = root.appendingPathComponent("Docs")
+            images = docs.appendingPathComponent("images")
+            try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
+        }
+
+        @discardableResult
+        func makeImage(at url: URL, readable: Bool = true) throws -> URL {
+            try Data([0x89, 0x50, 0x4E, 0x47]).write(to: url)
+            if !readable {
+                try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+            }
+            return url
+        }
+
+        func remove() {
+            let everything = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: images.path)
+            for case let url as URL in everything ?? .init() {
+                try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            }
+            try? FileManager.default.removeItem(at: root)
+        }
+    }
+
+    /// The file an `<img>` in `html` was rewritten to serve, or nil if it was
+    /// left as it was written.
+    private func servedFile(in html: String) throws -> URL? {
+        guard let match = html.firstMatch(of: /<img src="(mdimage:[^"]*)"/) else { return nil }
+        let url = try #require(URL(string: String(match.1)))
+        return MarkdownImageURL.fileURL(for: url)
+    }
+
+    private func reasons(for source: String, in folders: Folders) -> [MarkdownImageURL.UnresolvedReason] {
+        MarkdownImageURL.unresolvedLocalImages(
+            in: "<img src=\"\(source)\" />",
+            relativeTo: folders.docs
+        ).map(\.reason)
+    }
+
+    // MARK: - Rewriting
+
+    @Test func anImageInAFolderBelowTheDocumentIsServed() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+        let photo = try folders.makeImage(at: folders.images.appendingPathComponent("photo.png"))
+
+        let html = MarkdownImageURL.rewritingLocalImages(
+            in: "<img src=\"images/photo.png\" alt=\"\" />",
+            relativeTo: folders.docs
+        )
+
+        #expect(try servedFile(in: html) == photo)
+    }
+
+    /// The served path is the file's own, with the `..` worked out of it.
+    @Test func anImageInTheFolderAboveTheDocumentIsServed() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+        let photo = try folders.makeImage(at: folders.root.appendingPathComponent("photo.png"))
+
+        let html = MarkdownImageURL.rewritingLocalImages(
+            in: "<img src=\"../photo.png\" alt=\"\" />",
+            relativeTo: folders.docs
+        )
+
+        #expect(try servedFile(in: html) == photo)
+        #expect(!html.contains(".."))
+    }
+
+    @Test func anImageReachedDownAFolderAndBackUpIsServed() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+        let photo = try folders.makeImage(at: folders.docs.appendingPathComponent("photo.png"))
+
+        let html = MarkdownImageURL.rewritingLocalImages(
+            in: "<img src=\"images/../photo.png\" alt=\"\" />",
+            relativeTo: folders.docs
+        )
+
+        #expect(try servedFile(in: html) == photo)
+    }
+
+    /// The sample document that ships in the app names `lilsyd.JPG`.
+    @Test(arguments: ["lilsyd.JPG", "Photo.Png", "SCAN.JPEG", "images/CHART.GIF"])
+    func anImageWithAnUpperCaseExtensionIsServed(name: String) async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+        let image = try folders.makeImage(at: folders.docs.appendingPathComponent(name))
+
+        let html = MarkdownImageURL.rewritingLocalImages(
+            in: "<img src=\"\(name)\" alt=\"\" />",
+            relativeTo: folders.docs
+        )
+
+        #expect(try servedFile(in: html) == image)
+    }
+
+    @Test func aSourceWithAFolderIsStillRefusedForItsExtension() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+        try folders.makeImage(at: folders.images.appendingPathComponent("notes.txt"))
+
+        let source = "<img src=\"images/notes.txt\" alt=\"\" />"
+
+        #expect(MarkdownImageURL.rewritingLocalImages(in: source, relativeTo: folders.docs) == source)
+    }
+
+    // MARK: - Why an image did not resolve
+
+    // Whether a file is missing or unreadable is a question about the folder
+    // the source names, which is not always the one the document is in.
+
+    @Test func anImageMissingFromAFolderBelowTheDocumentIsMissing() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+
+        #expect(reasons(for: "images/absent.png", in: folders) == [.missing])
+    }
+
+    @Test func anUnopenableImageInAFolderBelowTheDocumentIsUnreadable() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+        try folders.makeImage(at: folders.images.appendingPathComponent("locked.png"), readable: false)
+
+        #expect(reasons(for: "images/locked.png", in: folders) == [.unreadable])
+    }
+
+    @Test func anUnopenableImageInTheFolderAboveTheDocumentIsUnreadable() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+        try folders.makeImage(at: folders.root.appendingPathComponent("locked.png"), readable: false)
+
+        #expect(reasons(for: "../locked.png", in: folders) == [.unreadable])
+    }
+
+    /// A file of the same name beside the document is a different file. It
+    /// says nothing about the one the source names.
+    @Test func anImageMissingFromItsFolderIsMissingWhateverIsBesideTheDocument() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+        try folders.makeImage(at: folders.docs.appendingPathComponent("photo.png"))
+
+        #expect(reasons(for: "images/photo.png", in: folders) == [.missing])
+    }
+
+    /// Nothing can be said about a file in a folder that cannot be listed, so
+    /// it is an access problem, as it is for the document's own folder.
+    @Test func anImageInAFolderThatCannotBeListedIsUnreadable() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: folders.images.path)
+
+        #expect(reasons(for: "images/photo.png", in: folders) == [.unreadable])
+    }
+
+    @Test func anImageInAFolderThatIsNotThereIsMissing() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+
+        #expect(reasons(for: "pictures/photo.png", in: folders) == [.missing])
+    }
+
+    /// The button that asks for access follows the same judgement.
+    @Test func anUnopenableImageInAFolderBelowTheDocumentGetsTheAccessButton() async throws {
+        let folders = try Folders()
+        defer { folders.remove() }
+        try folders.makeImage(at: folders.images.appendingPathComponent("locked.png"), readable: false)
+
+        let html = MarkdownImageURL.replacingUnreadableImages(
+            in: "<p><img src=\"images/locked.png\" alt=\"\" /></p>",
+            relativeTo: folders.docs,
+            label: "Allow…",
+            explanation: "Images need permission."
+        )
+
+        #expect(html.contains(MarkdownImageURL.accessButtonAttribute))
+        #expect(!html.contains("<img"))
+    }
+}

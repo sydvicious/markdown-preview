@@ -4,7 +4,9 @@
 //
 
 import Foundation
+import SwiftUI
 import Testing
+import MarkdownCore
 @testable import MarkdownPreview
 
 struct DocumentSessionStoreTests {
@@ -597,5 +599,193 @@ struct DocumentSessionStoreTests {
 
         #expect(error?.code == .fileReadInapplicableStringEncoding)
         #expect(store.openedDocuments.isEmpty)
+    }
+
+    // MARK: - Taking a document off the list
+
+    /// Three documents, none of them on disk, with `beta.md` on screen.
+    @MainActor
+    private static func makeStoreWithBetaOnScreen() -> (store: DocumentSessionStore, ids: [String: String]) {
+        let files = ["alpha.md", "beta.md", "gamma.md"].map {
+            MarkdownFile(url: URL(fileURLWithPath: "/tmp/notes/\($0)"), contents: "The \($0) text")
+        }
+        let ids = Dictionary(uniqueKeysWithValues: files.map { ($0.fileName, $0.url.standardizedFileURL.path) })
+        let store = DocumentSessionStore(
+            previewFiles: files,
+            selectedPreviewFileID: ids["beta.md"],
+            disablePersistenceRestore: true
+        )
+        return (store, ids)
+    }
+
+    /// With room for the list and a document side by side, the first document
+    /// left takes the place of the one that was removed.
+    @MainActor
+    @Test func removingTheDocumentOnScreenShowsTheFirstOneLeft() async throws {
+        let (store, ids) = Self.makeStoreWithBetaOnScreen()
+
+        let showsTheList = store.removeDocument(id: try #require(ids["beta.md"]), isCompactWidth: false)
+
+        #expect(!showsTheList)
+        #expect(store.sortedDocuments.map(\.file.fileName) == ["alpha.md", "gamma.md"])
+        #expect(store.selectedDocumentID == ids["alpha.md"])
+    }
+
+    /// On a screen that shows one column at a time nothing takes its place:
+    /// the reader is left with the list, and no document chosen from it.
+    @MainActor
+    @Test func removingTheDocumentOnScreenAtACompactWidthLeavesNothingSelected() async throws {
+        let (store, ids) = Self.makeStoreWithBetaOnScreen()
+
+        let showsTheList = store.removeDocument(id: try #require(ids["beta.md"]), isCompactWidth: true)
+
+        #expect(!showsTheList)
+        #expect(store.sortedDocuments.map(\.file.fileName) == ["alpha.md", "gamma.md"])
+        #expect(store.selectedDocumentID == nil)
+    }
+
+    /// The caller may ask to be told to go back to the list, which it is when
+    /// the removal took the document the reader was looking at.
+    @MainActor
+    @Test func removingTheDocumentOnScreenAtACompactWidthCanAskForTheList() async throws {
+        let (store, ids) = Self.makeStoreWithBetaOnScreen()
+
+        let showsTheList = store.removeDocument(
+            id: try #require(ids["beta.md"]),
+            forceShowSidebarOnCompact: true,
+            isCompactWidth: true
+        )
+
+        #expect(showsTheList)
+        #expect(store.selectedDocumentID == nil)
+    }
+
+    /// Removing some other document changes nothing the reader is looking at,
+    /// at either width, so there is no call to go back to the list.
+    @MainActor
+    @Test(arguments: [true, false])
+    func removingADocumentThatIsNotOnScreenLeavesTheOneThatIs(isCompactWidth: Bool) async throws {
+        let (store, ids) = Self.makeStoreWithBetaOnScreen()
+
+        let showsTheList = store.removeDocument(
+            id: try #require(ids["gamma.md"]),
+            forceShowSidebarOnCompact: true,
+            isCompactWidth: isCompactWidth
+        )
+
+        #expect(!showsTheList)
+        #expect(store.sortedDocuments.map(\.file.fileName) == ["alpha.md", "beta.md"])
+        #expect(store.selectedDocumentID == ids["beta.md"])
+    }
+
+    @MainActor
+    @Test func removingADocumentDropsWhatWasKeptForIt() async throws {
+        let (store, ids) = Self.makeStoreWithBetaOnScreen()
+        let gamma = try #require(ids["gamma.md"])
+        store.setSelections([MarkdownSelectionRange(location: 0, length: 3)], for: gamma, text: "The gamma.md text")
+        store.increaseTextSize(for: gamma)
+        #expect(store.documentMatchesListSearch(gamma, query: "gamma"))
+
+        store.removeDocument(id: gamma, isCompactWidth: false)
+
+        #expect(store.selections(for: gamma).isEmpty)
+        #expect(store.textSize(for: gamma) == .defaultValue)
+        #expect(!store.documentMatchesListSearch(gamma, query: "gamma"))
+    }
+
+    @MainActor
+    @Test func removingADocumentThatIsNotListedChangesNothing() async throws {
+        let (store, ids) = Self.makeStoreWithBetaOnScreen()
+
+        let showsTheList = store.removeDocument(
+            id: "/tmp/notes/never-opened.md",
+            forceShowSidebarOnCompact: true,
+            isCompactWidth: true
+        )
+
+        #expect(!showsTheList)
+        #expect(store.openedDocuments.count == 3)
+        #expect(store.selectedDocumentID == ids["beta.md"])
+    }
+
+    /// Deleting from the list, by its rows as they are sorted.
+    @MainActor
+    @Test func deletingTheDocumentOnScreenAtACompactWidthLeavesNothingSelected() async throws {
+        let (store, _) = Self.makeStoreWithBetaOnScreen()
+
+        store.deleteDocuments(at: IndexSet(integer: 1), isCompactWidth: true)
+
+        #expect(store.sortedDocuments.map(\.file.fileName) == ["alpha.md", "gamma.md"])
+        #expect(store.selectedDocumentID == nil)
+    }
+
+    @MainActor
+    @Test(arguments: [true, false])
+    func deletingOtherRowsLeavesTheDocumentOnScreen(isCompactWidth: Bool) async throws {
+        let (store, ids) = Self.makeStoreWithBetaOnScreen()
+
+        store.deleteDocuments(at: IndexSet([0, 2]), isCompactWidth: isCompactWidth)
+
+        #expect(store.sortedDocuments.map(\.file.fileName) == ["beta.md"])
+        #expect(store.selectedDocumentID == ids["beta.md"])
+    }
+
+    @MainActor
+    @Test func deletingEveryRowLeavesAnEmptyListAndNothingSelected() async throws {
+        let (store, _) = Self.makeStoreWithBetaOnScreen()
+
+        store.deleteDocuments(at: IndexSet(0..<3), isCompactWidth: false)
+
+        #expect(store.openedDocuments.isEmpty)
+        #expect(store.selectedDocumentID == nil)
+    }
+
+    // MARK: - Whether a list has ever been saved
+
+    // This is what decides whether the welcome document is put in the list: it
+    // goes in on a first launch, and not for someone who has closed everything.
+
+    @MainActor
+    @Test func aStoreThatHasNeverSavedAListHasNone() async throws {
+        let suiteName = "DocumentSessionStoreTests.\(#function).\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = DocumentSessionStore(disablePersistenceRestore: true, userDefaults: defaults)
+
+        #expect(!store.hasPersistedDocumentList(in: defaults))
+    }
+
+    @MainActor
+    @Test func aSavedListIsAList() async throws {
+        let suiteName = "DocumentSessionStoreTests.\(#function).\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (store, _) = Self.makeStoreWithBetaOnScreen()
+
+        store.persistDocuments(to: defaults)
+
+        #expect(store.hasPersistedDocumentList(in: defaults))
+    }
+
+    /// A list with nothing left in it is still a list that was saved, which a
+    /// first launch does not have.
+    @MainActor
+    @Test func aListSavedWithNothingInItIsStillAList() async throws {
+        let suiteName = "DocumentSessionStoreTests.\(#function).\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (store, _) = Self.makeStoreWithBetaOnScreen()
+
+        store.deleteDocuments(at: IndexSet(0..<3), isCompactWidth: false)
+        store.persistDocuments(to: defaults)
+
+        #expect(store.hasPersistedDocumentList(in: defaults))
+        // And a store made later, over the same defaults, sees it too.
+        let later = DocumentSessionStore(disablePersistenceRestore: true, userDefaults: defaults)
+        #expect(later.hasPersistedDocumentList(in: defaults))
     }
 }

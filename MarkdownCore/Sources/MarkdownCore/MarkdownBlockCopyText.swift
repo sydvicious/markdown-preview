@@ -77,8 +77,8 @@ public enum MarkdownBlockCopyText {
         })
     }
 
-    /// Removes a fenced code block's fences, or an indented code block's
-    /// four-space indent, leaving the code itself.
+    /// Removes a fenced code block's fences, or an indented code block's first
+    /// four columns of indentation, leaving the code itself.
     private static func strippingCodeDecoration(from source: String) -> String {
         var lines = source.markdownLines
 
@@ -88,24 +88,27 @@ public enum MarkdownBlockCopyText {
             let fenceIndent = MarkdownBlockParser.fenceIndent(of: first[...])
             lines.removeFirst()
             // A fenced block at the end of a document may be unterminated, so a
-            // closing fence is stripped only if one is actually there.
-            if let last = lines.last, fenceMarker(of: last) != nil {
+            // closing fence is stripped only if one is actually there. Whether
+            // the last line is one is the parser's to say: it closes the block
+            // only if it is the same fence character, at least as long, with
+            // nothing after it. Anything else there is a line of the code.
+            if let last = lines.last, MarkdownBlockParser.fence(first[...], isClosedBy: last[...]) {
                 lines.removeLast()
             }
             return joined(lines.map { String(MarkdownBlockParser.codeLineContent(in: $0[...], fenceIndent: fenceIndent)) })
         }
 
+        // Indentation is counted as the parser counts it, in columns, with a
+        // tab reaching the next multiple of four. So two spaces and a tab are
+        // one indent, as a tab alone is, and what is copied is the code the
+        // preview shows.
         let indentedLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         guard !indentedLines.isEmpty,
-              indentedLines.allSatisfy({ $0.hasPrefix("    ") || $0.hasPrefix("\t") }) else {
+              indentedLines.allSatisfy({ MarkdownBlockParser.isIndentedCodeLine($0[...]) }) else {
             return source
         }
 
-        return joined(lines.map { line in
-            if line.hasPrefix("    ") { return String(line.dropFirst(4)) }
-            if line.hasPrefix("\t") { return String(line.dropFirst()) }
-            return line
-        })
+        return joined(lines.map { String(MarkdownBlockParser.indentedCodeLineContent(in: $0[...])) })
     }
 
     /// The run of fence characters opening or closing a fenced code block, or
