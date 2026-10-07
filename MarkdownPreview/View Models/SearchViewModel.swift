@@ -52,6 +52,9 @@ final class SearchViewModel: ObservableObject {
     @Published var focusedField: SearchField?
 
     private let store: DocumentSessionStore
+    /// Where the search term is shared from and published to. Handed in, so
+    /// that a test can give the view model one of its own.
+    private let findPasteboard: any FindPasteboard
     private var didApplyDetailSearchSelection = false
     private var savedSelectionsBeforeDetailSearch: [String: [MarkdownSelectionRange]] = [:]
     private var detailSearchTask: Task<Void, Never>?
@@ -65,8 +68,9 @@ final class SearchViewModel: ObservableObject {
     private(set) var pasteboardWriteTask: Task<Void, Never>?
     #endif
 
-    init(store: DocumentSessionStore) {
+    init(store: DocumentSessionStore, findPasteboard: any FindPasteboard) {
         self.store = store
+        self.findPasteboard = findPasteboard
     }
 
     // MARK: - Derived state
@@ -175,13 +179,13 @@ final class SearchViewModel: ObservableObject {
         pasteboardWriteTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard let self, !Task.isCancelled else { return }
-            SystemFindPasteboard.setQuery(trimmedQuery)
+            self.findPasteboard.setQuery(trimmedQuery)
             // Remember our own write so it is not re-adopted as an external change.
-            self.lastFindPasteboardChangeCount = SystemFindPasteboard.changeCount()
+            self.lastFindPasteboardChangeCount = self.findPasteboard.changeCount()
         }
         #else
         guard !trimmedQuery.isEmpty else { return }
-        SystemFindPasteboard.setQuery(trimmedQuery)
+        findPasteboard.setQuery(trimmedQuery)
         #endif
     }
 
@@ -191,7 +195,7 @@ final class SearchViewModel: ObservableObject {
 
     func seedFromPasteboardIfEmpty() {
         guard trimmedSearchText.isEmpty,
-              let existingQuery = SystemFindPasteboard.currentQuery(),
+              let existingQuery = findPasteboard.currentQuery(),
               !existingQuery.isEmpty else { return }
         setSearchText(existingQuery, origin: .systemFindBuffer)
     }
@@ -219,11 +223,11 @@ final class SearchViewModel: ObservableObject {
     func adoptSystemFindQueryIfChanged() {
         guard focusedField != nil else { return }
 
-        let changeCount = SystemFindPasteboard.changeCount()
+        let changeCount = findPasteboard.changeCount()
         guard changeCount != lastFindPasteboardChangeCount else { return }
         lastFindPasteboardChangeCount = changeCount
 
-        guard let query = SystemFindPasteboard.currentQuery(),
+        guard let query = findPasteboard.currentQuery(),
               !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               query != searchText else { return }
         setSearchText(query, origin: .systemFindBuffer)

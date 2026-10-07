@@ -37,7 +37,8 @@ struct ContentView: View {
                 previewFiles: previewFiles,
                 selectedPreviewFileID: selectedPreviewFileID,
                 showsSourceInPreview: showsSourceInPreview,
-                disablePersistenceRestore: disablePersistenceRestore
+                disablePersistenceRestore: disablePersistenceRestore,
+                findPasteboard: SystemFindPasteboard()
             )
         )
         self.disableLiveFileMonitoring = disableLiveFileMonitoring

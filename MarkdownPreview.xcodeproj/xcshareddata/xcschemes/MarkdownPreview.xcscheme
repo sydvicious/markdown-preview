@@ -52,6 +52,17 @@
                ReferencedContainer = "container:MarkdownPreview.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "62BB0003000000000000D001"
+               BuildableName = "MarkdownPreviewWindowServerTests.xctest"
+               BlueprintName = "MarkdownPreviewWindowServerTests"
+               ReferencedContainer = "container:MarkdownPreview.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

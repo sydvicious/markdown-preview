@@ -29,6 +29,14 @@
     {
       "parallelizable" : true,
       "target" : {
+        "containerPath" : "container:MarkdownPreview.xcodeproj",
+        "identifier" : "62BB0003000000000000D001",
+        "name" : "MarkdownPreviewWindowServerTests"
+      }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
         "containerPath" : "container:MarkdownCore",
         "identifier" : "MarkdownCoreTests",
         "name" : "MarkdownCoreTests"

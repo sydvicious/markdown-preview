@@ -69,7 +69,8 @@ final class ContentViewModel: ObservableObject {
         previewFiles: [MarkdownFile] = [],
         selectedPreviewFileID: String? = nil,
         showsSourceInPreview: Bool = false,
-        disablePersistenceRestore: Bool = false
+        disablePersistenceRestore: Bool = false,
+        findPasteboard: any FindPasteboard
     ) {
         let store = DocumentSessionStore(
             previewFiles: previewFiles,
@@ -77,7 +78,7 @@ final class ContentViewModel: ObservableObject {
             disablePersistenceRestore: disablePersistenceRestore
         )
         self.store = store
-        self.search = SearchViewModel(store: store)
+        self.search = SearchViewModel(store: store, findPasteboard: findPasteboard)
         self.detailMode = showsSourceInPreview ? .source : .preview
         self.hasPresentedInitialOpenPrompt = disablePersistenceRestore
         self.disablePersistenceRestore = disablePersistenceRestore

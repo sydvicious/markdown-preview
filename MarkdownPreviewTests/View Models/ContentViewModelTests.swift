@@ -20,13 +20,13 @@ struct ContentViewModelTests {
     }
 
     @Test func detailSearchStartsInTheToolbar() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
 
         #expect(viewModel.detailSearchFitsInToolbar)
     }
 
     @Test func detailSearchLeavesTheToolbarBelowTheDropoutWidth() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
 
         viewModel.updateDetailSearchPlacement(
             forDetailPaneWidth: ContentViewModel.detailSearchToolbarDropoutWidth - 1
@@ -36,7 +36,7 @@ struct ContentViewModelTests {
     }
 
     @Test func detailSearchStaysInTheToolbarAtTheDropoutWidth() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
 
         viewModel.updateDetailSearchPlacement(
             forDetailPaneWidth: ContentViewModel.detailSearchToolbarDropoutWidth
@@ -49,7 +49,7 @@ struct ContentViewModelTests {
     /// two thresholds must not move it back, or dragging the window edge across
     /// the boundary would make the field flicker between title bar and pane.
     @Test func detailSearchStaysInThePaneInsideTheDeadBand() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         viewModel.updateDetailSearchPlacement(forDetailPaneWidth: 400)
 
         let deadBandWidth = (
@@ -62,7 +62,7 @@ struct ContentViewModelTests {
     }
 
     @Test func detailSearchReturnsToTheToolbarAtTheRestoreWidth() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         viewModel.updateDetailSearchPlacement(forDetailPaneWidth: 400)
 
         viewModel.updateDetailSearchPlacement(
@@ -75,7 +75,7 @@ struct ContentViewModelTests {
     /// SwiftUI reports a zero width before the pane is laid out; that must not be
     /// read as "too narrow" and knock the search out of the toolbar on launch.
     @Test func detailSearchIgnoresUnlaidOutWidths() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
 
         viewModel.updateDetailSearchPlacement(forDetailPaneWidth: 0)
         #expect(viewModel.detailSearchFitsInToolbar)
@@ -101,7 +101,7 @@ struct ContentViewModelTests {
             return url
         }
 
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         viewModel.handleImport(.success(urls), isCompactWidth: false)
 
         #expect(
@@ -119,7 +119,7 @@ struct ContentViewModelTests {
             return url
         }
 
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         viewModel.openPendingURLs(urls, isCompactWidth: false)
 
         #expect(
@@ -134,7 +134,7 @@ struct ContentViewModelTests {
         let url = temporaryDirectory.appendingPathComponent("note.md")
         try "hello".write(to: url, atomically: true, encoding: .utf8)
 
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         viewModel.load(url: url, isCompactWidth: false)
 
         #expect(viewModel.store.selectedDocumentID == url.standardizedFileURL.path)
@@ -145,7 +145,7 @@ struct ContentViewModelTests {
     @Test func loadReportsAnErrorForAMissingFile() {
         let url = URL(fileURLWithPath: "/tmp/\(UUID().uuidString)-missing.md")
 
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         viewModel.load(url: url, isCompactWidth: false)
 
         #expect(viewModel.openErrorMessage != nil)
@@ -153,14 +153,14 @@ struct ContentViewModelTests {
     }
 
     @Test func detailNavigationTitleIsEmptyWithNoSelection() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         #expect(viewModel.detailNavigationTitle().isEmpty)
     }
 
     // MARK: - Command capabilities & focus/actions (Stage 2)
 
     @Test func commandCapabilitiesAreFalseWithNoDocuments() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         #expect(!viewModel.canFind)
         #expect(!viewModel.canProjectFind)
         #expect(!viewModel.canRemoveFromList)
@@ -171,7 +171,7 @@ struct ContentViewModelTests {
     @Test func listFilteringReflectsSearchTextAndForegroundState() {
         let alpha = MarkdownFile(url: URL(fileURLWithPath: "/tmp/alpha.md"), contents: "content about alpha")
         let beta = MarkdownFile(url: URL(fileURLWithPath: "/tmp/beta.md"), contents: "content about beta")
-        let viewModel = ContentViewModel(previewFiles: [alpha, beta], disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(previewFiles: [alpha, beta], disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
 
         // No search text → not filtering; every document shows.
         #expect(!viewModel.isListSearchFiltering)
@@ -190,7 +190,7 @@ struct ContentViewModelTests {
 
     @Test func findCapabilitiesReflectDocumentAndSearchState() {
         let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/doc.md"), contents: "alpha beta alpha")
-        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
 
         #expect(viewModel.canFind)
         #expect(viewModel.canProjectFind)
@@ -205,7 +205,7 @@ struct ContentViewModelTests {
 
     @Test func focusListSearchRequestsListFocus() {
         let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/doc.md"), contents: "alpha")
-        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
 
         viewModel.focusListSearch()
         #expect(viewModel.focusRequest?.field == .list)
@@ -213,7 +213,7 @@ struct ContentViewModelTests {
 
     @Test func clearSearchClearsTheTextAndRequestsNoFocus() {
         let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/doc.md"), contents: "alpha")
-        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
 
         viewModel.search.setSearchText("alpha")
         viewModel.clearSearch()
@@ -227,7 +227,8 @@ struct ContentViewModelTests {
         let viewModel = ContentViewModel(
             previewFiles: [file],
             showsSourceInPreview: true,
-            disablePersistenceRestore: true
+            disablePersistenceRestore: true,
+            findPasteboard: InMemoryFindPasteboard()
         )
         let id = try #require(viewModel.store.selectedDocumentID)
         viewModel.store.setSelections(
@@ -248,7 +249,8 @@ struct ContentViewModelTests {
         let viewModel = ContentViewModel(
             previewFiles: [alpha, beta],
             selectedPreviewFileID: alpha.url.standardizedFileURL.path,
-            disablePersistenceRestore: true
+            disablePersistenceRestore: true,
+            findPasteboard: InMemoryFindPasteboard()
         )
 
         viewModel.removeSelectedDocumentFromList()
@@ -258,7 +260,7 @@ struct ContentViewModelTests {
 
     @Test func increaseSelectedTextSizeBumpsTheSelectedDocument() throws {
         let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/\(UUID().uuidString).md"), contents: "alpha")
-        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(previewFiles: [file], disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         let id = try #require(viewModel.store.selectedDocumentID)
         let before = viewModel.store.textSize(for: id)
 
@@ -269,7 +271,7 @@ struct ContentViewModelTests {
     }
 
     @Test func tooltipPathAbbreviatesTheHomeDirectory() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         let url = URL(fileURLWithPath: UserHomeDirectory.path + "/Documents/note.md")
         #expect(viewModel.tooltipPath(for: url) == "~/Documents/note.md")
     }
@@ -360,7 +362,8 @@ struct ContentViewModelTests {
         let viewModel = ContentViewModel(
             previewFiles: [Self.gamma, Self.alpha, Self.beta],
             selectedPreviewFileID: Self.id(Self.beta),
-            disablePersistenceRestore: true
+            disablePersistenceRestore: true,
+            findPasteboard: InMemoryFindPasteboard()
         )
         if !showingADocument {
             viewModel.store.selectedDocumentID = nil
@@ -396,7 +399,7 @@ struct ContentViewModelTests {
     }
 
     @Test func findDoesNothingWithNoDocuments() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
 
         viewModel.handleFindCommand()
 
@@ -437,7 +440,7 @@ struct ContentViewModelTests {
     }
 
     @Test func findOnASingleColumnDoesNothingWithNoDocuments() {
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         viewModel.usesSingleColumnNavigation = true
         viewModel.preferredCompactColumn = .detail
 
@@ -459,6 +462,22 @@ struct ContentViewModelTests {
     }
 
     // MARK: - Going to a search field
+
+    /// The term comes from the find pasteboard the view model was made with.
+    @Test func goingToASearchFieldSeedsItFromTheFindPasteboardItWasGiven() {
+        let findPasteboard = InMemoryFindPasteboard()
+        findPasteboard.setQuery("alpha")
+        let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/doc.md"), contents: "alpha beta")
+        let viewModel = ContentViewModel(
+            previewFiles: [file],
+            disablePersistenceRestore: true,
+            findPasteboard: findPasteboard
+        )
+
+        viewModel.focusDetailSearch()
+
+        #expect(viewModel.search.searchText == "alpha")
+    }
 
     @Test func goingToTheDocumentsSearchFieldNeedsADocument() {
         let viewModel = makeViewModel(showingADocument: false, singleColumn: true, column: .sidebar)
@@ -743,7 +762,7 @@ struct ContentViewModelTests {
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
         let url = temporaryDirectory.appendingPathComponent("note.md")
         try "hello".write(to: url, atomically: true, encoding: .utf8)
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
 
         viewModel.load(url: url, isCompactWidth: isCompactWidth)
 
@@ -756,7 +775,7 @@ struct ContentViewModelTests {
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
         let url = temporaryDirectory.appendingPathComponent("note.md")
         try "hello".write(to: url, atomically: true, encoding: .utf8)
-        let viewModel = ContentViewModel(disablePersistenceRestore: true)
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
         viewModel.load(url: url, isCompactWidth: isCompactWidth)
         viewModel.preferredCompactColumn = .detail
 

@@ -156,7 +156,7 @@ After this, double-clicking `.md` files should open them in this app.
 
 ## Tests
 
-There are four test suites:
+There are five test suites:
 
 - `MarkdownCoreTests` and `MarkdownCoreConformanceTests`: tests for the markdown engine. Both
   run from the command line with no app host:
@@ -173,12 +173,17 @@ swift test --package-path MarkdownCore
   `TODO.md`, until it does.
 
 - `MarkdownPreviewTests`: tests for the app layer (view models, file state, selection handling).
-  It also checks find and selection one markdown feature at a time, loading the real page and
-  scripts in WebKit, without a window, and carrying a selection from the source to the page and
-  back. These need the app target, and its test plan runs the two engine suites as well:
+  None of them uses the window server itself, but they need the app target, which is launched
+  to host them.
+
+- `MarkdownPreviewWindowServerTests`: the tests that do use the window server, or a pasteboard.
+  It checks find and selection one markdown feature at a time, loading the real page and scripts
+  in WebKit, without a window, and carrying a selection from the source to the page and back;
+  and it checks what a copy puts on the pasteboard, and the Mac's find pasteboard. It needs the
+  app target too. The scheme's test plan runs both of these, and the two engine suites as well:
 
 ```bash
-xcodebuild test -project MarkdownPreview.xcodeproj -scheme MarkdownPreview -destination 'platform=macOS'
+xcodebuild test -project MarkdownPreview.xcodeproj -scheme MarkdownPreview -destination 'platform=macOS,arch=arm64'
 ```
 
 - `MarkdownCore/Tests/WebTests`: tests for the preview's scripts in `MarkdownPreview/Web`,
@@ -195,6 +200,16 @@ npm install
 ```bash
 npm test
 ```
+
+`Scripts/run-tests-mac.sh` runs the suites that do not use the window server: the two engine
+suites, the scripts', and `MarkdownPreviewTests`. The app is launched to host the last of those,
+built unsigned. `MarkdownPreviewWindowServerTests` is left to Xcode or `xcodebuild test`. It ends
+with a count, for each suite, of the tests that passed, failed, failed as expected, and were
+expected to fail and passed. `--help` says the rest.
+
+That script and the command above are for Apple silicon, which is all that is built and tested
+while developing. A release is built for x86_64 as well, and every suite is run for both before it
+ships; for x86_64 that is the same `xcodebuild test` with `arch=x86_64`, which runs under Rosetta.
 
 
 *Copyright ©2026 Syd Polk. All Rights Reserved.*

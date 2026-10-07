@@ -160,14 +160,17 @@ This document tracks planned work for MarkdownPreviewApp.
   - It gives confidence that the model and the views are separate.
   - Where things stand: `MarkdownCore` runs with `swift test`. `MarkdownPreviewTests` is hosted by the app (`TEST_HOST`), so every run of it launches the app, for the stores, view models and utilities as much as for the views.
 
-### A script to run all of the non-GUI tests, on every platform.
-  - One script that runs all of the non-GUI tests for all platforms: Mac, iOS and JavaScript.
-  - Once it exists, add it to the release process, and eventually to CI/CD.
-  - Where things stand: three things are run by hand. `swift test` in `MarkdownCore`, `xcodebuild` for the app's tests, and `npm test` for the scripts'.
+### Test everything before a release.
+  - Before a release ships, run every suite with `xcodebuild`, the tests that use the window server included.
+  - On the Mac, run them once for arm64 and once for x86_64, which runs under Rosetta. The release is built for both; development builds and tests arm64 only.
+  - Run them on an iPhone simulator and an iPad simulator as well.
+  - Run the preview scripts' tests too (`npm test`), which `xcodebuild` does not.
+  - Decide where this lives: a step of `Scripts/release-build.sh`, which would then refuse to release on a failure, or a script of its own that is run first.
+  - Where things stand: `Scripts/release-build.sh` runs no tests. `Scripts/run-tests-mac.sh` is the run made while developing: arm64 only, and without `MarkdownPreviewWindowServerTests`.
 
 ### Set up CI/CD on the new Mac mini.
   - Run a build server on the M5 Pro Mac mini, and set up a CI/CD system on it. Probably Jenkins; not decided.
-  - Depends on "A script to run all of the non-GUI tests, on every platform", which is what it would run.
+  - What it would run: `Scripts/run-tests-mac.sh`.
 
 ### Adopt Swift 6 "MainActor by default" concurrency.
   - Move the targets to the Swift 6 language mode and enable Default Actor Isolation = MainActor (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`). Currently on Swift 5 mode with no default actor isolation.
