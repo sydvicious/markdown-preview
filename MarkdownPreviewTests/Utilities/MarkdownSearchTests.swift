@@ -21,6 +21,39 @@ struct MarkdownSearchTests {
         ])
     }
 
+    /// The store keeps each document's text as a search sees it, so a search
+    /// in the document is handed that and does not work it out again.
+    @Test func matchesInTextAlreadyReadAreTheMatchesInTheSource() {
+        let source = "**Alpha** beta [ALPHA](https://example.com)\nalpha"
+        let read = MarkdownTextOffsetMapping(sourceText: source)
+
+        let matches = MarkdownSearch.matches(in: read, query: "alpha")
+
+        #expect(matches.count == 3)
+        #expect(matches == MarkdownSearch.matches(in: source, query: "alpha"))
+    }
+
+    @Test func aSessionSearchesTextAlreadyRead() {
+        var session = MarkdownSearchSession()
+
+        session.updateQuery("alpha", in: MarkdownTextOffsetMapping(sourceText: "alpha beta **alpha**"))
+
+        #expect(session.query == "alpha")
+        #expect(session.resultPositionText == "1 of 2")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 0, length: 5))
+    }
+
+    @Test func aSessionIsRefreshedFromTextAlreadyRead() {
+        var session = MarkdownSearchSession()
+        session.updateQuery("alpha", in: MarkdownTextOffsetMapping(sourceText: "alpha beta alpha"))
+        session.move(.forward)
+
+        session.refresh(in: MarkdownTextOffsetMapping(sourceText: "beta alpha"))
+
+        #expect(session.resultPositionText == "1 of 1")
+        #expect(session.currentMatch == MarkdownSelectionRange(location: 5, length: 5))
+    }
+
     @Test func markdownSearchSessionWrapsOnSecondNavigationAtBoundary() async throws {
         var session = MarkdownSearchSession()
         session.updateQuery("alpha", in: "alpha beta alpha")

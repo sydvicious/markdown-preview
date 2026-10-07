@@ -39,6 +39,10 @@ struct MarkdownPreviewView: View {
 
     @ObservedObject private var accessStore = DirectoryAccessStore.shared
     @State private var isRequestingFolderAccess = false
+    /// The rendering last made, and what it was made from. The body runs far
+    /// more often than the document changes: for every change of selection,
+    /// and whenever anything in the window is redrawn.
+    @State private var renderings = LastValueCache<RenderingInputs, Rendering>()
 
     /// Why the document's images failed, if any did.
     ///
@@ -48,6 +52,19 @@ struct MarkdownPreviewView: View {
         case none
         case unreadable
         case missing
+    }
+
+    /// Everything a rendering is made from. While none of it has changed,
+    /// the rendering is not made again.
+    ///
+    /// What is on disk is not among them. An image that turns up where one
+    /// was missing is found when the document, its text size or the folders
+    /// the app may read next change.
+    private struct RenderingInputs: Equatable {
+        let source: String
+        let textSize: DynamicTypeSize
+        let baseURL: URL?
+        let grantedDirectories: [URL]
     }
 
     /// The rendered document, and what if anything is wrong with its images.
@@ -62,6 +79,20 @@ struct MarkdownPreviewView: View {
     private static let accessButtonLabel = String(localized: "Allow…")
     private static let accessExplanation = String(localized: "Images in this document need permission to load.")
 
+    /// The document as the preview shows it, made again only when what it is
+    /// made from has changed.
+    private var rendering: Rendering {
+        renderings.value(
+            for: RenderingInputs(
+                source: source,
+                textSize: textSize,
+                baseURL: baseURL,
+                grantedDirectories: accessStore.grantedDirectories
+            ),
+            make: makeRendering
+        )
+    }
+
     /// Renders the document with local image references pointed at the app's own
     /// URL scheme, and any image the app is not allowed to read replaced by a
     /// button that asks for access.
@@ -70,8 +101,29 @@ struct MarkdownPreviewView: View {
     /// read access to the file system, so a relative image reference never loads
     /// however correct the base URL is. `MarkdownImageSchemeHandler` serves those
     /// URLs from the app process instead.
-    private var rendering: Rendering {
-        let document = MarkdownHTMLBuilder.document(for: source, contentScale: textSize.scaleFactor, softBreak: .lineBreak)
+    private func makeRendering() -> Rendering {
+        let built = PerfLog.timed {
+            MarkdownHTMLBuilder.document(for: source, contentScale: textSize.scaleFactor, softBreak: .lineBreak)
+        }
+        let document = built.value
+        // One line each time the HTML is built.
+        let imagesStarted = ContinuousClock.now
+        defer {
+            let name = documentID.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "(no document)"
+            // What it was made from, to tell why it was made again: a cache
+            // that is not the one before is a view that was made anew, and
+            // the same cache is something here that changed.
+            let cache = String(UInt(bitPattern: ObjectIdentifier(renderings).hashValue), radix: 16).suffix(5)
+            PerfLog.log.info("""
+                [perf] render \(name, privacy: .public): \
+                \(source.utf8.count, privacy: .public) bytes to HTML in \
+                \(built.milliseconds, format: .fixed(precision: 1), privacy: .public) ms, images \
+                \(PerfLog.milliseconds(since: imagesStarted), format: .fixed(precision: 1), privacy: .public) ms; \
+                cache \(cache, privacy: .public), text size \(String(describing: textSize), privacy: .public), \
+                folder \(baseURL?.lastPathComponent ?? "(none)", privacy: .public), \
+                \(accessStore.grantedDirectories.count, privacy: .public) folders granted
+                """)
+        }
         guard let baseURL else { return Rendering(html: document, imageProblem: .none) }
 
         // Every step here is a privileged read: the rewrite checks each image

@@ -15,21 +15,18 @@ This document tracks planned work for MarkdownPreviewApp.
   - When focus is in either Search field, Esc should put focus back in the detail view. It should still clear the search text too, as it does today.
 
 ### Async file loading off `@Main`.
-  - Read source files in a separate task, not on `@Main`.
   - If loading takes longer than 0.5 seconds, show a spinner with "Loading...".
   - Investigate checking file existence and polling in a separate `Task` as well.
   - Treat this as two separate off-main stages: first read the file's bytes/text in its own actor, then parse and build the HTML in a second actor, handing only the finished result back to the main actor for display.
   - Moving just the read off `@Main` may turn out to be good enough, but the suspicion is that building the HTML is the slow half — measure both stages before deciding how far to take it.
   - Symptom driving this: opening a new file visibly freezes the GUI. The whole open path — read, parse, HTML build — currently runs on `@Main`, so the window stops responding until it finishes.
   - Schedule this work after the YMMV-related refactor work.
-  - Measure first: put `[perf]` timing lines in the console for each stage of an open (bookmark, read, decode, search index, HTML build, image checks, page load) and for the once-a-second check, then open the slow file from Xcode.
-  - What the code does today, from reading it. None of it is measured.
-    - Everything `DocumentSessionStore.openDocument` does is on the main actor: making and resolving the bookmark, the coordinated read, decoding, and `DocumentSearchIndex.upsert`, which builds a text-offset mapping of the whole document.
-    - `MarkdownFile.load` retries a file that is not there for up to 30 seconds, sleeping the thread between tries. That is for an iCloud file still downloading.
-    - `MarkdownPreviewView` builds the HTML in `body`: the parse, the render, and a check on disk for each image, every time the body runs. The web view reloads only when the HTML differs, but the build is paid for each time, and that is expected to include every change of selection.
-    - A document is parsed more than once for one open: for the search index, for the HTML, and again in `PreviewSelectionReflection` to place a selection.
-    - At launch `restorePersistedDocumentsIfNeeded` reads and indexes every listed document before anything is shown.
-    - The once-a-second check resolves the active document's bookmark and reads its dates on the main actor. Every ten seconds the same is done for every listed document.
+  - Steps, in this order. Measured on a 505 KB document, all of it on the main actor: reading and decoding it, 3 ms; the search index, 450 ms; the HTML build with its image checks, about 410 ms, run three times for an open, twice on switching back to the document, and four times while text was being selected; the once-a-second check, 5 to 7 ms.
+    1. Build the HTML once for each change, not each time the body runs. Keep the last result, and use it again while the source, the text size, the folder and the image grants are the same.
+    2. Take the search index off the path of an open: build it off the main actor, or only when a search needs it.
+    3. Build the HTML off the main actor, with the spinner past 0.5 seconds.
+    4. Find out why the engine is slow: about 0.75 ms per KB, for the HTML and for the index alike.
+  - Take the `[perf]` timing lines out once this is closed.
 
 ### A line selected by triple-click in the preview does not stay a line.
   - Clicking three times on a line in the preview highlights the line and a strip below it, into the block after. Switching to Source and back highlights the line's words alone. The highlight should be the line alone from the click.
@@ -38,6 +35,10 @@ This document tracks planned work for MarkdownPreviewApp.
   - Have the page remember that this exact selection is whole lines, so that a copy of it is still the line as it is written.
   - When the app puts a whole-line selection into the page, as it does on the way back from Source, pass the same note with it.
   - This changes the selection under WebKit, which only running the app can check: try a triple-click and drag, and touch selection on iPad.
+
+### Open every file dropped from the Finder, not only one.
+  - Several files dragged from the Finder and dropped on the window should all be opened.
+  - This may have worked once. Find out whether it did, and what stopped it.
 
 ## Features
 

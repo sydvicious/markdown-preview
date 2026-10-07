@@ -169,4 +169,151 @@ struct DocumentSearchIndexTests {
         #expect(index.suggestedCompletions(prefix: "al") == ["alpha", "almond", "Alpaca"])
         #expect(index.suggestedCompletions(in: Self.id(Self.notes), prefix: "al") == ["almond"])
     }
+
+    // MARK: - Reading a document's text, off the path of an open
+
+    /// Stands in for the thread the index has text read on. It keeps what it
+    /// was asked to read, and the test hands back what it likes, when it likes.
+    private final class HeldBuilds {
+        typealias Deliver = @MainActor @Sendable (MarkdownTextOffsetMapping) -> Void
+        private(set) var asked: [(contents: String, deliver: Deliver)] = []
+
+        var build: DocumentSearchIndex.BackgroundBuild {
+            { [self] contents, deliver in asked.append((contents, deliver)) }
+        }
+    }
+
+    /// Reading a document's text for searching is as much work as showing it,
+    /// and opening it does not wait for that.
+    @Test func addingADocumentAsksForItsTextToBeReadAndDoesNotReadIt() {
+        let held = HeldBuilds()
+        let index = DocumentSearchIndex(backgroundBuild: held.build)
+
+        index.upsert(Self.notes)
+
+        #expect(index.hasReadText(of: Self.id(Self.notes)) == false)
+        #expect(held.asked.map(\.contents) == [Self.notes.contents])
+    }
+
+    /// As at launch, when every listed document goes in at once.
+    @Test func anIndexMadeFromAListAsksForEachDocumentToBeRead() {
+        let held = HeldBuilds()
+        let files = [Self.zeta, Self.notes, Self.beta]
+        let index = DocumentSearchIndex(documents: files, backgroundBuild: held.build)
+
+        #expect(Set(held.asked.map(\.contents)) == Set(files.map(\.contents)))
+        #expect(files.allSatisfy { !index.hasReadText(of: Self.id($0)) })
+    }
+
+    @Test func aSearchThatComesBeforeTheTextHasBeenReadReadsIt() {
+        let held = HeldBuilds()
+        let index = DocumentSearchIndex(backgroundBuild: held.build)
+        index.upsert(Self.notes)
+
+        #expect(index.containsMatch(in: Self.id(Self.notes), query: "soup"))
+        #expect(index.hasReadText(of: Self.id(Self.notes)))
+    }
+
+    @Test func aSearchTheFileNameAnswersDoesNotReadTheText() {
+        let held = HeldBuilds()
+        let index = DocumentSearchIndex(backgroundBuild: held.build)
+        index.upsert(Self.notes)
+
+        #expect(index.containsMatch(in: Self.id(Self.notes), query: "notes"))
+        #expect(index.hasReadText(of: Self.id(Self.notes)) == false)
+    }
+
+    @MainActor
+    @Test func textReadInTheBackgroundIsWhatASearchUses() throws {
+        let held = HeldBuilds()
+        let index = DocumentSearchIndex(backgroundBuild: held.build)
+        index.upsert(Self.notes)
+        let read = MarkdownTextOffsetMapping(sourceText: Self.notes.contents)
+
+        try #require(held.asked.first).deliver(read)
+
+        #expect(index.hasReadText(of: Self.id(Self.notes)))
+        #expect(index.entry(for: Self.id(Self.notes))?.mapping === read)
+    }
+
+    /// The document changed on disk while its old text was being read.
+    @MainActor
+    @Test func textReadForADocumentThatHasSinceChangedIsDropped() throws {
+        let held = HeldBuilds()
+        let index = DocumentSearchIndex(backgroundBuild: held.build)
+        index.upsert(Self.notes)
+        index.upsert(MarkdownFile(url: Self.notes.url, contents: "almond"))
+
+        try #require(held.asked.first).deliver(MarkdownTextOffsetMapping(sourceText: Self.notes.contents))
+
+        #expect(index.hasReadText(of: Self.id(Self.notes)) == false)
+        #expect(index.containsMatch(in: Self.id(Self.notes), query: "almond"))
+        #expect(index.containsMatch(in: Self.id(Self.notes), query: "soup") == false)
+    }
+
+    @MainActor
+    @Test func textReadForADocumentNoLongerInTheIndexIsDropped() throws {
+        let held = HeldBuilds()
+        let index = DocumentSearchIndex(backgroundBuild: held.build)
+        index.upsert(Self.notes)
+        index.remove(documentID: Self.id(Self.notes))
+
+        try #require(held.asked.first).deliver(MarkdownTextOffsetMapping(sourceText: Self.notes.contents))
+
+        #expect(index.entry(for: Self.id(Self.notes)) == nil)
+        #expect(index.hasReadText(of: Self.id(Self.notes)) == false)
+    }
+
+    /// A search got there first and read the text itself. What it read stays.
+    @MainActor
+    @Test func textReadInTheBackgroundAfterASearchReadItChangesNothing() throws {
+        let held = HeldBuilds()
+        let index = DocumentSearchIndex(backgroundBuild: held.build)
+        index.upsert(Self.notes)
+        let readByTheSearch = try #require(index.entry(for: Self.id(Self.notes))?.mapping)
+
+        try #require(held.asked.first).deliver(MarkdownTextOffsetMapping(sourceText: Self.notes.contents))
+
+        #expect(index.entry(for: Self.id(Self.notes))?.mapping === readByTheSearch)
+    }
+
+    /// A document that is already listed is opened again, with nothing in it
+    /// changed.
+    @MainActor
+    @Test func addingADocumentAgainWithTheSameTextKeepsWhatWasRead() throws {
+        let held = HeldBuilds()
+        let index = DocumentSearchIndex(backgroundBuild: held.build)
+        index.upsert(Self.notes)
+        let read = MarkdownTextOffsetMapping(sourceText: Self.notes.contents)
+        try #require(held.asked.first).deliver(read)
+
+        index.upsert(Self.notes)
+
+        #expect(index.entry(for: Self.id(Self.notes))?.mapping === read)
+        #expect(held.asked.count == 1)
+    }
+
+    /// And again before its text has been read: the one reading under way is
+    /// enough.
+    @MainActor
+    @Test func addingADocumentAgainWhileItsTextIsBeingReadAsksForNothingMore() throws {
+        let held = HeldBuilds()
+        let index = DocumentSearchIndex(backgroundBuild: held.build)
+        index.upsert(Self.notes)
+
+        index.upsert(Self.notes)
+
+        #expect(held.asked.count == 1)
+        try #require(held.asked.first).deliver(MarkdownTextOffsetMapping(sourceText: Self.notes.contents))
+        #expect(index.hasReadText(of: Self.id(Self.notes)))
+    }
+
+    /// With nowhere else to read it, the text is read when a search needs it.
+    @Test func withNoBackgroundToReadInTheTextIsReadWhenASearchNeedsIt() {
+        let index = DocumentSearchIndex(documents: [Self.notes])
+
+        #expect(index.hasReadText(of: Self.id(Self.notes)) == false)
+        #expect(index.containsMatch(in: Self.id(Self.notes), query: "soup"))
+        #expect(index.hasReadText(of: Self.id(Self.notes)))
+    }
 }

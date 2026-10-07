@@ -55,6 +55,8 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         /// Where to put the reader when the page now loading has finished.
         var scrollRestoration: PreviewScrollRestoration.Restoration = .top
         var isLoadingPage = false
+        /// When the page now loading was handed to the web view.
+        var loadStarted: ContinuousClock.Instant?
 
         func webView(
             _ webView: WKWebView,
@@ -72,6 +74,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            logPageLoad()
             self.webView?.applySelection(lastSelectedRange)
             // After the selection, which centres itself: on a reload the
             // reader's place wins.
@@ -209,6 +212,8 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         /// Where to put the reader when the page now loading has finished.
         var scrollRestoration: PreviewScrollRestoration.Restoration = .top
         var isLoadingPage = false
+        /// When the page now loading was handed to the web view.
+        var loadStarted: ContinuousClock.Instant?
 
         func webView(
             _ webView: WKWebView,
@@ -226,6 +231,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            logPageLoad()
             self.webView?.applySelection(lastSelectedRange)
             // After the selection, which centres itself: on a reload the
             // reader's place wins.
@@ -420,8 +426,16 @@ private final class MarkdownCopyWebView: WKWebView {
 
 private extension MarkdownCopyWebView {
     func applySelection(_ selectedRange: MarkdownSelectionRange?) {
-        let payload = MarkdownPreviewWebView.selectionInvocation(source: markdownSource, selectedRange: selectedRange)
-        evaluateJavaScript(payload)
+        let placed = PerfLog.timed {
+            MarkdownPreviewWebView.selectionInvocation(source: markdownSource, selectedRange: selectedRange)
+        }
+        if selectedRange != nil {
+            PerfLog.log.info("""
+                [perf] selection placed in the page's terms in \
+                \(placed.milliseconds, format: .fixed(precision: 1), privacy: .public) ms
+                """)
+        }
+        evaluateJavaScript(placed.value)
     }
 
     func writeBlockRangeToPasteboard(start: Int, end: Int, kind: MarkdownCopyableBlockKind?) {
@@ -554,7 +568,19 @@ extension MarkdownPreviewWebView.Coordinator {
         loadedContent = content
         lastHTML = html
         isLoadingPage = true
+        loadStarted = .now
         webView.loadHTMLString(html, baseURL: baseURL)
+    }
+
+    /// Says how long the page took, from being handed to the web view to
+    /// having finished loading.
+    func logPageLoad() {
+        guard let loadStarted else { return }
+        self.loadStarted = nil
+        PerfLog.log.info("""
+            [perf] page: \(self.lastHTML?.utf8.count ?? 0, privacy: .public) bytes of HTML loaded in \
+            \(PerfLog.milliseconds(since: loadStarted), format: .fixed(precision: 1), privacy: .public) ms
+            """)
     }
 
     /// Puts the reader back where `load` found them, once the page is there to

@@ -241,7 +241,7 @@ final class SearchViewModel: ObservableObject {
            savedSelectionsBeforeDetailSearch[currentDocument.id] == nil {
             savedSelectionsBeforeDetailSearch[currentDocument.id] = store.selections(for: currentDocument.id)
         }
-        detailSearch.refresh(in: store.currentDocument?.file.contents ?? "")
+        detailSearch.refresh(in: currentSearchText)
         applyDetailSearchSelection()
     }
 
@@ -256,6 +256,13 @@ final class SearchViewModel: ObservableObject {
         return true
     }
 
+    /// The text of the document on screen as a search sees it. The store keeps
+    /// it, so that each search does not read the whole document again.
+    private var currentSearchText: MarkdownTextOffsetMapping {
+        store.currentDocument.flatMap { store.searchMapping(for: $0.id) }
+            ?? MarkdownTextOffsetMapping(sourceText: "")
+    }
+
     private func updateDetailSearch(for query: String) {
         let wasEmpty = detailSearch.query.isEmpty
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -263,7 +270,7 @@ final class SearchViewModel: ObservableObject {
             savedSelectionsBeforeDetailSearch[currentDocument.id] = store.selections(for: currentDocument.id)
         }
 
-        detailSearch.updateQuery(query, in: store.currentDocument?.file.contents ?? "")
+        detailSearch.updateQuery(query, in: currentSearchText)
         applyDetailSearchSelection()
     }
 

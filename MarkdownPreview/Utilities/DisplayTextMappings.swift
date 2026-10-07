@@ -22,6 +22,10 @@ final class MarkdownTextOffsetMapping: TextOffsetMapping {
     }
 }
 
+/// Nothing in it changes once it is made, so one read on another thread can be
+/// handed to the main actor.
+extension MarkdownTextOffsetMapping: @unchecked Sendable {}
+
 extension TextOffsetRun {
     init(_ run: MarkdownVisibleText.Run) {
         self.init(sourceRange: run.sourceRange, displayRange: run.displayRange)

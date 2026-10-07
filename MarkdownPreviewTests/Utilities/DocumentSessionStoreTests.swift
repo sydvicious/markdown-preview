@@ -787,4 +787,24 @@ struct DocumentSessionStoreTests {
         let later = DocumentSessionStore(disablePersistenceRestore: true, userDefaults: defaults)
         #expect(later.hasPersistedDocumentList(in: defaults))
     }
+
+    /// A search in the document on screen is handed this, so it does not work
+    /// out again what the list's search already has.
+    @MainActor
+    @Test func theStoreKeepsEachDocumentsTextAsASearchSeesIt() throws {
+        let file = MarkdownFile(
+            url: URL(fileURLWithPath: "/tmp/search-mapping/notes.md"),
+            contents: "# Title\n\n**alpha** beta"
+        )
+        let store = DocumentSessionStore(previewFiles: [file], disablePersistenceRestore: true)
+        let documentID = file.url.standardizedFileURL.path
+
+        let read = try #require(store.searchMapping(for: documentID))
+
+        #expect(read.sourceText == file.contents)
+        #expect(read.displayText.contains("alpha beta"))
+        // Kept, and not made again for the next search.
+        #expect(store.searchMapping(for: documentID) === read)
+        #expect(store.searchMapping(for: "/tmp/search-mapping/not-listed.md") == nil)
+    }
 }

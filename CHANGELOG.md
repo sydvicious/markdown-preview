@@ -5,6 +5,8 @@
 
 ## 0.11
 
+- A document's text is no longer read for searching while it is being opened, or while the list is restored at launch. It is read in the background, and by a search that gets there first. That reading took as long as showing the document: 450 ms for a 505 KB one, and 584 ms at launch for a list of six. A search in the document on screen uses what was read, and no longer reads the whole document again each time.
+- The preview's HTML is built once for each change to the document, its text size or the folders the app may read. It was built again each time the view was redrawn: three times to open a document, twice to go back to one, and again for every change of selection. On a 505 KB document each build takes about 0.4 seconds.
 - `Scripts/release-build.sh` runs `Scripts/run-tests-release.sh` before it archives anything, and makes no release if a test fails or the tests cannot be run. `--no-tests` releases without them, for a commit whose tests have just been run by hand; `--no-notarize` runs none. The `Release DMG` target has `/opt/homebrew/bin` on its `PATH`, for the Node the tests need.
 - `Scripts/run-tests-mac.sh` and `Scripts/run-tests-release.sh` ask Node for TAP by name. Under Node 26, which no longer prints TAP by default, the scripts' tests passed and were counted as none.
 - `Scripts/run-tests-release.sh` runs every test before a release: the preview scripts' with `npm test`, and the whole scheme, the tests that use the window server included, on the Mac as arm64 and as x86_64 and on an iPhone and an iPad simulator on each of iOS 26.0 and iOS 27. The simulators are tested two at a time. It ends with the same counts for each run as `Scripts/run-tests-mac.sh`, and its exit status says whether all of them passed.

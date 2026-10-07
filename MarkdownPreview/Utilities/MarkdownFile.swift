@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import os
 import UniformTypeIdentifiers
 
 struct MarkdownFile: Identifiable, Equatable {
@@ -19,8 +20,15 @@ struct MarkdownFile: Identifiable, Equatable {
     /// `DocumentSessionStore` takes it around this call, and taking it a second
     /// time here would repeat a refused request the store has learned not to make.
     static func load(from url: URL) throws -> MarkdownFile {
-        let data = try readData(from: url)
-        guard let text = decodedText(from: data) else {
+        let read = try PerfLog.timed { try readData(from: url) }
+        let decoded = PerfLog.timed { decodedText(from: read.value) }
+        PerfLog.log.info("""
+            [perf] read \(url.lastPathComponent, privacy: .public): \
+            \(read.value.count, privacy: .public) bytes in \
+            \(read.milliseconds, format: .fixed(precision: 1), privacy: .public) ms, decoded in \
+            \(decoded.milliseconds, format: .fixed(precision: 1), privacy: .public) ms
+            """)
+        guard let text = decoded.value else {
             throw CocoaError(.fileReadInapplicableStringEncoding)
         }
         return MarkdownFile(url: url, contents: text)

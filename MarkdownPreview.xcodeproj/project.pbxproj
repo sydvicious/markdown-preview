@@ -55,13 +55,6 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		62C74B2030734B9B00CA784C /* Exceptions for "MarkdownPreview" folder in "MarkdownPreview" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Web,
-			);
-			target = 62584AF02D45FB4E00831420 /* MarkdownPreview */;
-		};
 		62BB0003000000000000D00D /* Exceptions for "MarkdownPreview" folder in "MarkdownPreviewTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -81,6 +74,13 @@
 				Web,
 			);
 			target = 62584B002D45FB5000831420 /* MarkdownPreviewTests */;
+		};
+		62C74B2030734B9B00CA784C /* Exceptions for "MarkdownPreview" folder in "MarkdownPreview" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Web,
+			);
+			target = 62584AF02D45FB4E00831420 /* MarkdownPreview */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -767,11 +767,11 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = MarkdownCore;
 		};
-		62F31E7A300D4540005D7305 /* MarkdownCore */ = {
+		62BB0003000000000000D00E /* MarkdownCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MarkdownCore;
 		};
-		62BB0003000000000000D00E /* MarkdownCore */ = {
+		62F31E7A300D4540005D7305 /* MarkdownCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MarkdownCore;
 		};

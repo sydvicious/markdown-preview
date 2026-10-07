@@ -32,14 +32,31 @@ struct MarkdownSearchSession: Equatable {
     }
 
     mutating func updateQuery(_ query: String, in text: String) {
+        updateQuery(query, matches: MarkdownSearch.matches(in: text, query: query))
+    }
+
+    /// Searches text that has already been read, as the store keeps it for
+    /// each document, where the other reads the text itself first.
+    mutating func updateQuery(_ query: String, in mapping: MarkdownTextOffsetMapping) {
+        updateQuery(query, matches: MarkdownSearch.matches(in: mapping, query: query))
+    }
+
+    private mutating func updateQuery(_ query: String, matches: [MarkdownSelectionRange]) {
         self.query = query
-        matches = MarkdownSearch.matches(in: text, query: query)
+        self.matches = matches
         currentMatchIndex = matches.isEmpty ? nil : 0
         pendingWrapDirection = nil
     }
 
     mutating func refresh(in text: String) {
-        let refreshedMatches = MarkdownSearch.matches(in: text, query: query)
+        refresh(with: MarkdownSearch.matches(in: text, query: query))
+    }
+
+    mutating func refresh(in mapping: MarkdownTextOffsetMapping) {
+        refresh(with: MarkdownSearch.matches(in: mapping, query: query))
+    }
+
+    private mutating func refresh(with refreshedMatches: [MarkdownSelectionRange]) {
         matches = refreshedMatches
         if refreshedMatches.isEmpty {
             currentMatchIndex = nil
@@ -94,10 +111,16 @@ struct MarkdownSearchSession: Equatable {
 
 enum MarkdownSearch {
     static func matches(in text: String, query: String) -> [MarkdownSelectionRange] {
+        // Nothing to look for, so nothing to read.
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        return matches(in: MarkdownTextOffsetMapping(sourceText: text), query: query)
+    }
+
+    /// The matches in text that has already been read.
+    static func matches(in mapping: MarkdownTextOffsetMapping, query: String) -> [MarkdownSelectionRange] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return [] }
 
-        let mapping = MarkdownTextOffsetMapping(sourceText: text)
         let nsText = mapping.displayText as NSString
         let searchOptions: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
 
