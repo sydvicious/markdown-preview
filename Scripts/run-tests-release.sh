@@ -220,11 +220,15 @@ check() {
     return "$status"
 }
 
+# TAP is asked for by name. The counts at the end are read from it, and which
+# reporter Node uses when it is not writing to a terminal depends on the Node:
+# 22 prints TAP, 26 does not.
 scripts() {
     local started=$SECONDS status=0
     echo "==> scripts"
     forget scripts
-    (cd "$REPO" && npm test) > "$OUTPUT/scripts.log" 2>&1 || status=1
+    (cd "$REPO" && NODE_OPTIONS="${NODE_OPTIONS:-} --test-reporter=tap" npm test) \
+        > "$OUTPUT/scripts.log" 2>&1 || status=1
     record scripts "$status" "$started"
 }
 
@@ -268,7 +272,7 @@ simulators() {
 # expected, and expected to fail but passed. A test of the last kind is taken
 # out of the failed, so the four add up to the tests that ran.
 
-# From the TAP that Node prints when it is not writing to a terminal. A todo
+# From the TAP that Node is asked for. A todo
 # test is its expected failure, and one that passes does not fail the run.
 count_scripts() {
     awk '

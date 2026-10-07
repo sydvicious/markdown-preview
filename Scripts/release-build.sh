@@ -6,11 +6,13 @@
 # Makes a release. **main always carries the version of the next release**, so
 # from a clean main this:
 #
-#   1. builds a Release MarkdownPreview.app that can be handed to another
+#   1. runs every test, with Scripts/run-tests-release.sh, and goes no further
+#      if any of them fails;
+#   2. builds a Release MarkdownPreview.app that can be handed to another
 #      person: signed with Developer ID, notarized, stapled, and wrapped with
 #      a link to /Applications and CHANGELOG.md in a DMG, laid out by Finder,
 #      that is signed, notarized and stapled in turn;
-#   2. tags the commit it built release-<version>-build-<build>.
+#   3. tags the commit it built release-<version>-build-<build>.
 #
 # **It does not bump.** A release may take several candidates before one ships,
 # so bump-version.sh stays separate: run it with no options for the next
@@ -18,7 +20,7 @@
 # and with --minor once a release has shipped, so main moves on to the next one.
 #
 # Nothing is pushed. With --no-notarize it only builds and packages, from any
-# branch, and does not tag. It never starts from a dirty repo.
+# branch, and neither tests nor tags. It never starts from a dirty repo.
 #
 # Syd's to run, not an agent's: it uploads the build to Apple's notary service,
 # it tags, and it drives Finder on his screen.
@@ -33,6 +35,7 @@ BUILD_DIR="$DERIVED_DATA/release"
 RELEASES_DIR="$HOME/iCloud/dev/MarkdownPreview Releases"
 PROFILE="pgr-notary"
 NOTARIZE=1
+TESTS=1
 
 usage() {
     cat <<'HELPTEXT'
@@ -50,10 +53,13 @@ OPTIONS
                               ~/iCloud/dev/MarkdownPreview Releases
   --keychain-profile <name>   The notarytool credentials to submit with.
                               Default: pgr-notary, shared by the team's apps.
-  --no-notarize               Sign and package, but upload nothing to Apple,
-                              copy nothing to the releases folder, and do not
-                              tag. Works from any branch, but still only
-                              from a clean repo.
+  --no-notarize               Sign and package, but run no tests, upload
+                              nothing to Apple, copy nothing to the releases
+                              folder, and do not tag. Works from any branch,
+                              but still only from a clean repo.
+  --no-tests                  Release without running the tests first. For a
+                              commit whose tests have just been run by hand,
+                              with Scripts/run-tests-release.sh.
   -h, --help                  This.
 
 NEEDS, ONCE PER MAC
@@ -67,7 +73,9 @@ NEEDS, ONCE PER MAC
 
 NEEDS, EVERY RELEASE
   A clean main (no changes, and no untracked files that are not ignored), and a
-  "## <version>" heading in CHANGELOG.md for the release.
+  "## <version>" heading in CHANGELOG.md for the release. Every test passing:
+  Scripts/run-tests-release.sh is run first, and --help there says what it
+  needs, Node and its simulators among them. Its logs are in <output>/tests.
 
 RESULT
   <releases>/MarkdownPreview <version> (<build>).dmg, holding the stapled app,
@@ -86,6 +94,7 @@ while [[ $# -gt 0 ]]; do
         --releases) RELEASES_DIR="$2"; shift 2 ;;
         --keychain-profile) PROFILE="$2"; shift 2 ;;
         --no-notarize) NOTARIZE=0; shift ;;
+        --no-tests) TESTS=0; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -133,6 +142,20 @@ if [[ -z "$IDENTITY" ]]; then
     echo "no Developer ID Application certificate for team $TEAM_ID in the keychain." >&2
     echo "Create one in Xcode -> Settings -> Accounts -> Manage Certificates." >&2
     exit 1
+fi
+
+# **Every test first.** Nothing is archived, uploaded or tagged from a commit
+# with a test failing, or with tests that could not be run. After the checks
+# above, so that a release that could not be made anyway does not wait for
+# them. Not with --no-notarize, which ships nothing.
+if [[ $NOTARIZE -eq 1 ]]; then
+    if [[ $TESTS -eq 1 ]]; then
+        echo "==> Testing"
+        "$REPO/Scripts/run-tests-release.sh" --output "$BUILD_DIR/tests" \
+            || { echo "the tests did not pass; nothing has been built" >&2; exit 1; }
+    else
+        echo "==> Not testing: --no-tests" >&2
+    fi
 fi
 
 ARCHIVE="$BUILD_DIR/MarkdownPreview.xcarchive"

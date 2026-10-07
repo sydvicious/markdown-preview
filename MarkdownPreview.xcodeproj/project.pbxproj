@@ -355,7 +355,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Builds, signs and notarizes a Release, and packages it in its disk image:\n# Scripts/release-build.sh. So building this target is making a release, and it\n# is Syd's to build: it uploads to Apple's notary service.\n#\n# The environment is cleared first. This build's own settings (SDKROOT,\n# CONFIGURATION and the rest) would otherwise reach the archive the script runs.\n# The script's last line is the image; Finder then shows it.\nset -eo pipefail\nDMG=\"$(/usr/bin/env -i HOME=\"$HOME\" USER=\"$USER\" LOGNAME=\"$LOGNAME\" TMPDIR=\"$TMPDIR\" \\\n    PATH=\"/usr/bin:/bin:/usr/sbin:/sbin\" \"$SRCROOT/Scripts/release-build.sh\" | tee /dev/stderr | tail -n 1)\"\n/usr/bin/open -R \"$DMG\"\n";
+			shellScript = "# Builds, signs and notarizes a Release, and packages it in its disk image:\n# Scripts/release-build.sh. So building this target is making a release, and it\n# is Syd's to build: it uploads to Apple's notary service.\n#\n# The environment is cleared first. This build's own settings (SDKROOT,\n# CONFIGURATION and the rest) would otherwise reach the archive the script runs.\n# The script's last line is the image; Finder then shows it.\n#\n# /opt/homebrew/bin is on the PATH, after the system's own folders, for Node:\n# the release's tests need npm.\nset -eo pipefail\nDMG=\"$(/usr/bin/env -i HOME=\"$HOME\" USER=\"$USER\" LOGNAME=\"$LOGNAME\" TMPDIR=\"$TMPDIR\" \\\n    PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin\" \"$SRCROOT/Scripts/release-build.sh\" | tee /dev/stderr | tail -n 1)\"\n/usr/bin/open -R \"$DMG\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */

@@ -5,6 +5,8 @@
 
 ## 0.11
 
+- `Scripts/release-build.sh` runs `Scripts/run-tests-release.sh` before it archives anything, and makes no release if a test fails or the tests cannot be run. `--no-tests` releases without them, for a commit whose tests have just been run by hand; `--no-notarize` runs none. The `Release DMG` target has `/opt/homebrew/bin` on its `PATH`, for the Node the tests need.
+- `Scripts/run-tests-mac.sh` and `Scripts/run-tests-release.sh` ask Node for TAP by name. Under Node 26, which no longer prints TAP by default, the scripts' tests passed and were counted as none.
 - `Scripts/run-tests-release.sh` runs every test before a release: the preview scripts' with `npm test`, and the whole scheme, the tests that use the window server included, on the Mac as arm64 and as x86_64 and on an iPhone and an iPad simulator on each of iOS 26.0 and iOS 27. The simulators are tested two at a time. It ends with the same counts for each run as `Scripts/run-tests-mac.sh`, and its exit status says whether all of them passed.
 
 ## 0.10

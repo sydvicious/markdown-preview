@@ -152,7 +152,10 @@ engine() {
     swift test --package-path "$REPO/MarkdownCore" --scratch-path "$OUTPUT/swiftpm" \
         --event-stream-output-path "$OUTPUT/engine-events.jsonl"
 }
-scripts() { cd "$REPO" && npm test; }
+# TAP is asked for by name. The counts at the end are read from it, and which
+# reporter Node uses when it is not writing to a terminal depends on the Node:
+# 22 prints TAP, 26 does not.
+scripts() { cd "$REPO" && NODE_OPTIONS="${NODE_OPTIONS:-} --test-reporter=tap" npm test; }
 
 # Built and run in two steps: built unsigned, `xcodebuild test` stops at the
 # test bundle it then cannot sign. The failures' own words are not in what
@@ -202,7 +205,7 @@ count_engine() {
     ' "$OUTPUT/engine-events.jsonl"
 }
 
-# From the TAP that Node prints when it is not writing to a terminal. A todo
+# From the TAP that Node is asked for. A todo
 # test is its expected failure, and one that passes does not fail the run.
 count_scripts() {
     awk '
