@@ -62,7 +62,7 @@ struct MarkdownPreviewWebViewTests {
 
     /// A selection is one contiguous source range, whichever view reported it,
     /// so the preview's per-run ranges collapse before they reach the model.
-    @Test func previewSelectionIsReportedAsOneContiguousRange() {
+    @Test func previewSelectionIsReportedAsOneContiguousRange() throws {
         let source = "# Heading\n\nA paragraph with text."
         let payload: [[String: Any]] = [
             [
@@ -84,7 +84,12 @@ struct MarkdownPreviewWebViewTests {
             source: source
         )
 
-        #expect(ranges.count == 1)
+        // "Heading" in the first block and "A paragraph" in the second, and
+        // everything in the source between them: the `#` before the heading is
+        // outside it, the blank line after is inside.
+        #expect(ranges == [MarkdownSelectionRange(location: 2, length: 20)])
+        let selected = try #require(ranges.first?.range(in: source))
+        #expect(source[selected] == "Heading\n\nA paragraph")
     }
 
     @Test func enclosingRangeOfNothingIsNil() {

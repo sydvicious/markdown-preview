@@ -292,8 +292,12 @@ struct DocumentSessionStoreTests {
         #expect(restoredStore.textSize(for: documentID) == .large)
     }
 
+    // The width does not come into what the store restores: which document
+    // is selected is the same at either. What a compact width changes is which
+    // column shows, and that is the view model's to decide.
     @MainActor
-    @Test func restoreKeepsPersistedSelectionOnCompactWidth() async throws {
+    @Test(arguments: [true, false])
+    func restoreKeepsThePersistedSelectionAtEitherWidth(isCompactWidth: Bool) async throws {
         let suiteName = "DocumentSessionStoreTests.\(#function).\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
             Issue.record("Unable to create isolated UserDefaults suite")
@@ -320,7 +324,7 @@ struct DocumentSessionStoreTests {
         store.persistSelectedDocument(to: defaults)
 
         let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
-        restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: true, userDefaults: defaults)
+        restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth, userDefaults: defaults)
 
         #expect(restoredStore.openedDocuments.count == 2)
         #expect(restoredStore.selectedDocumentID == alphaURL.standardizedFileURL.path)

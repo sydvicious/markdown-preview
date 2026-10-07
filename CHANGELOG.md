@@ -5,6 +5,7 @@
 
 ## 0.10
 
+- Tests: four tests that did not check what their names said now do. The refusal of a file without an image extension is reached with the right key; a find term that was on the pasteboard before launch is set up that way; the restored selection is checked at both widths; and the preview's one contiguous selection is checked for which range it is, not only that there is one.
 - A document moved to the Trash is treated as a deleted one is: the one on screen is reported as no longer available and then removed from the list, and any other is removed from the list. It used to stay listed, under the Trash folder.
 - (macOS) The list is checked for files that moved, changed or went missing whenever the app comes to the front, as well as on its timers. Coming back from the Finder used to mean waiting up to ten seconds.
 - Tests: the WebKit tests run one at a time, after a page has been loaded to start WebKit up. Run together, each spent most of its minute waiting on the others for the main actor; and the first page a process loads is slow, in an iPhone simulator sometimes slower than the minute a test is allowed. A page that stalls now ends its test with a report of how far the load got.

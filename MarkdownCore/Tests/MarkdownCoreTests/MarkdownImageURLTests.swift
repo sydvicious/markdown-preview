@@ -94,10 +94,22 @@ struct MarkdownImageURLTests {
     }
 
     @Test func refusesDisallowedExtensionsWhenServing() async throws {
-        // The handler applies the same restriction, so a hand-written mdimage://
-        // URL cannot be used to read an arbitrary file either.
-        let url = try #require(URL(string: "mdimage://local/etc/passwd"))
-        #expect(MarkdownImageURL.fileURL(for: url) == nil)
+        // The handler applies the same restriction, so an mdimage:// URL cannot
+        // be used to read an arbitrary file either. Each of these carries this
+        // launch's key, so the extension is the one thing wrong with it: without
+        // the key a request is refused for that, and the extension is never
+        // looked at.
+        for path in ["/etc/passwd", "/tmp/notes.txt", "/tmp/page.html", "/tmp/photo.png.txt"] {
+            let url = try #require(MarkdownImageURL.url(for: URL(fileURLWithPath: path)))
+
+            #expect(MarkdownImageURL.fileURL(for: url) == nil, "\(path) was accepted")
+        }
+
+        // The same request for an image is accepted, so it is the extension
+        // that the ones above were refused for.
+        let image = URL(fileURLWithPath: "/tmp/photo.png")
+        let imageURL = try #require(MarkdownImageURL.url(for: image))
+        #expect(MarkdownImageURL.fileURL(for: imageURL) == image)
     }
 
     @Test func refusesForeignSchemes() async throws {

@@ -222,14 +222,20 @@ struct SearchViewModelFindPasteboardTests {
     /// before this launch, which an earlier baseline used to swallow.
     @Test func findQueryPresentBeforeLaunchIsAdoptedOnFirstFocus() {
         let store = makeStore([("doc.md", "alpha beta")])
-        let viewModel = SearchViewModel(store: store)
-        viewModel.focusedField = .list
 
         withFindPasteboard("beta") {
-            viewModel.adoptSystemFindQueryIfChanged()
-        }
+            // The term is on the buffer before there is a view model to see it.
+            let viewModel = SearchViewModel(store: store)
 
-        #expect(viewModel.searchText == "beta")
+            // Looked at with no field focused, as when the app comes forward,
+            // it is not adopted, and looking must not use it up.
+            viewModel.adoptSystemFindQueryIfChanged()
+            #expect(viewModel.searchText == "")
+
+            viewModel.focusedField = .list
+            viewModel.adoptSystemFindQueryIfChanged()
+            #expect(viewModel.searchText == "beta")
+        }
     }
 
     /// The write path, which the read path's tests do not cover: typing in a
