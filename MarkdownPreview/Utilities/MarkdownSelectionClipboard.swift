@@ -12,6 +12,14 @@ import UIKit
 import AppKit
 #endif
 
+/// The pasteboard a copy is written to. The app writes to the general one,
+/// which is the clipboard; a test passes one of its own.
+#if os(iOS)
+typealias MarkdownSelectionPasteboard = UIPasteboard
+#elseif os(macOS)
+typealias MarkdownSelectionPasteboard = NSPasteboard
+#endif
+
 struct MarkdownSelectionClipboardPayload {
     let markdown: String
     let rtf: Data?
@@ -65,12 +73,13 @@ enum MarkdownSelectionClipboard {
     static func writeSelection(
         from source: String,
         ranges: [MarkdownSelectionRange],
-        richTextHTML: String? = nil
+        richTextHTML: String? = nil,
+        to pasteboard: MarkdownSelectionPasteboard = .general
     ) -> Bool {
         guard let payload = payload(for: source, ranges: ranges, richTextHTML: richTextHTML) else {
             return false
         }
-        write(payload)
+        write(payload, to: pasteboard)
         return true
     }
 
@@ -80,9 +89,9 @@ enum MarkdownSelectionClipboard {
     /// `MarkdownBlockCopyText.offersRichText(for:)` for why those kinds get
     /// plain text alone.
     @discardableResult
-    static func writePlainText(_ text: String) -> Bool {
+    static func writePlainText(_ text: String, to pasteboard: MarkdownSelectionPasteboard = .general) -> Bool {
         guard !text.isEmpty else { return false }
-        write(MarkdownSelectionClipboardPayload(markdown: text, rtf: nil))
+        write(MarkdownSelectionClipboardPayload(markdown: text, rtf: nil), to: pasteboard)
         return true
     }
 
@@ -123,15 +132,17 @@ enum MarkdownSelectionClipboard {
         return rtf(fromHTMLData: Data(html.utf8))
     }
 
-    private static func write(_ payload: MarkdownSelectionClipboardPayload) {
+    private static func write(
+        _ payload: MarkdownSelectionClipboardPayload,
+        to pasteboard: MarkdownSelectionPasteboard
+    ) {
         #if os(iOS)
         var item: [String: Any] = [UTType.plainText.identifier: payload.markdown]
         if let rtf = payload.rtf {
             item[UTType.rtf.identifier] = rtf
         }
-        UIPasteboard.general.setItems([item], options: [:])
+        pasteboard.setItems([item], options: [:])
         #elseif os(macOS)
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(payload.markdown, forType: .string)
         if let rtf = payload.rtf {
