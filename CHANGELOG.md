@@ -3,6 +3,10 @@
 
 # Changelog
 
+## 0.11
+
+- `Scripts/run-tests-release.sh` runs every test before a release: the preview scripts' with `npm test`, and the whole scheme, the tests that use the window server included, on the Mac as arm64 and as x86_64 and on an iPhone and an iPad simulator on each of iOS 26.0 and iOS 27. The simulators are tested two at a time. It ends with the same counts for each run as `Scripts/run-tests-mac.sh`, and its exit status says whether all of them passed.
+
 ## 0.10
 
 - A line selected in the preview by clicking it three times copies as that line, as it does in a text view. The plain text is the line as it is written, from its `#` or list marker to its line ending; it used to start at the first word and stop at the last, with no ending. The selection reaches the start of the block after it, and the rich text held that block too, emptied: a list pasted as a bullet with nothing beside it. Words dragged over copy as before.
