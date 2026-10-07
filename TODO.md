@@ -173,7 +173,7 @@ This document tracks planned work for MarkdownPreviewApp.
 ### Test everything before a release.
   - Before a release ships, run every suite with `xcodebuild`, the tests that use the window server included.
   - On the Mac, run them once for arm64 and once for x86_64, which runs under Rosetta. The release is built for both; development builds and tests arm64 only.
-  - Run them on an iPhone simulator and an iPad simulator as well.
+  - Run them on an iPhone simulator and an iPad simulator as well, on each of iOS 26.0, the deployment target, and iOS 27: four simulators.
   - Run the preview scripts' tests too (`npm test`), which `xcodebuild` does not.
   - Decide where this lives: a step of `Scripts/release-build.sh`, which would then refuse to release on a failure, or a script of its own that is run first.
   - Where things stand: `Scripts/release-build.sh` runs no tests. `Scripts/run-tests-mac.sh` is the run made while developing: arm64 only, and without `MarkdownPreviewWindowServerTests`.
