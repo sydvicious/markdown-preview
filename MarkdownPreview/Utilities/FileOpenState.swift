@@ -15,7 +15,7 @@ final class FileOpenState: ObservableObject {
     /// every URL together (macOS `application(_:open:)`) or one at a time (iOS
     /// `.onOpenURL`), so they are accumulated here and drained together rather
     /// than overwriting a single slot (which dropped all but one file).
-    @Published var pendingURLs: [URL] = []
+    @Published private(set) var pendingURLs: [URL] = []
     @Published var didReceiveExternalOpenRequest = false
 
     func enqueue(_ url: URL) {
@@ -25,5 +25,13 @@ final class FileOpenState: ObservableObject {
 
     func enqueue(_ urls: [URL]) {
         urls.forEach(enqueue)
+    }
+
+    /// Hands over every queued URL and empties the queue, so each is handed
+    /// over once. That something was asked for is not forgotten with it.
+    func takePendingURLs() -> [URL] {
+        let urls = pendingURLs
+        pendingURLs = []
+        return urls
     }
 }

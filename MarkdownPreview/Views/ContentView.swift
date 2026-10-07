@@ -255,9 +255,13 @@ struct ContentView: View {
             }
         }
         #endif
-        .onReceive(fileOpenState.$pendingURLs.filter { !$0.isEmpty }) { urls in
+        // `@Published` announces a value before the property holds it, so the
+        // queue is taken a turn later, when it does. A batch is announced once
+        // for each URL in it: the first take gets them all, the rest nothing.
+        .onReceive(fileOpenState.$pendingURLs.filter { !$0.isEmpty }.receive(on: DispatchQueue.main)) { _ in
+            let urls = fileOpenState.takePendingURLs()
+            guard !urls.isEmpty else { return }
             viewModel.openPendingURLs(urls, isCompactWidth: usesSingleColumnNavigation)
-            fileOpenState.pendingURLs = []
         }
         .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
             if !disableLiveFileMonitoring {

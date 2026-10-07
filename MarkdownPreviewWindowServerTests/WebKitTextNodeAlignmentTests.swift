@@ -498,20 +498,21 @@ struct WebKitTextNodeAlignmentTests {
 
         for word in feature.words {
             let inSource = try #require(feature.sourceRange(of: word), "\(word) is not in the source")
-            guard let reflected = PreviewSelectionReflection.reflectedSelection(
+            guard PreviewSelectionReflection.reflectedSelection(
                 in: feature.source,
                 selectedRange: inSource
-            ) else {
+            ) != nil else {
                 Issue.record("the source selection of \(word) reflects to nothing")
                 continue
             }
 
-            let arguments = "\(reflected.start.blockStart), \(reflected.start.blockEnd), "
-                + "\(reflected.start.displayOffset), \(reflected.end.blockStart), "
-                + "\(reflected.end.blockEnd), \(reflected.end.displayOffset)"
+            let invocation = MarkdownPreviewWebView.selectionInvocation(
+                source: feature.source,
+                selectedRange: inSource
+            )
             let result = try await webView.evaluateJavaScript("""
                 (() => {
-                  const applied = \(PreviewScriptCall.applySelection(arguments));
+                  const applied = \(invocation);
                   return {
                     applied: applied === true,
                     text: window.getSelection()?.toString() ?? '',
@@ -533,6 +534,49 @@ struct WebKitTextNodeAlignmentTests {
                 "what came back to the source, for \(word)"
             )
         }
+    }
+
+    // MARK: - The call that reflects a selection
+
+    /// Each end of the selection goes to the page as its block's place in the
+    /// source and an offset into that block's rendered text: the start's three
+    /// numbers, then the end's.
+    @Test func aSelectionAcrossTwoBlocksIsSentAsItsStartAndThenItsEnd() {
+        let source = "# Heading\n\nA paragraph with text."
+        // "Heading", the blank line, and "A paragraph".
+        let selected = MarkdownSelectionRange(location: 2, length: 20)
+
+        #expect(
+            MarkdownPreviewWebView.selectionInvocation(source: source, selectedRange: selected)
+                == PreviewScriptCall.applySelection("0, 9, 0, 11, 33, 11")
+        )
+    }
+
+    @Test func noSelectionIsSentAsACallThatClearsThePagesSelection() {
+        #expect(
+            MarkdownPreviewWebView.selectionInvocation(source: "Alpha beta", selectedRange: nil)
+                == PreviewScriptCall.applySelection("null, null, null, null, null, null")
+        )
+    }
+
+    /// A selection with no place in the page is not left showing as whatever
+    /// was selected before it.
+    @Test func aSelectionThatIsNotInTheSourceClearsThePagesSelection() {
+        let source = "Alpha beta"
+        let clear = PreviewScriptCall.applySelection("null, null, null, null, null, null")
+
+        #expect(
+            MarkdownPreviewWebView.selectionInvocation(
+                source: source,
+                selectedRange: MarkdownSelectionRange(location: 50, length: 5)
+            ) == clear
+        )
+        #expect(
+            MarkdownPreviewWebView.selectionInvocation(
+                source: source,
+                selectedRange: MarkdownSelectionRange(location: 4, length: 0)
+            ) == clear
+        )
     }
 
     // MARK: - Script links

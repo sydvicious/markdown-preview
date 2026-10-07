@@ -420,7 +420,7 @@ private final class MarkdownCopyWebView: WKWebView {
 
 private extension MarkdownCopyWebView {
     func applySelection(_ selectedRange: MarkdownSelectionRange?) {
-        let payload = Self.selectionInvocation(source: markdownSource, selectedRange: selectedRange)
+        let payload = MarkdownPreviewWebView.selectionInvocation(source: markdownSource, selectedRange: selectedRange)
         evaluateJavaScript(payload)
     }
 
@@ -496,7 +496,12 @@ private extension MarkdownCopyWebView {
             completion(payload.selectedText, selectionRanges)
         }
     }
+}
 
+extension MarkdownPreviewWebView {
+    /// The call that puts a source selection into the page, or clears the
+    /// page's selection when there is none to put there.
+    ///
     /// Logs at `.info`, which never reaches the unified log but does show in
     /// Xcode's console — cheap to leave in, and the next person debugging a
     /// selection that does not appear gets the reflection's decision for free.

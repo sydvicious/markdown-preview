@@ -354,6 +354,189 @@ struct MarkdownPreviewWebViewTests {
         ])
     }
 
+    @Test func aSelectionArrivingWithNoneFromThePreviewIsNotAnEcho() {
+        #expect(
+            PreviewSelectionBridge.isEcho(
+                ofPreviewOriginated: nil,
+                incoming: MarkdownSelectionRange(location: 4, length: 8)
+            ) == false
+        )
+    }
+
+    /// The span ends where the range reaching furthest ends, which need not be
+    /// the range that starts last.
+    @Test func enclosingRangeEndsAtTheLatestEndWhicheverRangeHasIt() {
+        let holdingTheOthers = [
+            MarkdownSelectionRange(location: 10, length: 50),
+            MarkdownSelectionRange(location: 20, length: 5),
+            MarkdownSelectionRange(location: 40, length: 8)
+        ]
+        let overlapping = [
+            MarkdownSelectionRange(location: 15, length: 10),
+            MarkdownSelectionRange(location: 10, length: 10)
+        ]
+
+        #expect(
+            PreviewSelectionBridge.enclosingRange(of: holdingTheOthers)
+                == MarkdownSelectionRange(location: 10, length: 50)
+        )
+        #expect(
+            PreviewSelectionBridge.enclosingRange(of: overlapping)
+                == MarkdownSelectionRange(location: 10, length: 15)
+        )
+    }
+
+    @Test func enclosingRangeOfOneRangeIsThatRange() {
+        let range = MarkdownSelectionRange(location: 12, length: 7)
+
+        #expect(PreviewSelectionBridge.enclosingRange(of: [range]) == range)
+    }
+
+    /// An empty range covers nothing, but it is still a place, and the span
+    /// runs from the earliest start to the latest end.
+    @Test func enclosingRangeReachesAnEmptyRangeBesideOnesWithText() {
+        let ranges = [
+            MarkdownSelectionRange(location: 4, length: 0),
+            MarkdownSelectionRange(location: 10, length: 5)
+        ]
+
+        #expect(
+            PreviewSelectionBridge.enclosingRange(of: ranges)
+                == MarkdownSelectionRange(location: 4, length: 11)
+        )
+    }
+
+    /// No ranges is what makes a copy from the preview fall back, and what
+    /// leaves the last selection the preview reported in place.
+    @Test func aPreviewSelectionWithNothingUsableInItIsNoSelection() {
+        let source = "Alpha beta"
+        let results: [Any?] = [
+            nil,
+            "not ranges",
+            [[String: Any]](),
+            // A block reaching past the end of the source.
+            [displayRange(blockStart: 0, blockEnd: source.utf16.count + 20, displayLocation: 0, displayLength: 5)],
+            // Text the block does not have.
+            [displayRange(blockStart: 0, blockEnd: source.utf16.count, displayLocation: 50, displayLength: 3)]
+        ]
+
+        for result in results {
+            #expect(
+                PreviewSelectionBridge.contiguousSelectionRanges(fromDisplayRangeResult: result, source: source)
+                    .isEmpty,
+                "\(String(describing: result))"
+            )
+        }
+    }
+
+    /// `displayRanges(from:)` asks only that a block end after it starts, so
+    /// one that starts before the source gets as far as here.
+    @Test func previewSelectionBridgeIgnoresABlockStartingBeforeTheSource() {
+        let source = "Alpha beta"
+        let payload = [
+            displayRange(blockStart: -4, blockEnd: source.utf16.count, displayLocation: 0, displayLength: 5),
+            displayRange(blockStart: 0, blockEnd: source.utf16.count, displayLocation: 6, displayLength: 4)
+        ]
+
+        let ranges = PreviewSelectionBridge.sourceRanges(fromDisplayRangeResult: payload, source: source)
+
+        #expect(ranges == [MarkdownSelectionRange(location: 6, length: 4)])
+    }
+
+    @Test func previewSelectionBridgeKeepsTheValidDisplayRangesAfterInvalidOnes() {
+        let valid = displayRange(blockStart: 30, blockEnd: 40, displayLocation: 2, displayLength: 4)
+        let payload: [[String: Any]] = [
+            // Numbers written as text.
+            ["blockStart": "0", "blockEnd": "20", "displayLocation": "4", "displayLength": "8"],
+            // A block that ends before it starts.
+            displayRange(blockStart: 20, blockEnd: 10, displayLocation: 0, displayLength: 4),
+            displayRange(blockStart: 0, blockEnd: 20, displayLocation: 4, displayLength: -8),
+            valid
+        ]
+
+        #expect(PreviewSelectionBridge.displayRanges(from: payload) == [
+            PreviewDisplaySelectionRange(blockStart: 30, blockEnd: 40, displayLocation: 2, displayLength: 4)
+        ])
+    }
+
+    /// The page reports a list of ranges and nothing else. A list with
+    /// something else in it is not that message, so none of it is read.
+    @Test func previewSelectionBridgeReadsNothingFromAListThatIsNotAllRanges() {
+        let payload: [Any] = [
+            displayRange(blockStart: 0, blockEnd: 20, displayLocation: 4, displayLength: 8),
+            "not a range"
+        ]
+
+        #expect(PreviewSelectionBridge.displayRanges(from: payload).isEmpty)
+    }
+
+    @Test func copyBlockMessageNeedsAnEndThatIsANumberPastTheStart() {
+        #expect(PreviewCopyBlockMessage(messageBody: [
+            "start": NSNumber(value: 4)
+        ]) == nil)
+        #expect(PreviewCopyBlockMessage(messageBody: [
+            "start": NSNumber(value: 4),
+            "end": "12"
+        ]) == nil)
+        #expect(PreviewCopyBlockMessage(messageBody: [
+            "start": NSNumber(value: 12),
+            "end": NSNumber(value: 4)
+        ]) == nil)
+    }
+
+    @Test func copyBlockMessageToleratesAKindThatIsNotText() throws {
+        let message = try #require(
+            PreviewCopyBlockMessage(messageBody: [
+                "start": NSNumber(value: 0),
+                "end": NSNumber(value: 5),
+                "kind": NSNumber(value: 3)
+            ])
+        )
+
+        #expect(message == PreviewCopyBlockMessage(start: 0, end: 5))
+    }
+
+    @Test func previewSelectionChangedMessageTrimsLineEndingsAndKeepsTheSpacesInside() {
+        let message = PreviewSelectionChangedMessage(messageBody: [
+            "text": "\n\t beta gamma \n"
+        ])
+
+        #expect(message.selectedText == "beta gamma")
+        #expect(message.displayRangeResult == nil)
+    }
+
+    @Test func previewSelectionChangedMessageWithoutTextStillCarriesItsRanges() {
+        let ranges = [displayRange(blockStart: 0, blockEnd: 10, displayLocation: 2, displayLength: 4)]
+        let expected = [
+            PreviewDisplaySelectionRange(blockStart: 0, blockEnd: 10, displayLocation: 2, displayLength: 4)
+        ]
+
+        let missing = PreviewSelectionChangedMessage(messageBody: ["ranges": ranges])
+        #expect(missing.selectedText == nil)
+        #expect(PreviewSelectionBridge.displayRanges(from: missing.displayRangeResult) == expected)
+
+        let notText = PreviewSelectionChangedMessage(messageBody: [
+            "text": NSNumber(value: 4),
+            "ranges": ranges
+        ])
+        #expect(notText.selectedText == nil)
+        #expect(PreviewSelectionBridge.displayRanges(from: notText.displayRangeResult) == expected)
+    }
+
+    private func displayRange(
+        blockStart: Int,
+        blockEnd: Int,
+        displayLocation: Int,
+        displayLength: Int
+    ) -> [String: Any] {
+        [
+            "blockStart": NSNumber(value: blockStart),
+            "blockEnd": NSNumber(value: blockEnd),
+            "displayLocation": NSNumber(value: displayLocation),
+            "displayLength": NSNumber(value: displayLength)
+        ]
+    }
+
     private func displayRangePayload(in source: String, visibleText: String) -> [[String: Any]] {
         displayRangePayloads(in: source, visibleTexts: [visibleText])
     }
@@ -503,5 +686,139 @@ struct PreviewScrollRestorationTests {
         #expect(PreviewScrollPosition(messageBody: "top") == nil)
         #expect(PreviewScrollPosition(messageBody: [NSNumber(value: 1), NSNumber(value: 2)]) == nil)
         #expect(PreviewScrollPosition(messageBody: [NSNumber(value: 0), NSNumber(value: Double.nan), NSNumber(value: 10)]) == nil)
+    }
+
+    @Test func aScrollMessageOfTheWrongLengthOrKindIsIgnored() {
+        #expect(PreviewScrollPosition(messageBody: [NSNumber]()) == nil)
+        #expect(
+            PreviewScrollPosition(
+                messageBody: [NSNumber(value: 0), NSNumber(value: 640), NSNumber(value: 1800), NSNumber(value: 1)]
+            ) == nil
+        )
+        #expect(PreviewScrollPosition(messageBody: ["0", "640", "1800"]) == nil)
+    }
+
+    @Test func aScrollMessageWithAnInfiniteNumberIsIgnored() {
+        #expect(
+            PreviewScrollPosition(
+                messageBody: [NSNumber(value: 0), NSNumber(value: 640), NSNumber(value: Double.infinity)]
+            ) == nil
+        )
+        #expect(
+            PreviewScrollPosition(
+                messageBody: [NSNumber(value: -Double.infinity), NSNumber(value: 640), NSNumber(value: 1800)]
+            ) == nil
+        )
+    }
+
+    // A page cannot scroll less than not at all, and there is then nowhere
+    // down it for the reader to be.
+    @Test func aPageSaidToScrollLessThanNothingDoesNotScroll() throws {
+        let position = try #require(
+            PreviewScrollPosition(messageBody: [NSNumber(value: 5), NSNumber(value: 30), NSNumber(value: -10)])
+        )
+
+        #expect(position == PreviewScrollPosition(x: 5, y: 0, maxY: 0))
+    }
+
+    // How far across the reader is does not depend on the page's height, so it
+    // is kept as it was whichever way the place down the page is kept.
+    @Test func theReadersPlaceAcrossThePageIsKeptEitherWay() {
+        let acrossAndDown = PreviewScrollPosition(x: 40, y: 600, maxY: 2400)
+
+        let edited = PreviewScrollRestoration.restoration(
+            of: acrossAndDown,
+            from: Content(documentID: plan, source: "before"),
+            to: Content(documentID: plan, source: "after")
+        )
+        let redrawn = PreviewScrollRestoration.restoration(
+            of: acrossAndDown,
+            from: Content(documentID: plan, source: "same"),
+            to: Content(documentID: plan, source: "same")
+        )
+
+        #expect(edited == .offset(x: 40, y: 600))
+        #expect(redrawn == .fraction(x: 40, ofMaxY: 0.25))
+    }
+
+    @Test func aReaderWhoHasOnlyScrolledAcrossIsNotAtTheTop() {
+        let restoration = PreviewScrollRestoration.restoration(
+            of: PreviewScrollPosition(x: 40, y: 0, maxY: 2400),
+            from: Content(documentID: plan, source: "same"),
+            to: Content(documentID: plan, source: "same")
+        )
+
+        #expect(restoration == .fraction(x: 40, ofMaxY: 0))
+    }
+
+    @Test func aRestorationToTheTopHasNothingToRun() {
+        #expect(PreviewScrollRestoration.Restoration.top.script == nil)
+    }
+
+    @Test func eachRestorationRunsTheCallThatCarriesItOut() {
+        #expect(
+            PreviewScrollRestoration.Restoration.offset(x: 40, y: 900).script
+                == PreviewScriptCall.scrollToOffset(x: 40, y: 900)
+        )
+        #expect(
+            PreviewScrollRestoration.Restoration.fraction(x: 40, ofMaxY: 0.5).script
+                == PreviewScriptCall.scrollToFraction(x: 40, ofMaxY: 0.5)
+        )
+    }
+}
+
+/// The calls the app makes into the page's scripts. Each finds its function by
+/// name, and is written to find nothing, without complaint, when the function
+/// is not there. So a name that is wrong here is a call that quietly does
+/// nothing, in a web view and nowhere a test without one would see.
+struct PreviewScriptCallTests {
+
+    @Test func everyCallNamesAFunctionAScriptDefines() throws {
+        let calls = [
+            PreviewScriptCall.selectionSnapshot,
+            PreviewScriptCall.selectedDisplayRanges,
+            PreviewScriptCall.selectedHTML,
+            PreviewScriptCall.scrollPosition,
+            PreviewScriptCall.applySelection("null, null, null, null, null, null"),
+            PreviewScriptCall.scrollToOffset(x: 0, y: 0),
+            PreviewScriptCall.scrollToFraction(x: 0, ofMaxY: 0)
+        ]
+        let scripts = MarkdownWebResources.Script.allCases.map(MarkdownWebResources.script)
+
+        for call in calls {
+            let name = try #require(functionName(calledBy: call), "no function named in \(call)")
+            #expect(
+                scripts.contains { $0.contains("window.markdownPreview.\(name) =") },
+                "no script defines \(name)"
+            )
+        }
+    }
+
+    @Test func applySelectionPassesItsArgumentsAsTheyAreGiven() {
+        #expect(
+            PreviewScriptCall.applySelection("0, 9, 2, 11, 30, 7")
+                == "window.markdownPreview?.applySelection?.(0, 9, 2, 11, 30, 7)"
+        )
+    }
+
+    @Test func theScrollCallsPassAcrossAndThenDown() {
+        #expect(
+            PreviewScriptCall.scrollToOffset(x: 12.5, y: 640)
+                == "window.markdownPreview?.scrollToOffset?.(12.5, 640.0);"
+        )
+        #expect(
+            PreviewScriptCall.scrollToFraction(x: 12.5, ofMaxY: 0.25)
+                == "window.markdownPreview?.scrollToFraction?.(12.5, 0.25);"
+        )
+    }
+
+    /// The name between `window.markdownPreview?.` and the `?.(` that calls it.
+    private func functionName(calledBy call: String) -> String? {
+        let prefix = "window.markdownPreview?."
+        guard call.hasPrefix(prefix) else { return nil }
+        let rest = call.dropFirst(prefix.count)
+        guard let invocation = rest.range(of: "?.(") else { return nil }
+        let name = rest[..<invocation.lowerBound]
+        return name.isEmpty ? nil : String(name)
     }
 }
