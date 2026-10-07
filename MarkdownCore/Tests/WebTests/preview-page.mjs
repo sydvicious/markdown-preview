@@ -97,3 +97,28 @@ export function setScrollGeometry(window, { x, y, pageHeight, viewportHeight }) 
 export const plain = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 
 export const tick = (milliseconds = 0) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+/// Waits until the page has said at least `count` things to the app, and then
+/// a moment more for anything else already on its way.
+///
+/// What is waited for is the report and not a length of time. A report goes
+/// out from a timer, and on a busy machine a timer can be late by more than
+/// any pause it would be reasonable to write in a test: a fixed ten
+/// milliseconds was sometimes over before the report had been sent. If the
+/// reports never come this gives up after `within` milliseconds, and the
+/// assertion that follows says what was missing.
+export async function reports(messages, count = 1, { within = 2000 } = {}) {
+  const deadline = Date.now() + within;
+  while (messages.length < count && Date.now() < deadline) {
+    await tick(1);
+  }
+  await settle();
+  return messages;
+}
+
+/// Lets everything the page has already queued have its turn.
+export async function settle() {
+  for (let turn = 0; turn < 3; turn += 1) {
+    await tick(1);
+  }
+}

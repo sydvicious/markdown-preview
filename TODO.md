@@ -143,8 +143,6 @@ This document tracks planned work for MarkdownPreviewApp.
   - To check before changing it: that the app's own scripts still work with it off — the Copy button, selection reporting and applying, the image-access button, scroll reporting and restoring. The WebKit tests build their own configuration, so they do not exercise the app's; they would need to share it, or this wants checking in the running app.
 
 ### Close the gaps the test audit found.
-  - The gaps, from reading the tests against the sources; nothing was run to find them. "No test" means the name appears nowhere in either test directory, which was checked by search. Anything said about behavior is from reading the code and is marked so.
-    - The scripts' tests have the smallest gaps: a selection whose ends are elements, not text nodes (select-all, triple-click); `preventDefault` and `stopPropagation` in the two button handlers; the `touchend` and `pointerup` listeners.
   - No UI tests. Syd is not willing to write or maintain any more of them than there already are, particularly since the Mac app is going to have a complete redesign at some point. The one exception is a specific GUI bug that has to be verified and cannot easily be reproduced by hand. In their place, working previews to play with: both need mocks and discipline, but a preview adapts as the interface changes, where GUI tests are much harder to maintain.
   - Working previews in place of tests, for `MarkdownPreviewView.swift`:
     - The image decision: one preview each for a document whose images load, are missing, and are unreadable.
