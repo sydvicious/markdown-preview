@@ -135,6 +135,77 @@ struct SearchViewModelTests {
         #expect(viewModel.hasSearchText)
     }
 
+    // MARK: - Suggestions under the two search fields
+
+    /// Two documents, with `a.md` on screen.
+    private func makeSuggestionStore() -> DocumentSessionStore {
+        makeStore([
+            ("a.md", "alphabet soup and alpine air"),
+            ("b.md", "an alpaca"),
+        ])
+    }
+
+    /// The field over a document offers words from that document, and the
+    /// field over the list offers them from every document.
+    @Test func theDocumentsSearchFieldSuggestsFromTheDocumentOnScreenOnly() {
+        let store = makeSuggestionStore()
+        let viewModel = SearchViewModel(store: store)
+
+        viewModel.setSearchText("al", origin: .passive)
+        viewModel.flushPendingSearch()
+
+        #expect(viewModel.detailSearchSuggestions == ["alphabet", "alpine"])
+        #expect(viewModel.listSearchSuggestions == ["alphabet", "alpine", "alpaca"])
+    }
+
+    @Test func theDocumentsSearchFieldSuggestsFromWhicheverDocumentIsOnScreen() throws {
+        let store = makeSuggestionStore()
+        let viewModel = SearchViewModel(store: store)
+        viewModel.setSearchText("al", origin: .passive)
+        viewModel.flushPendingSearch()
+
+        store.selectedDocumentID = try #require(store.openedDocuments.first { $0.file.fileName == "b.md" }).id
+
+        #expect(viewModel.detailSearchSuggestions == ["alpaca"])
+    }
+
+    @Test func theDocumentsSearchFieldSuggestsNothingWithNoDocumentOnScreen() {
+        let store = makeSuggestionStore()
+        let viewModel = SearchViewModel(store: store)
+        viewModel.setSearchText("al", origin: .passive)
+        viewModel.flushPendingSearch()
+
+        store.selectedDocumentID = nil
+
+        #expect(viewModel.detailSearchSuggestions.isEmpty)
+        // The list is still there to search.
+        #expect(viewModel.listSearchSuggestions == ["alphabet", "alpine", "alpaca"])
+    }
+
+    @Test func neitherFieldSuggestsAnythingForOneCharacter() {
+        let store = makeSuggestionStore()
+        let viewModel = SearchViewModel(store: store)
+
+        viewModel.setSearchText("a", origin: .passive)
+        viewModel.flushPendingSearch()
+
+        #expect(viewModel.detailSearchSuggestions.isEmpty)
+        #expect(viewModel.listSearchSuggestions.isEmpty)
+    }
+
+    @Test func clearingTheSearchClearsTheSuggestions() {
+        let store = makeSuggestionStore()
+        let viewModel = SearchViewModel(store: store)
+        viewModel.setSearchText("al", origin: .passive)
+        viewModel.flushPendingSearch()
+
+        viewModel.setSearchText("", origin: .passive)
+        viewModel.flushPendingSearch()
+
+        #expect(viewModel.detailSearchSuggestions.isEmpty)
+        #expect(viewModel.listSearchSuggestions.isEmpty)
+    }
+
     @Test func listSearchSuggestionsCompleteFromIndexedContent() {
         let store = makeStore([("doc.md", "alphabetical ordering")])
         let viewModel = SearchViewModel(store: store)
@@ -203,6 +274,51 @@ struct SearchViewModelFindPasteboardTests {
         }
 
         #expect(viewModel.searchText == "")
+    }
+
+    // MARK: - Starting a search from what the machine last searched for
+
+    /// Going to an empty search field starts it with the term on the find
+    /// buffer, the way Find does in every other app.
+    @Test func anEmptySearchIsSeededFromTheFindBuffer() {
+        let store = makeStore([("doc.md", "alpha beta alpha")])
+        let viewModel = SearchViewModel(store: store)
+
+        withFindPasteboard("alpha") {
+            viewModel.seedFromPasteboardIfEmpty()
+        }
+        viewModel.flushPendingSearch()
+
+        #expect(viewModel.searchText == "alpha")
+        #expect(viewModel.resultCount == 2)
+        // The buffer already holds it, so it is not written back there.
+        #expect(viewModel.pasteboardWriteTask == nil)
+    }
+
+    /// What the reader has typed is theirs. The buffer does not replace it.
+    @Test func aSearchAlreadyUnderWayIsNotReplacedFromTheFindBuffer() {
+        let store = makeStore([("doc.md", "alpha beta alpha")])
+        let viewModel = SearchViewModel(store: store)
+        viewModel.setSearchText("beta", origin: .passive)
+
+        withFindPasteboard("alpha") {
+            viewModel.seedFromPasteboardIfEmpty()
+        }
+
+        #expect(viewModel.searchText == "beta")
+    }
+
+    /// A field holding only spaces has nothing in it.
+    @Test func aSearchFieldHoldingOnlySpacesIsSeededFromTheFindBuffer() {
+        let store = makeStore([("doc.md", "alpha beta alpha")])
+        let viewModel = SearchViewModel(store: store)
+        viewModel.setSearchText("   ", origin: .passive)
+
+        withFindPasteboard("alpha") {
+            viewModel.seedFromPasteboardIfEmpty()
+        }
+
+        #expect(viewModel.searchText == "alpha")
     }
 
     @Test func findQueryIsAdoptedOnceAFieldIsFocused() {

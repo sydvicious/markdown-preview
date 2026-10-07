@@ -5,6 +5,7 @@
 
 ## 0.10
 
+- Tests for the words suggested under the search fields, from one document and across the list: the two-character minimum, the limit, capitals and accents, a word offered once, the word already typed not offered back, and only text the reader can see. Also for which documents each field suggests from, and for starting an empty search from the find buffer.
 - Tests for `MarkdownSearchSession`: Find Previous and its wrap at the first match, changing direction after being refused at either end, a single match, no matches, and what becomes of the reader's place when the document changes and has fewer matches, more, or none.
 - Tests for every command and capability of `MarkdownAppCommandCenter`, one at a time: each command reaches its own handler and no other, each menu item is enabled by its own flag and no other, and a reset or a later update leaves nothing of the handlers before it.
 - (iOS/iPadOS) Removing the document on screen at a compact width goes back to the list. It used to leave the document column showing with no document in it, when the removal was made from the menu or the keyboard.

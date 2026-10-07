@@ -324,6 +324,111 @@ struct MarkdownSearchSessionTests {
     }
 }
 
+/// The words offered under a search field as the reader types, from one
+/// document's text.
+struct MarkdownSearchSuggestionTests {
+
+    private static let text = "Alphabet soup: alpha, alphabetical, ALPHABET and alpine. Also algae."
+
+    private func suggestions(for prefix: String, in text: String = MarkdownSearchSuggestionTests.text, limit: Int = 5) -> [String] {
+        MarkdownSearch.suggestedCompletions(in: text, prefix: prefix, limit: limit)
+    }
+
+    /// Words that begin with what was typed, in the order the document has
+    /// them, spelled as the document spells them.
+    @Test func suggestsTheWordsThatBeginWithWhatWasTyped() {
+        #expect(suggestions(for: "alp") == ["Alphabet", "alpha", "alphabetical", "alpine"])
+        #expect(suggestions(for: "so") == ["soup"])
+        #expect(suggestions(for: "zu").isEmpty)
+    }
+
+    // MARK: - Minimum length
+
+    /// One letter begins too many words to be worth offering any.
+    @Test func suggestsNothingForFewerThanTwoCharacters() {
+        #expect(suggestions(for: "").isEmpty)
+        #expect(suggestions(for: "a").isEmpty)
+        #expect(suggestions(for: "al").isEmpty == false)
+    }
+
+    @Test func spacesAroundWhatWasTypedDoNotCount() {
+        #expect(suggestions(for: "  alp ") == suggestions(for: "alp"))
+        // One letter with spaces round it is still one letter.
+        #expect(suggestions(for: " a ").isEmpty)
+        #expect(suggestions(for: "   ").isEmpty)
+    }
+
+    // MARK: - Limit
+
+    @Test func suggestsNoMoreThanTheLimit() {
+        // Six words begin with "al": Alphabet, alpha, alphabetical, alpine,
+        // Also and algae.
+        #expect(suggestions(for: "al") == ["Alphabet", "alpha", "alphabetical", "alpine", "Also"])
+        #expect(suggestions(for: "al", limit: 2) == ["Alphabet", "alpha"])
+        #expect(suggestions(for: "al", limit: 1) == ["Alphabet"])
+        #expect(suggestions(for: "al", limit: 10) == ["Alphabet", "alpha", "alphabetical", "alpine", "Also", "algae"])
+    }
+
+    // MARK: - No repeats
+
+    /// A word the document uses twice is offered once, as it is first spelled.
+    @Test func aWordIsSuggestedOnceHoweverOftenItAppears() {
+        #expect(suggestions(for: "alphab") == ["Alphabet", "alphabetical"])
+        #expect(suggestions(for: "th", in: "the Theory, THE theory, and then the thesis") == ["the", "Theory", "then", "thesis"])
+    }
+
+    /// What was typed is already in the field, so it is not offered back.
+    @Test func theWordAlreadyTypedIsNotSuggested() {
+        #expect(suggestions(for: "alpha") == ["Alphabet", "alphabetical"])
+        #expect(suggestions(for: "ALPINE").isEmpty)
+    }
+
+    // MARK: - Folding
+
+    @Test func capitalsDoNotMatter() {
+        #expect(suggestions(for: "ALP") == suggestions(for: "alp"))
+        #expect(suggestions(for: "aLs") == ["Also"])
+    }
+
+    @Test func accentsDoNotMatter() {
+        let text = "Café society and the CAFETERIA; a naïve Zoë."
+
+        #expect(suggestions(for: "caf", in: text) == ["Café", "CAFETERIA"])
+        #expect(suggestions(for: "nai", in: text) == ["naïve"])
+        #expect(suggestions(for: "zo", in: text) == ["Zoë"])
+        // An accent that was typed matters no more than one that was not.
+        #expect(suggestions(for: "caféte", in: text) == ["CAFETERIA"])
+    }
+
+    /// "Café" is what was typed, give or take its accent, so it is not offered.
+    @Test func theWordAlreadyTypedIsNotSuggestedWhateverItsAccents() {
+        #expect(suggestions(for: "cafe", in: "Café society and the CAFETERIA") == ["CAFETERIA"])
+    }
+
+    // MARK: - What a word is
+
+    @Test func wordsEndAtAnythingThatIsNotALetterOrADigit() {
+        let text = "snake_case and well-known paths/like/this, plus version 2024 and 2025."
+
+        #expect(suggestions(for: "sn", in: text) == ["snake"])
+        #expect(suggestions(for: "ca", in: text) == ["case"])
+        #expect(suggestions(for: "kn", in: text) == ["known"])
+        #expect(suggestions(for: "li", in: text) == ["like"])
+        #expect(suggestions(for: "20", in: text) == ["2024", "2025"])
+    }
+
+    /// The reader searches what they can see, so that is what is offered: not
+    /// a link's address, nor the characters that make something a heading.
+    @Test func onlyWhatTheReaderCanSeeIsSuggested() {
+        let text = "# Beta notes\n\nSee the [beta test](https://example.com/hidden) and `betamax`."
+
+        #expect(suggestions(for: "be", in: text) == ["Beta", "betamax"])
+        #expect(suggestions(for: "ht", in: text).isEmpty)
+        #expect(suggestions(for: "ex", in: text).isEmpty)
+        #expect(suggestions(for: "hi", in: text).isEmpty)
+    }
+}
+
 /// What a search finds, one markdown feature at a time.
 ///
 /// Search runs over the document's visible text, so it should find what the
