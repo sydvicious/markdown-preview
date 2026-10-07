@@ -6,7 +6,6 @@
 import Foundation
 import Testing
 import MarkdownCore
-@testable import MarkdownPreview
 
 struct MarkdownPreviewTextOffsetMappingTests {
 

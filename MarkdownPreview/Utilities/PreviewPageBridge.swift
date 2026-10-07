@@ -1,0 +1,304 @@
+//
+// Copyright ©2026 Syd Polk. All Rights Reserved.
+// SPDX-License-Identifier: BSD-3-Clause
+//
+//  What the app and the preview's page say to each other: the calls into the
+//  page's scripts, the messages the page posts back, and the arithmetic on
+//  both. None of it needs a web view, which is why it is not in
+//  `MarkdownPreviewWebView.swift` with the view that uses it.
+//
+
+import Foundation
+import MarkdownCore
+
+/// The calls the app makes into the preview's scripts.
+///
+/// The scripts themselves are files, in the `Web` folder beside `Views`, loaded
+/// through `MarkdownWebResources` and installed as user scripts. What is left in
+/// Swift is the calling of them: each of these invokes a function a script
+/// defined on `window.markdownPreview`, and comes back with nothing, rather than
+/// throwing, on a page whose scripts have not run yet.
+enum PreviewScriptCall {
+    /// The selection as text and display ranges, falling back to the last one
+    /// that was not empty.
+    static let selectionSnapshot = "window.markdownPreview?.selectionSnapshot?.() ?? null"
+
+    /// The selection as ranges of each block's rendered text.
+    static let selectedDisplayRanges = "window.markdownPreview?.selectedDisplayRanges?.() ?? null"
+
+    /// The selection as HTML, for rich-text copy.
+    static let selectedHTML = "window.markdownPreview?.selectedHTML?.() ?? null"
+
+    /// Where the reader is, as `PreviewScrollPosition` reads it.
+    static let scrollPosition = "window.markdownPreview?.scrollPosition?.() ?? null"
+
+    /// Selects the span between two positions, each a block's source offsets
+    /// and an offset into its rendered text. Six nulls clear the selection.
+    static func applySelection(_ arguments: String) -> String {
+        "window.markdownPreview?.applySelection?.(\(arguments))"
+    }
+
+    static func scrollToOffset(x: Double, y: Double) -> String {
+        "window.markdownPreview?.scrollToOffset?.(\(x), \(y));"
+    }
+
+    static func scrollToFraction(x: Double, ofMaxY fraction: Double) -> String {
+        "window.markdownPreview?.scrollToFraction?.(\(x), \(fraction));"
+    }
+}
+
+struct PreviewDisplaySelectionRange: Equatable {
+    var blockStart: Int
+    var blockEnd: Int
+    var displayLocation: Int
+    var displayLength: Int
+}
+
+struct PreviewCopyBlockMessage: Equatable {
+    var start: Int
+    var end: Int
+    /// What kind of block the range covers, so the handler can strip syntax that
+    /// is decoration rather than content. Nil when the page predates the
+    /// attribute or the value is unrecognized; the raw source is copied then.
+    var kind: MarkdownCopyableBlockKind?
+
+    init(start: Int, end: Int, kind: MarkdownCopyableBlockKind? = nil) {
+        self.start = start
+        self.end = end
+        self.kind = kind
+    }
+
+    init?(messageBody: Any) {
+        guard let payload = messageBody as? [String: Any],
+              let start = payload["start"] as? NSNumber,
+              let end = payload["end"] as? NSNumber else {
+            return nil
+        }
+
+        let startValue = start.intValue
+        let endValue = end.intValue
+        guard startValue >= 0, endValue > startValue else { return nil }
+
+        self.start = startValue
+        self.end = endValue
+        self.kind = (payload["kind"] as? String).flatMap(MarkdownCopyableBlockKind.init(rawValue:))
+    }
+}
+
+/// Where the reader is in the preview, as the page reports it.
+struct PreviewScrollPosition: Equatable {
+    var x: Double
+    var y: Double
+    /// How far down the page can scroll. Zero when the whole page fits.
+    var maxY: Double
+
+    init(x: Double, y: Double, maxY: Double) {
+        self.x = x
+        self.y = y
+        self.maxY = maxY
+    }
+
+    /// Reads the `[x, y, maxY]` the page posts. Rubber-banding reports offsets
+    /// past either end of the page, which are not places, so they are clamped.
+    init?(messageBody: Any) {
+        guard let values = (messageBody as? [NSNumber])?.map(\.doubleValue),
+              values.count == 3,
+              values.allSatisfy(\.isFinite) else {
+            return nil
+        }
+
+        let maxY = max(0, values[2])
+        self.x = max(0, values[0])
+        self.y = min(max(0, values[1]), maxY)
+        self.maxY = maxY
+    }
+}
+
+/// Keeps the reader's place when the preview reloads.
+///
+/// The preview reloads the whole page whenever its HTML changes, and a reload
+/// starts at the top. When the change is to the document already on screen — it
+/// was edited on disk, the text size changed, a folder was granted for its
+/// images — the reader should be left where they were. Reading a long plan
+/// while it is being edited is the case that matters most.
+enum PreviewScrollRestoration {
+    /// What the preview is showing: which document, and its text.
+    struct Content: Equatable {
+        var documentID: String?
+        var source: String
+    }
+
+    /// Where a freshly loaded page should be scrolled to.
+    enum Restoration: Equatable {
+        /// Leave it where a load puts it.
+        case top
+        /// The same distance down the page as before.
+        case offset(x: Double, y: Double)
+        /// The same way down the page as before, as a share of how far it scrolls.
+        case fraction(x: Double, ofMaxY: Double)
+
+        /// The script that carries it out, or nil when there is nothing to do.
+        var script: String? {
+            switch self {
+            case .top:
+                return nil
+            case let .offset(x, y):
+                return PreviewScriptCall.scrollToOffset(x: x, y: y)
+            case let .fraction(x, fraction):
+                return PreviewScriptCall.scrollToFraction(x: x, ofMaxY: fraction)
+            }
+        }
+    }
+
+    /// Where to put the reader once `current` has replaced `previous`, given
+    /// where they were.
+    ///
+    /// Only a reload of the same document keeps the place; anything else is a
+    /// different page and starts at the top. If the text changed, the offset is
+    /// kept, which stays true for everything above the edit. If the text is the
+    /// same and only its drawing changed, the height did, so the same offset
+    /// would land somewhere else and the proportion is kept instead.
+    static func restoration(
+        of position: PreviewScrollPosition?,
+        from previous: Content?,
+        to current: Content
+    ) -> Restoration {
+        guard let position,
+              let documentID = current.documentID,
+              previous?.documentID == documentID else {
+            return .top
+        }
+        guard position.x > 0 || position.y > 0 else { return .top }
+
+        if previous?.source == current.source, position.maxY > 0 {
+            return .fraction(x: position.x, ofMaxY: position.y / position.maxY)
+        }
+        return .offset(x: position.x, y: position.y)
+    }
+}
+
+struct PreviewSelectionChangedMessage {
+    var selectedText: String?
+    var displayRangeResult: Any?
+
+    init(messageBody: Any) {
+        let payload = messageBody as? [String: Any]
+        let selectedText = (payload?["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.selectedText = selectedText?.isEmpty == false ? selectedText : nil
+        displayRangeResult = payload?["ranges"]
+    }
+}
+
+enum PreviewSelectionBridge {
+    /// The preview's current selection as a single source range, or none.
+    ///
+    /// A selection is a source text offset and a length — one contiguous span
+    /// that both views know how to render. The preview reports its DOM selection
+    /// as one range per visible run of text, which is a rendering detail, so it
+    /// is collapsed here rather than leaking into the selection model.
+    static func contiguousSelectionRanges(
+        fromDisplayRangeResult result: Any?,
+        source: String
+    ) -> [MarkdownSelectionRange] {
+        enclosingRange(of: sourceRanges(fromDisplayRangeResult: result, source: source))
+            .map { [$0] } ?? []
+    }
+
+    /// The single source range spanning `ranges`, from the earliest start to the
+    /// latest end.
+    ///
+    /// A DOM selection is contiguous, but it maps back to one source range per
+    /// visible run of text — the markdown syntax between them falls in the gaps.
+    /// Stitching those pieces together produced plain text with every `#`, link
+    /// target and blank line missing. Spanning them instead yields the raw
+    /// markdown the user actually swept over.
+    static func enclosingRange(of ranges: [MarkdownSelectionRange]) -> MarkdownSelectionRange? {
+        guard let start = ranges.map(\.location).min(),
+              let end = ranges.map({ $0.location + $0.length }).max(),
+              end > start else {
+            return nil
+        }
+        return MarkdownSelectionRange(location: start, length: end - start)
+    }
+
+    /// Whether an incoming selection is the echo of one the preview itself just
+    /// reported, and so should not be pushed back into the web view.
+    ///
+    /// The stored range must actually exist for this to be an echo. Comparing
+    /// the two optionals directly made `nil == nil` report "echo", so every
+    /// transition to *no selection* was suppressed and the web view kept its old
+    /// highlight — visible when a search match stopped matching as the user
+    /// typed another character, and the stale match stayed highlighted.
+    static func isEcho(
+        ofPreviewOriginated previewOriginatedRange: MarkdownSelectionRange?,
+        incoming selectedRange: MarkdownSelectionRange?
+    ) -> Bool {
+        guard let previewOriginatedRange else { return false }
+        return previewOriginatedRange == selectedRange
+    }
+
+    static func sourceRanges(fromDisplayRangeResult result: Any?, source: String) -> [MarkdownSelectionRange] {
+        let displayRanges = displayRanges(from: result)
+        guard !displayRanges.isEmpty else { return [] }
+
+        let nsSource = source as NSString
+        let sourceLength = nsSource.length
+        // Each block is read on its own, but a reference in it is a link only
+        // by a definition elsewhere in the document.
+        let definitions = MarkdownLinkDefinitions(source: source)
+        return displayRanges.compactMap { displayRange -> MarkdownSelectionRange? in
+            guard displayRange.blockStart >= 0,
+                  displayRange.blockEnd <= sourceLength,
+                  displayRange.blockEnd > displayRange.blockStart else {
+                return nil
+            }
+
+            let blockRange = NSRange(
+                location: displayRange.blockStart,
+                length: displayRange.blockEnd - displayRange.blockStart
+            )
+            let blockSource = nsSource.substring(with: blockRange)
+            let mapping = MarkdownPreviewTextOffsetMapping(sourceText: blockSource, definitions: definitions)
+            let localDisplayRange = MarkdownSelectionRange(
+                location: displayRange.displayLocation,
+                length: displayRange.displayLength
+            )
+            guard let localSourceRange = mapping.sourceRange(forDisplayRange: localDisplayRange),
+                  localSourceRange.length > 0 else {
+                return nil
+            }
+
+            return MarkdownSelectionRange(
+                location: displayRange.blockStart + localSourceRange.location,
+                length: localSourceRange.length
+            )
+        }
+    }
+
+    static func displayRanges(from result: Any?) -> [PreviewDisplaySelectionRange] {
+        guard let dictionaries = result as? [[String: Any]] else { return [] }
+        return dictionaries.compactMap { dictionary -> PreviewDisplaySelectionRange? in
+            guard let blockStart = dictionary["blockStart"] as? NSNumber,
+                  let blockEnd = dictionary["blockEnd"] as? NSNumber,
+                  let displayLocation = dictionary["displayLocation"] as? NSNumber,
+                  let displayLength = dictionary["displayLength"] as? NSNumber else {
+                return nil
+            }
+            let blockStartValue = blockStart.intValue
+            let blockEndValue = blockEnd.intValue
+            let displayLocationValue = displayLocation.intValue
+            let displayLengthValue = displayLength.intValue
+            guard blockEndValue > blockStartValue,
+                  displayLocationValue >= 0,
+                  displayLengthValue > 0 else {
+                return nil
+            }
+            return PreviewDisplaySelectionRange(
+                blockStart: blockStartValue,
+                blockEnd: blockEndValue,
+                displayLocation: displayLocationValue,
+                displayLength: displayLengthValue
+            )
+        }
+    }
+}

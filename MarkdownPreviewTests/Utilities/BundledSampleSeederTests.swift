@@ -5,7 +5,6 @@
 
 import Foundation
 import Testing
-@testable import MarkdownPreview
 
 struct BundledSampleSeederTests {
 

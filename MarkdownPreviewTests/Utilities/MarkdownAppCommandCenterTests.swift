@@ -4,7 +4,6 @@
 //
 
 import Testing
-@testable import MarkdownPreview
 
 @MainActor
 struct MarkdownAppCommandCenterTests {

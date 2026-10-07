@@ -148,17 +148,15 @@ This document tracks planned work for MarkdownPreviewApp.
     - The image decision: one preview each for a document whose images load, are missing, and are unreadable.
     - `PreviewSelectionSynchronizer`: a preview showing the preview and the source together, to select in by hand.
   - Markdown features with nothing to assert yet, to cover when they exist: a line break inside a table cell (there is no way to write one until `<br>` is supported), strikethrough, and bare-URL autolinks.
+  - Audit three files against the suites that cover them, and write the tests that are missing:
+    - `PreviewPageBridge.swift`, against `MarkdownPreviewWebViewTests` and `PreviewScrollRestorationTests`.
+    - `SourceSelectionUpdate.swift`, against `SelectableSourceTextViewTests`.
+    - `FileOpenState.swift`, against `FileOpenStateTests`.
   - Land any future suite complete and runnable even where it exposes bugs. Do not gate landing the tests on fixing what they find, and do not delete or weaken a test to make the suite green.
     - A release, and a feature called complete, have no failing tests. While work is under way an intermediate commit may have them, and a failure that goes on for a while is converted to an expected failure. A test that shows a known bug, or a feature left unbuilt on purpose, is marked an expected failure (`withKnownIssue`): it does not fail the run, and it does fail the run once it starts passing, which is the signal to take the marking off.
     - A test that fails while the code is behaving correctly is not a valid test; change or remove it.
     - Updating a test because the intended behavior changed is a different thing and is expected. What is not allowed is softening an assertion to hide a defect.
     - File each exposed bug as its own entry under "Bugs" so the failing test and the bug are linked.
-
-### Run the tests from the command line, without launching the app.
-  - A command-line test binary that exercises the test suite, so the GUI app does not launch to run it.
-  - It makes a clean break between the GUI tests and the rest.
-  - It gives confidence that the model and the views are separate.
-  - Where things stand: `MarkdownCore` runs with `swift test`. `MarkdownPreviewTests` is hosted by the app (`TEST_HOST`), so every run of it launches the app, for the stores, view models and utilities as much as for the views.
 
 ### Test everything before a release.
   - Before a release ships, run every suite with `xcodebuild`, the tests that use the window server included.

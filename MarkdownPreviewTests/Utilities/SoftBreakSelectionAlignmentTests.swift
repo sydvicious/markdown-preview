@@ -6,7 +6,6 @@
 import Foundation
 import Testing
 import MarkdownCore
-@testable import MarkdownPreview
 
 /// Find and selection depend on two independent mappings agreeing about the
 /// document's visible text: `MarkdownPreviewTextOffsetMapping` walks the

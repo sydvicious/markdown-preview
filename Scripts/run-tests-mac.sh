@@ -12,14 +12,15 @@
 #   app       MarkdownPreviewTests, the app's stores, view models and
 #             utilities, with `xcodebuild`.
 #
-# The engine and scripts suites launch nothing. The app suite is hosted by
-# MarkdownPreview, so the app is launched to run it, but nothing in the suite
-# uses the window server. No simulator is started.
+# **Nothing here launches MarkdownPreview**, a simulator, or anything with a
+# window. The app suite's bundle has no host: it compiles the app's stores,
+# view models and utilities into itself, and is run by Xcode's `xctest`.
 #
 # **MarkdownPreviewWindowServerTests is not run here.** Those are the tests
-# that do use it: pages loaded in WebKit, and the pasteboards. Run them, with
-# everything above except the scripts suite, in Xcode: the MarkdownPreview
-# scheme, Product > Test (Cmd-U). Or from the command line:
+# that do use it: pages loaded in WebKit, and the pasteboards. The app is
+# launched to host them. Run them, with everything above except the scripts
+# suite, in Xcode: the MarkdownPreview scheme, Product > Test (Cmd-U). Or from
+# the command line:
 #
 #   xcodebuild test -project MarkdownPreview.xcodeproj -scheme MarkdownPreview \
 #       -destination "platform=macOS,arch=arm64"
@@ -27,8 +28,7 @@
 # and for those tests alone, add -only-testing:MarkdownPreviewWindowServerTests.
 #
 # **The app suite is built unsigned**, so this runs on a Mac that has no
-# signing certificate. The app is therefore not sandboxed while its tests run,
-# which it is under Cmd-U.
+# signing certificate.
 #
 # **Apple silicon only.** Nothing here is built or run for x86_64: this is the
 # run made while developing. The release is still built for both, and its
@@ -61,8 +61,8 @@ SUITES
   engine     swift test, in MarkdownCore: MarkdownCoreTests and
              MarkdownCoreConformanceTests.
   scripts    npm test: MarkdownCore/Tests/WebTests, under Node.
-  app        xcodebuild: MarkdownPreviewTests. MarkdownPreview is launched to
-             host it. Built unsigned, so the app is not sandboxed.
+  app        xcodebuild: MarkdownPreviewTests, the app's stores, view models
+             and utilities. The app is built, unsigned, and not launched.
 
   With none named, all three.
 
@@ -90,8 +90,9 @@ RESULT
 
 NOT RUN HERE
   MarkdownPreviewWindowServerTests: the tests that use the window server or a
-  pasteboard. In Xcode, the MarkdownPreview scheme and Product > Test (Cmd-U)
-  runs them with the app's and the engine's. From the command line:
+  pasteboard, which the app is launched to host. In Xcode, the MarkdownPreview
+  scheme and Product > Test (Cmd-U) runs them with the app's and the engine's.
+  From the command line:
 
     xcodebuild test -project MarkdownPreview.xcodeproj -scheme MarkdownPreview \
         -destination "platform=macOS,arch=arm64"

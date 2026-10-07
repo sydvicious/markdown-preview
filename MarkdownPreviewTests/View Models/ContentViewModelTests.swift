@@ -7,7 +7,6 @@ import Foundation
 import SwiftUI
 import Testing
 import MarkdownCore
-@testable import MarkdownPreview
 
 @MainActor
 struct ContentViewModelTests {

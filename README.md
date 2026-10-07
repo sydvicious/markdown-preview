@@ -173,14 +173,18 @@ swift test --package-path MarkdownCore
   `TODO.md`, until it does.
 
 - `MarkdownPreviewTests`: tests for the app layer (view models, file state, selection handling).
-  None of them uses the window server itself, but they need the app target, which is launched
-  to host them.
+  None of them uses the window server, and the app is not launched to run them: the test bundle
+  compiles the app's `Utilities` and `View Models` folders into itself, and has no host. A file
+  in either folder that needs something from `Views` will not compile there, so anything a view
+  shares with a test lives in one of those two folders. A new file in `Views` has to be taken out
+  of the `MarkdownPreviewTests` target by hand.
 
 - `MarkdownPreviewWindowServerTests`: the tests that do use the window server, or a pasteboard.
   It checks find and selection one markdown feature at a time, loading the real page and scripts
   in WebKit, without a window, and carrying a selection from the source to the page and back;
-  and it checks what a copy puts on the pasteboard, and the Mac's find pasteboard. It needs the
-  app target too. The scheme's test plan runs both of these, and the two engine suites as well:
+  and it checks what a copy puts on the pasteboard, and the Mac's find pasteboard. The app is
+  launched to host these. The scheme's test plan runs both of these, and the two engine suites
+  as well:
 
 ```bash
 xcodebuild test -project MarkdownPreview.xcodeproj -scheme MarkdownPreview -destination 'platform=macOS,arch=arm64'
@@ -202,8 +206,8 @@ npm test
 ```
 
 `Scripts/run-tests-mac.sh` runs the suites that do not use the window server: the two engine
-suites, the scripts', and `MarkdownPreviewTests`. The app is launched to host the last of those,
-built unsigned. `MarkdownPreviewWindowServerTests` is left to Xcode or `xcodebuild test`. It ends
+suites, the scripts', and `MarkdownPreviewTests`, and launches nothing with a window.
+`MarkdownPreviewWindowServerTests` is left to Xcode or `xcodebuild test`. It ends
 with a count, for each suite, of the tests that passed, failed, failed as expected, and were
 expected to fail and passed. `--help` says the rest.
 

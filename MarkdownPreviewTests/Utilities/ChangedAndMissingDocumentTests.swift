@@ -7,7 +7,6 @@ import Foundation
 import SwiftUI
 import Testing
 import MarkdownCore
-@testable import MarkdownPreview
 
 /// Documents whose files change, or go away, while they are in the list.
 ///

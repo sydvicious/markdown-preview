@@ -5,7 +5,6 @@
 
 import Foundation
 import Testing
-@testable import MarkdownPreview
 
 /// The folders the user has granted, across launches.
 ///

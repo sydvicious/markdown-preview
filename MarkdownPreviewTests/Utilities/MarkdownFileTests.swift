@@ -6,7 +6,6 @@
 import Foundation
 import Testing
 import UniformTypeIdentifiers
-@testable import MarkdownPreview
 
 /// What `MarkdownFile.load` makes of the bytes in a file.
 ///

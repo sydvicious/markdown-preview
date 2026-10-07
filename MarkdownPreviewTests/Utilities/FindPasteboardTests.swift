@@ -4,7 +4,6 @@
 //
 
 import Testing
-@testable import MarkdownPreview
 
 /// The find buffer held in memory: the one iOS and iPadOS search through,
 /// having no system-wide one, and the one a test gives a view model so that it

@@ -6,7 +6,6 @@
 import Foundation
 import Testing
 import MarkdownCore
-@testable import MarkdownPreview
 
 /// A document that is moved or renamed while it is in the list.
 ///

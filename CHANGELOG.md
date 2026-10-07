@@ -5,6 +5,7 @@
 
 ## 0.10
 
+- Tests: the app is no longer launched to run `MarkdownPreviewTests`. The test bundle has no host, and compiles the app's `Utilities` and `View Models` folders into itself. What those tests need that was in a view's file now has a file of its own in `Utilities`: `PreviewPageBridge.swift` for what the app and the preview's page say to each other, `SourceSelectionUpdate.swift`, and `FileOpenState.swift`. `MarkdownPreviewWindowServerTests` is still hosted by the app.
 - `Scripts/run-tests-mac.sh` runs the tests that do not use the window server: the engine's with `swift test`, the preview scripts' with `npm test`, and `MarkdownPreviewTests` with `xcodebuild`, built unsigned and for Apple silicon only. It ends with a count for each suite of the tests that passed, failed, failed as expected, and were expected to fail and passed, and its exit status says whether all of them passed.
 - Tests: the ones that use the window server or a pasteboard are in a target of their own, `MarkdownPreviewWindowServerTests`: the WebKit tests, the image handler's, what a copy puts on the pasteboard, and the Mac's find pasteboard. Cmd-U runs it with the rest. `MarkdownFeature`, which both targets go through, is in `MarkdownPreviewTestSupport`.
 - Tests: `SearchViewModel` and `ContentViewModel` are given their find pasteboard when they are made, and their tests give them one held in memory. Twenty-three of those tests used to read the machine's find pasteboard or write to it, so what they saw depended on what had last been searched for on the machine.

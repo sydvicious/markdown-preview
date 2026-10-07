@@ -24,16 +24,10 @@
 		62A96B24300D649800BA1DE1 /* MarkdownCore in Frameworks */ = {isa = PBXBuildFile; productRef = 62F31E7A300D4540005D7305 /* MarkdownCore */; };
 		62AA0001000000000000B001 /* SAMPLE.md in Resources */ = {isa = PBXBuildFile; fileRef = 62AA0001000000000000A001 /* SAMPLE.md */; };
 		62AA0001000000000000B002 /* lilsyd.JPG in Resources */ = {isa = PBXBuildFile; fileRef = 62AA0001000000000000A002 /* lilsyd.JPG */; };
+		62BB0003000000000000D00F /* MarkdownCore in Frameworks */ = {isa = PBXBuildFile; productRef = 62BB0003000000000000D00E /* MarkdownCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		62584B022D45FB5000831420 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 62584AE92D45FB4E00831420 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 62584AF02D45FB4E00831420;
-			remoteInfo = MarkdownPreview;
-		};
 		62BB0003000000000000D006 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 62584AE92D45FB4E00831420 /* Project object */;
@@ -68,6 +62,26 @@
 			);
 			target = 62584AF02D45FB4E00831420 /* MarkdownPreview */;
 		};
+		62BB0003000000000000D00D /* Exceptions for "MarkdownPreview" folder in "MarkdownPreviewTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Assets.xcassets,
+				MarkdownPreviewApp.swift,
+				"Preview Content/MarkdownPreviewFixtures.swift",
+				"Preview Content/Preview Assets.xcassets",
+				PrivacyInfo.xcprivacy,
+				Views/ContentView.swift,
+				Views/DetailPreviewPane.swift,
+				Views/MarkdownDocumentPicker.swift,
+				Views/MarkdownImageSchemeHandler.swift,
+				Views/MarkdownPreviewView.swift,
+				Views/MarkdownPreviewWebView.swift,
+				Views/MarkdownSourceView.swift,
+				Views/SelectableSourceTextView.swift,
+				Web,
+			);
+			target = 62584B002D45FB5000831420 /* MarkdownPreviewTests */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -75,6 +89,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				62C74B2030734B9B00CA784C /* Exceptions for "MarkdownPreview" folder in "MarkdownPreview" target */,
+				62BB0003000000000000D00D /* Exceptions for "MarkdownPreview" folder in "MarkdownPreviewTests" target */,
 			);
 			explicitFolders = (
 				Web,
@@ -112,6 +127,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				62BB0003000000000000D00F /* MarkdownCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -211,14 +227,15 @@
 			buildRules = (
 			);
 			dependencies = (
-				62584B032D45FB5000831420 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
+				62584AF32D45FB4E00831420 /* MarkdownPreview */,
 				62584B042D45FB5000831420 /* MarkdownPreviewTests */,
 				62BB0003000000000000D00C /* MarkdownPreviewTestSupport */,
 			);
 			name = MarkdownPreviewTests;
 			packageProductDependencies = (
+				62BB0003000000000000D00E /* MarkdownCore */,
 			);
 			productName = MarkdownPreviewTests;
 			productReference = 62584B012D45FB5000831420 /* MarkdownPreviewTests.xctest */;
@@ -263,7 +280,6 @@
 					};
 					62584B002D45FB5000831420 = {
 						CreatedOnToolsVersion = 16.2;
-						TestTargetID = 62584AF02D45FB4E00831420;
 					};
 					62BB0003000000000000D001 = {
 						CreatedOnToolsVersion = 27.0;
@@ -369,11 +385,6 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		62584B032D45FB5000831420 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 62584AF02D45FB4E00831420 /* MarkdownPreview */;
-			targetProxy = 62584B022D45FB5000831420 /* PBXContainerItemProxy */;
-		};
 		62A96A6D300D61CC00BA1DE1 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			productRef = 62A96A6C300D61CC00BA1DE1 /* MarkdownCore */;
@@ -613,7 +624,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 6242B0012FF2A00100C0D001 /* Version.xcconfig */;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -624,7 +634,6 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MarkdownPreview.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MarkdownPreview";
 			};
 			name = Debug;
 		};
@@ -632,7 +641,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 6242B0012FF2A00100C0D001 /* Version.xcconfig */;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -643,7 +651,6 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MarkdownPreview.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MarkdownPreview";
 			};
 			name = Release;
 		};
@@ -761,6 +768,10 @@
 			productName = MarkdownCore;
 		};
 		62F31E7A300D4540005D7305 /* MarkdownCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MarkdownCore;
+		};
+		62BB0003000000000000D00E /* MarkdownCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MarkdownCore;
 		};
