@@ -16,6 +16,9 @@ window.markdownPreview.applySelection = (
   if (selection) {
     selection.removeAllRanges();
   }
+  // What the app last selected here, so that the page can say of a selection
+  // whether it is that or one the reader has made since.
+  window.markdownPreview.appliedRange = null;
 
   const args = [startBlockStart, startBlockEnd, startOffset, endBlockStart, endBlockEnd, endOffset];
   if (!args.every((value) => Number.isFinite(value))) {
@@ -62,10 +65,14 @@ window.markdownPreview.applySelection = (
     return false;
   }
   selection?.addRange(range);
+  window.markdownPreview.appliedRange = range.cloneRange();
 
   const boundingRect = range.getBoundingClientRect();
   if (boundingRect) {
     const top = boundingRect.top + window.scrollY - (window.innerHeight / 2) + (boundingRect.height / 2);
+    // The app's doing, which the page's scrolling script is told, so that
+    // the source pane is not sent after it as if the reader had gone there.
+    window.markdownPreview?.noteAppScroll?.(Math.max(top, 0));
     window.scrollTo({ top: Math.max(top, 0), behavior: 'auto' });
   }
 

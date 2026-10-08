@@ -13,6 +13,9 @@ struct MarkdownSourceView: View {
     /// there. Without them it opens at the top and says nothing.
     var documentID: String? = nil
     var scrollMemory: PreviewScrollMemory? = nil
+    /// Whether the reader can see the pane, or it is waiting behind the
+    /// preview with its text as they left it.
+    var isShowing: Bool = true
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
     var onSearchSelection: (String) -> Void = { _ in }
@@ -22,6 +25,7 @@ struct MarkdownSourceView: View {
             text: contents,
             documentID: documentID,
             scrollMemory: scrollMemory,
+            isShowing: isShowing,
             textSize: textSize,
             selections: $selections,
             onSearchSelection: onSearchSelection

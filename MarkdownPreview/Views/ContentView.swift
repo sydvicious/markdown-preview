@@ -23,6 +23,18 @@ struct ContentView: View {
     @State private var pendingSearchFocusTask: Task<Void, Never>?
     @StateObject private var viewModel: ContentViewModel
     @StateObject private var previewSelectionSynchronizer = PreviewSelectionSynchronizer()
+    /// What builds each document's page and keeps it, for every document that
+    /// has been shown in Preview, by the name each keeps for as long as it is
+    /// listed. Each of those documents has a preview pane of its own from then
+    /// on. The renderers are the window's, so that the pages outlast panes
+    /// that are taken down for the list where the list and the document take
+    /// turns. Held and not watched: it is a preview that redraws when its page
+    /// is ready, not the whole window.
+    @State private var previewRenderers: [UUID: MarkdownPreviewView.Renderer] = [:]
+    /// The documents that have been shown in Source, by the name each keeps
+    /// for as long as it is listed. Each has a source pane of its own from
+    /// then on.
+    @State private var documentsShownInSource: Set<UUID> = []
     @FocusState private var focusedSearchField: SearchField?
 
     init(
@@ -448,12 +460,15 @@ struct ContentView: View {
                         .padding(.bottom, 8)
                 }
 
-                Group {
-                    if viewModel.detailMode == .preview {
-                        previewPanel
-                    } else {
-                        sourcePanel
-                    }
+                // Every document that has been shown keeps both of its
+                // panes, and all but the one being read are out of sight and
+                // out of reach. A pane taken down would be made again on the
+                // way back: a preview's page loaded again, and a source's
+                // text laid out again and put back somewhere near where the
+                // reader was.
+                ZStack {
+                    previewPanel
+                    sourcePanel
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
@@ -483,13 +498,28 @@ struct ContentView: View {
     }
     #endif
 
+    /// A source pane for each document that has been shown in Source, one on
+    /// top of another, and only the one for the document on screen to be seen
+    /// or reached.
+    ///
+    /// One pane handed each document's text in turn has to be put back where
+    /// the reader was every time they come back to a document, and where a
+    /// line is far down a long text is something the text view can only
+    /// estimate until it has laid out everything above it. A pane that keeps
+    /// its document is where it was left, exactly. A document gets its pane
+    /// the first time it is shown in Source, and not before.
     private var sourcePanel: some View {
-        Group {
-            if let document = store.currentDocument {
+        ZStack {
+            ForEach(
+                store.openedDocuments.filter { documentsShownInSource.contains($0.stableID) },
+                id: \.stableID
+            ) { document in
+                let isShowing = !isShowingPreview && document.id == store.selectedDocumentID
                 MarkdownSourceView(
                     contents: document.file.contents,
                     documentID: document.stableID.uuidString,
                     scrollMemory: store.previewScrollMemory,
+                    isShowing: isShowing,
                     textSize: store.textSize(for: document.id),
                     selections: Binding(
                         get: { store.selections(for: document.id) },
@@ -497,32 +527,79 @@ struct ContentView: View {
                     ),
                     onSearchSelection: searchForSelection
                 )
+                .opacity(isShowing ? 1 : 0)
+                .allowsHitTesting(isShowing)
+                .accessibilityHidden(!isShowing)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: documentShowingInSource, initial: true) { _, shown in
+            if let shown {
+                documentsShownInSource.insert(shown)
             }
         }
     }
 
+    /// The document on screen in Source, if Source is what is showing.
+    private var documentShowingInSource: UUID? {
+        isShowingPreview ? nil : store.currentDocument?.stableID
+    }
+
+    /// A preview pane for each document that has been shown in Preview, one on
+    /// top of another, and only the one for the document on screen to be seen
+    /// or reached. Each keeps its page loaded and where the reader left it. A
+    /// document gets its pane the first time it is shown in Preview, and not
+    /// before.
     private var previewPanel: some View {
-        Group {
-            if let document = store.currentDocument {
-                MarkdownPreviewView(
-                    source: document.file.contents,
-                    baseURL: document.file.url.deletingLastPathComponent(),
-                    documentID: document.stableID.uuidString,
-                    textSize: store.textSize(for: document.id),
-                    selections: Binding(
-                        get: { store.selections(for: document.id) },
-                        set: { store.setSelections($0, for: document.id, text: document.file.contents) }
-                    ),
-                    selectionSynchronizer: previewSelectionSynchronizer,
-                    scrollMemory: store.previewScrollMemory,
-                    onSelectedTextChange: { previewSelectedText = $0 },
-                    onSelectedRangesChange: { ranges in
-                        store.setSelections(ranges, for: document.id, text: document.file.contents)
-                    },
-                    onSearchSelection: searchForSelection
-                )
+        ZStack {
+            ForEach(
+                store.openedDocuments.filter { previewRenderers[$0.stableID] != nil },
+                id: \.stableID
+            ) { document in
+                if let renderer = previewRenderers[document.stableID] {
+                    let isShowing = isShowingPreview && document.id == store.selectedDocumentID
+                    MarkdownPreviewView(
+                        source: document.file.contents,
+                        baseURL: document.file.url.deletingLastPathComponent(),
+                        documentID: document.stableID.uuidString,
+                        textSize: store.textSize(for: document.id),
+                        selections: Binding(
+                            get: { store.selections(for: document.id) },
+                            set: { store.setSelections($0, for: document.id, text: document.file.contents) }
+                        ),
+                        // The one in front is the one whose selection is asked
+                        // for before a switch to Source.
+                        selectionSynchronizer: isShowing ? previewSelectionSynchronizer : nil,
+                        scrollMemory: store.previewScrollMemory,
+                        renderer: renderer,
+                        isShowing: isShowing,
+                        onSelectedTextChange: { previewSelectedText = $0 },
+                        onSelectedRangesChange: { ranges in
+                            store.setSelections(ranges, for: document.id, text: document.file.contents)
+                        },
+                        onSearchSelection: searchForSelection
+                    )
+                    .opacity(isShowing ? 1 : 0)
+                    .allowsHitTesting(isShowing)
+                    .accessibilityHidden(!isShowing)
+                }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: documentShowingInPreview, initial: true) { _, shown in
+            if let shown, previewRenderers[shown] == nil {
+                previewRenderers[shown] = MarkdownPreviewView.makeRenderer()
+            }
+        }
+    }
+
+    /// The document on screen in Preview, if Preview is what is showing.
+    private var documentShowingInPreview: UUID? {
+        isShowingPreview ? store.currentDocument?.stableID : nil
+    }
+
+    private var isShowingPreview: Bool {
+        viewModel.detailMode == .preview
     }
 
     private var detailModePicker: some View {

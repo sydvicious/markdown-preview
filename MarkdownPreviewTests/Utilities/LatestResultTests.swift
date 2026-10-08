@@ -329,6 +329,70 @@ struct LatestResultTests {
         #expect(latest.current?.result == "<p>plan</p>")
     }
 
+    // MARK: - Everything kept, and one result for each thing
+
+    /// Two requests are for the same thing when they begin with the same word:
+    /// "plan" as it was, and "plan" after an edit.
+    private static func isForTheSameThing(_ newer: String, _ older: String) -> Bool {
+        newer.split(separator: " ").first == older.split(separator: " ").first
+    }
+
+    private func makeLatestKeepingEverything(_ held: Held) -> Latest {
+        Latest(keeping: nil, replacing: Self.isForTheSameThing, work: held.work, patience: held.patience)
+    }
+
+    @Test func withNoLimitEveryResultIsKept() async {
+        let held = Held()
+        defer { held.letGo() }
+        let latest = Latest(keeping: nil, work: held.work, patience: held.patience)
+        let requests = (1...12).map { "document \($0)" }
+        await show(requests, in: latest, held: held)
+
+        for request in requests {
+            await answeredAtOnce(request, by: latest, held: held)
+            #expect(latest.current?.request == request)
+        }
+        #expect(held.started == requests)
+    }
+
+    /// A document that has changed is built again, and the page of how it was
+    /// is nothing anyone will ask for again.
+    @Test func aResultForTheSameThingReplacesTheOneBefore() async {
+        let held = Held()
+        defer { held.letGo() }
+        let latest = makeLatestKeepingEverything(held)
+        await show(["plan as-it-was", "notes", "plan edited"], in: latest, held: held)
+
+        // The edited plan and the notes are kept.
+        await answeredAtOnce("notes", by: latest, held: held)
+        await answeredAtOnce("plan edited", by: latest, held: held)
+        #expect(held.started.count == 3)
+
+        // The plan as it was has gone, and is worked out again if asked for.
+        _ = await ask("plan as-it-was", of: latest, held: held, startingWork: 4)
+        #expect(held.started.last == "plan as-it-was")
+    }
+
+    /// The older of two requests for the same thing finishes last. It is not
+    /// what is wanted, and does not put out the one that is.
+    @Test func aResultOvertakenByALaterOneForTheSameThingDoesNotReplaceIt() async {
+        let held = Held()
+        defer { held.letGo() }
+        let latest = makeLatestKeepingEverything(held)
+        let first = await ask("plan as-it-was", of: latest, held: held, startingWork: 1)
+        let second = await ask("plan edited", of: latest, held: held, startingWork: 2)
+        held.finish("plan edited", with: "<p>plan edited</p>")
+        await second.value
+
+        held.finish("plan as-it-was", with: "<p>plan as-it-was</p>")
+        await first.value
+
+        #expect(latest.current?.request == "plan edited")
+        await show(["notes"], in: latest, held: held)
+        await answeredAtOnce("plan edited", by: latest, held: held)
+        #expect(held.started == ["plan as-it-was", "plan edited", "notes"])
+    }
+
     // MARK: - Taking long
 
     @Test func aRequestStillUnderWayWhenTheWaitEndsIsTakingLong() async {

@@ -22,13 +22,13 @@ This document tracks planned work for MarkdownPreviewApp.
   - Stop resolving every listed document's bookmark each time a document is opened. `upsertDocument` does it to find a document already listed under the path it was moved from, at about 2 ms for each one listed.
   - Take the ten-second check of every listed document off the main actor, or make it cheaper. It grows with the list: 18 to 31 ms with 17 documents. This goes with the polling bullet above.
   - Take the image checks off the main actor: 29 ms for a 505 KB document. They need the folders the app has been granted, which are the main actor's.
-  - Find out why a launch builds the page on screen twice. Each `[perf] render asked for` line names the renderer it was asked of: two renderers is a view made twice, and one is something it is made from that changed.
-  - Take the `[perf]` timing lines out once this is closed.
+  - Find out why a launch builds the page on screen twice. A line in the console for each request to build, naming the renderer it was asked of, would say which it is: two renderers is a view made twice, and one is something the page is made from that changed.
 
-### Switching to Source and back rebuilds the preview.
-  - The detail pane shows the preview or the source and not both. Switching to Source removes the preview, and with it the pages it had built and its web view. Coming back builds the HTML again, makes a new web view and loads the page into it: a blank pane, and the spinner for a large document.
-  - First, keep the built pages somewhere that outlasts the preview, with the session, so that coming back skips the build and pays only for a new web view to load the page.
-  - Then keep the web view alive behind Source, hidden, so that coming back loads nothing. Focus, the hand-off of the selection, and what Copy acts on all assume that only one pane exists.
+### The source pane lands near a place far down a long document, and not on it.
+  - When the source pane has to follow the preview to a place far down a long document, it lands close to the place and not on it. That is after the reader scrolls Preview by hand and switches to Source, and on iPhone on coming back from the list, where both panes are made again.
+  - The pane is scrolled to a character offset. That far down, the text above has not been laid out, so where the line is is an estimate. Asking twice, a turn apart, does not settle it.
+  - Find a way to put a line at the top of the source pane that is right that far down. Scrolling a range into view, which is how the selection has always been shown there, may already be right where asking for the line's rectangle is not.
+  - Within one long block, a long list or code block, the place is taken by proportion, in both directions. Decide whether that is close enough.
 
 ### A line selected by triple-click in the preview does not stay a line.
   - Clicking three times on a line in the preview highlights the line and a strip below it, into the block after. Switching to Source and back highlights the line's words alone. The highlight should be the line alone from the click.

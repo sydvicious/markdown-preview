@@ -956,6 +956,176 @@ struct PreviewScrollRestorationTests {
         #expect(memory.sourceOffset(for: nil) == nil)
     }
 
+    // MARK: - A selection made in one pane is where the other goes
+
+    /// The selection is the same in both panes, and has been since before
+    /// either kept a place: select something in one, and the other shows it.
+    /// A place kept for the other pane does not come before that.
+    @Test func aSelectionMadeInOnePaneIsForTheOtherToShow() {
+        let memory = PreviewScrollMemory()
+        memory.remember(halfway, in: Content(documentID: plan, source: "the plan"))
+
+        memory.rememberSelection(in: plan, by: .preview)
+
+        #expect(memory.takeSelectionToShow(in: plan, for: .source))
+    }
+
+    @Test func aSelectionMadeInTheSourceIsForThePreviewToShow() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSelection(in: plan, by: .source)
+
+        #expect(memory.takeSelectionToShow(in: plan, for: .preview))
+    }
+
+    /// It is shown once. After that the pane is where the reader left it, as
+    /// any other time.
+    @Test func aSelectionIsShownOnce() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSelection(in: plan, by: .preview)
+
+        #expect(memory.takeSelectionToShow(in: plan, for: .source))
+        #expect(memory.takeSelectionToShow(in: plan, for: .source) == false)
+    }
+
+    /// The pane the selection was made in is already showing it.
+    @Test func aSelectionIsNotForThePaneItWasMadeInToShow() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSelection(in: plan, by: .preview)
+
+        #expect(memory.takeSelectionToShow(in: plan, for: .preview) == false)
+        // And asking did not use it up.
+        #expect(memory.takeSelectionToShow(in: plan, for: .source))
+    }
+
+    /// Select something, then read on somewhere else: where the reader is now
+    /// is where they are reading, and the other pane goes there.
+    @Test func scrollingInThePreviewAfterSelectingPutsThePlaceFirstAgain() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSelection(in: plan, by: .preview)
+
+        // The reader moving the page is told both ways: where in the page,
+        // and what of the source is at the top of it.
+        memory.remember(halfway, in: Content(documentID: plan, source: "the plan"))
+        memory.rememberSourceOffset(4200, in: plan, by: .preview)
+
+        #expect(memory.takeSelectionToShow(in: plan, for: .source) == false)
+    }
+
+    @Test func scrollingInTheSourceAfterSelectingPutsThePlaceFirstAgain() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSelection(in: plan, by: .source)
+
+        memory.rememberSourceOffset(9000, in: plan, by: .source)
+
+        #expect(memory.takeSelectionToShow(in: plan, for: .preview) == false)
+    }
+
+    // MARK: - Each pane stays where it was left unless the reader moved in the other
+
+    /// Both panes are kept, each where the reader left it. One follows the
+    /// other only when the reader has moved there since.
+    @Test func afterTheReaderMovesInThePreviewTheSourceHasAPlaceToFollow() {
+        let memory = PreviewScrollMemory()
+        memory.remember(halfway, in: Content(documentID: plan, source: "the plan"))
+        memory.rememberSourceOffset(4200, in: plan, by: .preview)
+
+        #expect(memory.takePlaceToFollow(in: plan, for: .source) == 4200)
+        // Followed once. After that the source pane is where the reader
+        // leaves it.
+        #expect(memory.takePlaceToFollow(in: plan, for: .source) == nil)
+    }
+
+    @Test func theSourceHasNothingToFollowWhenTheReaderLastMovedInIt() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSourceOffset(4200, in: plan, by: .preview)
+
+        memory.rememberSourceOffset(9000, in: plan, by: .source)
+
+        #expect(memory.takePlaceToFollow(in: plan, for: .source) == nil)
+    }
+
+    /// The page tells the app where it is whenever it moves, and what of the
+    /// source is at the top of it only when it was the reader who moved it.
+    /// Moved by the app, to show a selection or to put the reader back, it has
+    /// given the source pane nowhere to go.
+    @Test func thePreviewMovedByTheAppGivesTheSourceNothingToFollow() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSourceOffset(9000, in: plan, by: .source)
+
+        memory.remember(halfway, in: Content(documentID: plan, source: "the plan"))
+
+        #expect(memory.takePlaceToFollow(in: plan, for: .source) == nil)
+    }
+
+    /// Nor has it stopped being the source the reader was last in: a preview
+    /// loaded again goes to where they were there.
+    @Test func thePreviewMovedByTheAppIsStillFollowingTheSource() {
+        let memory = PreviewScrollMemory()
+        let content = Content(documentID: plan, source: "the plan")
+        memory.rememberSourceOffset(9000, in: plan, by: .source)
+
+        memory.remember(halfway, in: content)
+
+        #expect(memory.restoration(for: content) == .sourceOffset(9000))
+    }
+
+    @Test func thePreviewMovedByTheAppLeavesASelectionStillToShow() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSelection(in: plan, by: .preview)
+
+        memory.remember(halfway, in: Content(documentID: plan, source: "the plan"))
+
+        #expect(memory.takeSelectionToShow(in: plan, for: .source))
+    }
+
+    /// The preview's place to follow is where `restoration` puts it.
+    @Test func thePreviewIsNotAskedForAPlaceToFollowThisWay() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSourceOffset(9000, in: plan, by: .source)
+
+        #expect(memory.takePlaceToFollow(in: plan, for: .preview) == nil)
+    }
+
+    @Test func aForgottenDocumentHasNoPlaceToFollow() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSourceOffset(4200, in: plan, by: .preview)
+
+        memory.forget(documentID: plan)
+
+        #expect(memory.takePlaceToFollow(in: plan, for: .source) == nil)
+        #expect(memory.takePlaceToFollow(in: nil, for: .source) == nil)
+    }
+
+    @Test func aSelectionInOneDocumentIsNotAnothersToShow() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSelection(in: plan, by: .preview)
+
+        #expect(memory.takeSelectionToShow(in: notes, for: .source) == false)
+        #expect(memory.takeSelectionToShow(in: nil, for: .source) == false)
+        #expect(memory.takeSelectionToShow(in: plan, for: .source))
+    }
+
+    @Test func aForgottenDocumentHasNoSelectionToShow() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSelection(in: plan, by: .preview)
+
+        memory.forget(documentID: plan)
+
+        #expect(memory.takeSelectionToShow(in: plan, for: .source) == false)
+    }
+
+    /// The page says of a selection whether the app put it there. One it did
+    /// is an echo, and not the reader selecting something in the preview.
+    @Test func thePageSaysWhetherASelectionWasTheAppsDoing() {
+        let ranges = [["blockStart": NSNumber(value: 0), "blockEnd": NSNumber(value: 10),
+                       "displayLocation": NSNumber(value: 2), "displayLength": NSNumber(value: 4)]]
+
+        #expect(PreviewSelectionChangedMessage(messageBody: ["ranges": ranges, "applied": NSNumber(value: true)]).wasApplied)
+        #expect(PreviewSelectionChangedMessage(messageBody: ["ranges": ranges]).wasApplied == false)
+        #expect(PreviewSelectionChangedMessage(messageBody: ["ranges": ranges, "applied": "yes"]).wasApplied == false)
+        #expect(PreviewSelectionChangedMessage(messageBody: "not a payload").wasApplied == false)
+    }
+
     // MARK: - What the page says of the place in the source
 
     @Test func thePlaceInTheSourceIsReadAsAWholeNumber() {

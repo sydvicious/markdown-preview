@@ -37,7 +37,7 @@ private extension UITextView {
 
     /// Scrolls so that the line the character at `offset` is on is at the top.
     func scrollToTop(characterAt offset: Int) {
-        let length = (text ?? "").utf16.count
+        let length = textStorage.length
         guard let position = position(from: beginningOfDocument, offset: min(max(offset, 0), length)) else {
             return
         }
@@ -59,6 +59,11 @@ struct SelectableSourceTextView: UIViewRepresentable {
     /// and says where they go from there. With neither it opens at the top.
     var documentID: String? = nil
     var scrollMemory: PreviewScrollMemory? = nil
+    /// Whether the reader can see the text. The window keeps this pane where
+    /// it is while the preview is showing, so that coming back to it finds it
+    /// as it was left. Out of sight it is left alone: given no text, no
+    /// selection and no keyboard, and nothing it does is taken for the reader.
+    var isShowing: Bool = true
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
     var onSearchSelection: (String) -> Void = { _ in }
@@ -67,8 +72,16 @@ struct SelectableSourceTextView: UIViewRepresentable {
         var selections: Binding<[MarkdownSelectionRange]>
         var onSearchSelection: (String) -> Void
         var isApplyingSelection = false
+        /// The document whose text the view holds, which while it is out of
+        /// sight may not be the one on screen. Nil until it holds one.
         var documentID: String?
+        /// The text the view was last given. Kept so that an update can tell
+        /// whether it has changed without asking the view for all of its text
+        /// and comparing: for a long document that took fifty milliseconds,
+        /// several times for every click.
+        var text: String?
         var scrollMemory: PreviewScrollMemory?
+        var isShowing = true
         /// Counts the times the view has put the reader somewhere, so that a
         /// placing that a later one has overtaken does nothing more.
         var placings = 0
@@ -76,7 +89,8 @@ struct SelectableSourceTextView: UIViewRepresentable {
         /// Says where the reader is when it is the reader who moved. The view
         /// putting them somewhere is not that.
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            guard scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating,
+            guard isShowing,
+                  scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating,
                   let textView = scrollView as? UITextView else {
                 return
             }
@@ -89,11 +103,15 @@ struct SelectableSourceTextView: UIViewRepresentable {
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
-            guard !isApplyingSelection else { return }
+            guard !isApplyingSelection, isShowing else { return }
             let range = textView.selectedRange
             let next = range.length > 0 ? [MarkdownSelectionRange(range)] : []
             if next != selections.wrappedValue {
                 selections.wrappedValue = next
+            }
+            if !next.isEmpty {
+                // The reader's own: where the preview goes next.
+                scrollMemory?.rememberSelection(in: documentID, by: .source)
             }
         }
 
@@ -136,13 +154,19 @@ struct SelectableSourceTextView: UIViewRepresentable {
         view.textContainer.lineFragmentPadding = 0
         view.adjustsFontForContentSizeCategory = false
         view.font = Self.font(for: textSize)
+        context.coordinator.scrollMemory = scrollMemory
+        context.coordinator.isShowing = isShowing
+        // Made out of sight, behind the preview, it is given nothing until it
+        // is first shown.
+        guard isShowing else { return view }
+
         context.coordinator.isApplyingSelection = true
         view.text = text
+        context.coordinator.text = text
         applySelection(to: view, from: selections, coordinator: context.coordinator)
         context.coordinator.isApplyingSelection = false
         context.coordinator.documentID = documentID
-        context.coordinator.scrollMemory = scrollMemory
-        placeReader(in: view, coordinator: context.coordinator, isAnotherDocument: false)
+        placeReader(in: view, coordinator: context.coordinator, arrival: .newText(replacingAnother: false))
         return view
     }
 
@@ -150,15 +174,28 @@ struct SelectableSourceTextView: UIViewRepresentable {
         context.coordinator.selections = $selections
         context.coordinator.onSearchSelection = onSearchSelection
         context.coordinator.scrollMemory = scrollMemory
+        let wasShowing = context.coordinator.isShowing
+        context.coordinator.isShowing = isShowing
+        guard isShowing else {
+            // Out of sight behind the preview, and left as it is. It gives up
+            // the keyboard, which is the preview's to take.
+            if wasShowing, uiView.isFirstResponder {
+                uiView.resignFirstResponder()
+            }
+            return
+        }
         let isAnotherDocument = context.coordinator.documentID != documentID
         context.coordinator.documentID = documentID
-        if uiView.text != text {
+        if context.coordinator.text != text {
             context.coordinator.isApplyingSelection = true
             uiView.text = text
+            context.coordinator.text = text
             context.coordinator.isApplyingSelection = false
         }
         if isAnotherDocument {
-            placeReader(in: uiView, coordinator: context.coordinator, isAnotherDocument: true)
+            placeReader(in: uiView, coordinator: context.coordinator, arrival: .newText(replacingAnother: true))
+        } else if !wasShowing {
+            placeReader(in: uiView, coordinator: context.coordinator, arrival: .cameBack)
         }
         if uiView.textColor != .label {
             uiView.textColor = .label
@@ -168,35 +205,95 @@ struct SelectableSourceTextView: UIViewRepresentable {
             uiView.font = desiredFont
         }
         applySelection(to: uiView, from: selections, coordinator: context.coordinator)
+        if !wasShowing {
+            showSelectionAgain(in: uiView, coordinator: context.coordinator)
+        }
+    }
+
+    /// The text is in front of the reader again, after a spell behind the
+    /// preview.
+    ///
+    /// iOS draws a selection only in the view that has the keyboard, and this
+    /// one gave the keyboard up when it went out of sight. A selection it
+    /// still holds is the one it is asked to have, so `applySelection` finds
+    /// nothing to do, and the selection is there and cannot be seen. So the
+    /// view takes the keyboard back for it. The text is not scrolled: it is
+    /// where the reader left it, or where it has just been put.
+    private func showSelectionAgain(in textView: UITextView, coordinator: Coordinator) {
+        guard case let .select(range) = SourceSelectionUpdate.resolve(
+            from: selections,
+            current: textView.selectedRange,
+            textUTF16Length: textView.textStorage.length
+        ) else {
+            return
+        }
+        DispatchQueue.main.async {
+            coordinator.isApplyingSelection = true
+            if !textView.isFirstResponder {
+                textView.becomeFirstResponder()
+            }
+            textView.selectedRange = range
+            coordinator.isApplyingSelection = false
+        }
     }
 
     private static func font(for textSize: DynamicTypeSize) -> UIFont {
         UIFont.monospacedSystemFont(ofSize: 16 * textSize.scaleFactor, weight: .regular)
     }
 
-    /// Puts the reader where they last were in this document, in either pane.
-    /// A document they have not been in is left where a selection puts it, or
-    /// at the top if the view was showing another.
+    /// How the pane comes to be placing the reader.
+    private enum Arrival {
+        /// It has been given a document's text: the first, or another's in
+        /// place of the one it had.
+        case newText(replacingAnother: Bool)
+        /// It kept its text behind the preview, and is being shown again.
+        case cameBack
+    }
+
+    /// Puts the reader where they should be in the text.
+    ///
+    /// A selection they have made in the preview since comes first. After
+    /// that, text the pane has just been given opens where they last were in
+    /// that document, in either pane, or at the top if they have not been in
+    /// it. Text the pane kept behind the preview is where they left it, and is
+    /// moved only if they have moved in the preview since.
     ///
     /// The text has no layout until the turn after it is set, and where a line
     /// is far down a long document is a guess until the text above it is laid
     /// out. So it is done on the next turn, and again on the one after.
-    private func placeReader(in textView: UITextView, coordinator: Coordinator, isAnotherDocument: Bool) {
+    private func placeReader(in textView: UITextView, coordinator: Coordinator, arrival: Arrival) {
         coordinator.placings += 1
         let placing = coordinator.placings
-        guard let offset = scrollMemory?.sourceOffset(for: documentID) else {
-            if isAnotherDocument {
+        let showsSelection = selections.first.map { $0.length > 0 } == true
+            && scrollMemory?.takeSelectionToShow(in: documentID, for: .source) == true
+        let toFollow = scrollMemory?.takePlaceToFollow(in: documentID, for: .source)
+        let wanted: Int?
+        switch arrival {
+        case .newText:
+            wanted = scrollMemory?.sourceOffset(for: documentID)
+        case .cameBack:
+            wanted = toFollow
+        }
+        guard showsSelection || wanted != nil else {
+            if case .newText(replacingAnother: true) = arrival {
                 textView.scrollToTop(characterAt: 0)
             }
             return
         }
+        let offset = wanted ?? 0
 
-        DispatchQueue.main.async {
+        func place() {
             guard coordinator.placings == placing else { return }
-            textView.scrollToTop(characterAt: offset)
-            DispatchQueue.main.async {
-                guard coordinator.placings == placing else { return }
+            if showsSelection {
+                textView.scrollRangeToVisible(textView.selectedRange)
+            } else {
                 textView.scrollToTop(characterAt: offset)
+            }
+        }
+        DispatchQueue.main.async {
+            place()
+            DispatchQueue.main.async {
+                place()
             }
         }
     }
@@ -206,7 +303,11 @@ struct SelectableSourceTextView: UIViewRepresentable {
         from ranges: [MarkdownSelectionRange],
         coordinator: Coordinator
     ) {
-        switch SourceSelectionUpdate.resolve(from: ranges, textUTF16Length: textView.text.utf16.count) {
+        switch SourceSelectionUpdate.resolve(
+            from: ranges,
+            current: textView.selectedRange,
+            textUTF16Length: textView.textStorage.length
+        ) {
         case let .clear(range):
             // An empty selection just clears the range; no need to claim focus.
             guard textView.selectedRange != range else { return }
@@ -290,12 +391,31 @@ private final class MarkdownCopyTextView: NSTextView {
             return
         }
 
-        let length = (string as NSString).length
+        let length = textStorage?.length ?? 0
         let place = NSRange(location: min(offset, length), length: 0)
         let onScreen = firstRect(forCharacterRange: place, actualRange: nil)
         let inView = convert(window.convertFromScreen(onScreen), from: nil)
         guard inView.minY.isFinite else { return }
         scroll(NSPoint(x: 0, y: max(0, inView.minY - textContainerInset.height)))
+    }
+}
+
+private extension NSTextView {
+    /// Makes the text container as wide as the view's text is, which is
+    /// `width` less the inset on each side, if it is not already.
+    ///
+    /// The container keeps itself that wide (`widthTracksTextView`), so this
+    /// should find nothing to do. It used to be measured against the whole
+    /// width, which it never is: so it was set on every layout and every
+    /// update, and put back by the view each time. Each of those throws the
+    /// layout away, and far down a long document the height the view then
+    /// works out for its text is not the height it had, which moves the text
+    /// out from under the reader.
+    func keepTextContainer(asWideAsTextIn width: CGFloat) {
+        guard let textContainer else { return }
+        let wanted = max(width - 2 * textContainerInset.width, 0)
+        guard abs(textContainer.containerSize.width - wanted) > 0.5 else { return }
+        textContainer.containerSize = NSSize(width: wanted, height: CGFloat.greatestFiniteMagnitude)
     }
 }
 
@@ -309,12 +429,7 @@ private final class WidthTrackingScrollView: NSScrollView {
             textView.frame.size.width = contentWidth
         }
 
-        if let textContainer = textView.textContainer {
-            let desiredSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
-            if textContainer.containerSize != desiredSize {
-                textContainer.containerSize = desiredSize
-            }
-        }
+        textView.keepTextContainer(asWideAsTextIn: contentWidth)
     }
 }
 
@@ -325,6 +440,11 @@ struct SelectableSourceTextView: NSViewRepresentable {
     /// and says where they go from there. With neither it opens at the top.
     var documentID: String? = nil
     var scrollMemory: PreviewScrollMemory? = nil
+    /// Whether the reader can see the text. The window keeps this pane where
+    /// it is while the preview is showing, so that coming back to it finds it
+    /// as it was left. Out of sight it is left alone: given no text, no
+    /// selection and no keyboard, and nothing it does is taken for the reader.
+    var isShowing: Bool = true
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
     var onSearchSelection: (String) -> Void = { _ in }
@@ -333,8 +453,16 @@ struct SelectableSourceTextView: NSViewRepresentable {
         var selections: Binding<[MarkdownSelectionRange]>
         var onSearchSelection: (String) -> Void
         var isApplyingSelection = false
+        /// The document whose text the view holds, which while it is out of
+        /// sight may not be the one on screen. Nil until it holds one.
         var documentID: String?
+        /// The text the view was last given. Kept so that an update can tell
+        /// whether it has changed without asking the view for all of its text
+        /// and comparing: for a long document that took fifty milliseconds,
+        /// several times for every click.
+        var text: String?
         var scrollMemory: PreviewScrollMemory?
+        var isShowing = true
         /// Set while the view is putting the reader somewhere, and while it is
         /// first laid out. What moves the text then is not the reader.
         var isPlacingReader = true
@@ -346,6 +474,7 @@ struct SelectableSourceTextView: NSViewRepresentable {
         /// moved it, says where they are now.
         @objc func textDidScroll(_ notification: Notification) {
             guard !isPlacingReader,
+                  isShowing,
                   let clipView = notification.object as? NSClipView,
                   let textView = clipView.documentView as? MarkdownCopyTextView else {
                 return
@@ -361,7 +490,7 @@ struct SelectableSourceTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {}
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard !isApplyingSelection else { return }
+            guard !isApplyingSelection, isShowing else { return }
             guard let textView = notification.object as? NSTextView else { return }
             let next = textView.selectedRanges.compactMap { value -> MarkdownSelectionRange? in
                 let range = value.rangeValue
@@ -369,6 +498,10 @@ struct SelectableSourceTextView: NSViewRepresentable {
             }
             if next != selections.wrappedValue {
                 selections.wrappedValue = next
+            }
+            if !next.isEmpty {
+                // The reader's own: where the preview goes next.
+                scrollMemory?.rememberSelection(in: documentID, by: .source)
             }
         }
 
@@ -427,16 +560,9 @@ struct SelectableSourceTextView: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        context.coordinator.isApplyingSelection = true
-        textView.string = text
-
         scrollView.documentView = textView
-        applySelection(to: textView, from: selections, coordinator: context.coordinator)
-        context.coordinator.isApplyingSelection = false
-        textView.takeFirstResponderIfUnclaimed()
-
-        context.coordinator.documentID = documentID
         context.coordinator.scrollMemory = scrollMemory
+        context.coordinator.isShowing = isShowing
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
             context.coordinator,
@@ -444,7 +570,18 @@ struct SelectableSourceTextView: NSViewRepresentable {
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
         )
-        placeReader(in: textView, coordinator: context.coordinator, isAnotherDocument: false)
+        // Made out of sight, behind the preview, it is given nothing until it
+        // is first shown.
+        guard isShowing else { return scrollView }
+
+        context.coordinator.isApplyingSelection = true
+        textView.string = text
+        context.coordinator.text = text
+        applySelection(to: textView, from: selections, coordinator: context.coordinator)
+        context.coordinator.isApplyingSelection = false
+        textView.takeFirstResponderIfUnclaimed()
+        context.coordinator.documentID = documentID
+        placeReader(in: textView, coordinator: context.coordinator, arrival: .newText(replacingAnother: false))
         return scrollView
     }
 
@@ -457,29 +594,41 @@ struct SelectableSourceTextView: NSViewRepresentable {
         context.coordinator.onSearchSelection = onSearchSelection
         context.coordinator.scrollMemory = scrollMemory
         guard let textView = nsView.documentView as? MarkdownCopyTextView else { return }
+        let wasShowing = context.coordinator.isShowing
+        context.coordinator.isShowing = isShowing
+        guard isShowing else {
+            // Out of sight behind the preview, and left as it is. It gives up
+            // the keyboard, which is the preview's to take: left holding it,
+            // this pane is where Copy would go.
+            if wasShowing, let window = textView.window, window.firstResponder === textView {
+                window.makeFirstResponder(nil)
+            }
+            return
+        }
         let isAnotherDocument = context.coordinator.documentID != documentID
         context.coordinator.documentID = documentID
-        if textView.string != text {
+        if context.coordinator.text != text {
             context.coordinator.isApplyingSelection = true
             textView.string = text
+            context.coordinator.text = text
             context.coordinator.isApplyingSelection = false
         }
         if isAnotherDocument {
-            placeReader(in: textView, coordinator: context.coordinator, isAnotherDocument: true)
+            placeReader(in: textView, coordinator: context.coordinator, arrival: .newText(replacingAnother: true))
+        } else if !wasShowing {
+            placeReader(in: textView, coordinator: context.coordinator, arrival: .cameBack)
+        }
+        if !wasShowing {
+            textView.takeFirstResponderIfUnclaimed()
         }
         let desiredFont = Self.font(for: textSize)
         if textView.font != desiredFont {
             textView.font = desiredFont
         }
-        if let textContainer = textView.textContainer {
-            let desiredSize = NSSize(width: nsView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
-            if textContainer.containerSize != desiredSize {
-                textContainer.containerSize = desiredSize
-            }
-        }
         if textView.frame.width != nsView.contentSize.width {
             textView.frame.size.width = nsView.contentSize.width
         }
+        textView.keepTextContainer(asWideAsTextIn: nsView.contentSize.width)
         applySelection(to: textView, from: selections, coordinator: context.coordinator)
     }
 
@@ -487,34 +636,59 @@ struct SelectableSourceTextView: NSViewRepresentable {
         NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize * textSize.scaleFactor, weight: .regular)
     }
 
-    /// Puts the reader where they last were in this document, in either pane.
-    /// A document they have not been in is left where a selection puts it, or
-    /// at the top if the view was showing another.
+    /// How the pane comes to be placing the reader.
+    private enum Arrival {
+        /// It has been given a document's text: the first, or another's in
+        /// place of the one it had.
+        case newText(replacingAnother: Bool)
+        /// It kept its text behind the preview, and is being shown again.
+        case cameBack
+    }
+
+    /// Puts the reader where they should be in the text.
+    ///
+    /// A selection they have made in the preview since comes first. After
+    /// that, text the pane has just been given opens where they last were in
+    /// that document, in either pane, or at the top if they have not been in
+    /// it. Text the pane kept behind the preview is where they left it, and is
+    /// moved only if they have moved in the preview since.
     ///
     /// The view has no window until the turn after it is made, and where a
     /// line is far down a long document is a guess until the text above it is
     /// laid out. So it is done on the next turn, and again on the one after.
     /// Until then nothing the text does is taken for the reader moving it.
-    private func placeReader(in textView: MarkdownCopyTextView, coordinator: Coordinator, isAnotherDocument: Bool) {
+    private func placeReader(in textView: MarkdownCopyTextView, coordinator: Coordinator, arrival: Arrival) {
         coordinator.placings += 1
         let placing = coordinator.placings
         coordinator.isPlacingReader = true
 
-        let offset = scrollMemory?.sourceOffset(for: documentID)
-        if offset == nil, isAnotherDocument {
+        let showsSelection = selections.first.map { $0.length > 0 } == true
+            && scrollMemory?.takeSelectionToShow(in: documentID, for: .source) == true
+        let toFollow = scrollMemory?.takePlaceToFollow(in: documentID, for: .source)
+        let offset: Int?
+        switch arrival {
+        case .newText:
+            offset = showsSelection ? nil : scrollMemory?.sourceOffset(for: documentID)
+        case .cameBack:
+            offset = showsSelection ? nil : toFollow
+        }
+        if case .newText(replacingAnother: true) = arrival, offset == nil, !showsSelection {
             textView.scroll(.zero)
         }
 
-        DispatchQueue.main.async {
-            guard coordinator.placings == placing else { return }
-            if let offset {
+        func place() {
+            if showsSelection {
+                textView.centerSelectionInVisibleArea(nil)
+            } else if let offset {
                 textView.scrollToTop(characterAt: offset)
             }
+        }
+        DispatchQueue.main.async {
+            guard coordinator.placings == placing else { return }
+            place()
             DispatchQueue.main.async {
                 guard coordinator.placings == placing else { return }
-                if let offset {
-                    textView.scrollToTop(characterAt: offset)
-                }
+                place()
                 coordinator.isPlacingReader = false
             }
         }
@@ -525,16 +699,16 @@ struct SelectableSourceTextView: NSViewRepresentable {
         from ranges: [MarkdownSelectionRange],
         coordinator: Coordinator
     ) {
-        let textLength = textView.string.utf16.count
-        var nsRanges = ranges.compactMap { $0.clamped(toUTF16Length: textLength)?.nsRange }
-        if nsRanges.isEmpty {
-            nsRanges = [NSRange(location: 0, length: 0)]
-        }
         let current = textView.selectedRanges.compactMap { $0 as? NSRange }
-        guard current != nsRanges else { return }
+        let update = SourceSelectionUpdate.resolveAll(
+            from: ranges,
+            current: current,
+            textUTF16Length: textView.textStorage?.length ?? 0
+        )
+        guard current != update.ranges else { return }
         coordinator.isApplyingSelection = true
-        textView.selectedRanges = nsRanges.map(NSValue.init(range:))
-        if let firstRange = nsRanges.first {
+        textView.selectedRanges = update.ranges.map(NSValue.init(range:))
+        if update.bringsFirstIntoView, let firstRange = update.ranges.first {
             textView.scrollRangeToVisible(firstRange)
         }
         coordinator.isApplyingSelection = false

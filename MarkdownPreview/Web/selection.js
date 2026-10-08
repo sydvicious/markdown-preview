@@ -169,11 +169,30 @@
     return text.length > 0 ? text : null;
   };
 
+  // Whether what is selected is what the app last put there. A selection the
+  // reader makes is somewhere for the source pane to go when it is shown; one
+  // the app made came from there, or from a search, and saying it back is an
+  // echo.
+  const isAppliedSelection = () => {
+    const applied = window.markdownPreview.appliedRange;
+    const selection = window.getSelection();
+    if (!applied || !selection || selection.rangeCount !== 1) {
+      return false;
+    }
+    const range = selection.getRangeAt(0);
+    return range.compareBoundaryPoints(Range.START_TO_START, applied) === 0 &&
+      range.compareBoundaryPoints(Range.END_TO_END, applied) === 0;
+  };
+
   const currentSelectionSnapshot = () => {
-    return {
+    const snapshot = {
       text: selectedText(),
       ranges: selectedDisplayRanges()
     };
+    if (isAppliedSelection()) {
+      snapshot.applied = true;
+    }
+    return snapshot;
   };
 
   const rememberSelection = () => {

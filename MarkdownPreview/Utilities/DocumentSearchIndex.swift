@@ -4,7 +4,6 @@
 //
 
 import Foundation
-import os
 
 struct DocumentSearchIndexEntry {
     let documentID: String
@@ -33,12 +32,7 @@ final class DocumentSearchIndex {
     /// Reads the text on a thread of its own.
     static let detached: BackgroundBuild = { contents, deliver in
         Task.detached(priority: .utility) {
-            let read = PerfLog.timed { MarkdownTextOffsetMapping(sourceText: contents) }
-            PerfLog.log.info("""
-                [perf] index: \(contents.utf8.count, privacy: .public) bytes read for searching, \
-                in the background, in \(read.milliseconds, format: .fixed(precision: 1), privacy: .public) ms
-                """)
-            await deliver(read.value)
+            await deliver(MarkdownTextOffsetMapping(sourceText: contents))
         }
     }
 
@@ -132,13 +126,9 @@ final class DocumentSearchIndex {
             return mapping
         }
 
-        let read = PerfLog.timed { MarkdownTextOffsetMapping(sourceText: listing.contents) }
-        PerfLog.log.info("""
-            [perf] index \(listing.fileName, privacy: .public): read for a search that could not wait, in \
-            \(read.milliseconds, format: .fixed(precision: 1), privacy: .public) ms
-            """)
-        listingsByDocumentID[documentID]?.mapping = read.value
-        return read.value
+        let read = MarkdownTextOffsetMapping(sourceText: listing.contents)
+        listingsByDocumentID[documentID]?.mapping = read
+        return read
     }
 
     func containsMatch(in documentID: String, query: String) -> Bool {

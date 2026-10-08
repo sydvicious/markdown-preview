@@ -12,6 +12,17 @@ window.markdownPreview = window.markdownPreview ?? {};
   // Where the reader is, as [x, y, maxY].
   window.markdownPreview.scrollPosition = () => [window.scrollX, window.scrollY, maxScrollY()];
 
+  // Where the app last put the page. The page being there is the app's doing
+  // and not the reader's, and is not told to the source pane as somewhere to
+  // follow them to. Another script that moves the page, to show a selection,
+  // says so through `noteAppScroll`. What is kept is where the page can get
+  // to, which for a place past its end is its end.
+  let lastAppScrollY = null;
+  window.markdownPreview.noteAppScroll = (y) => {
+    lastAppScrollY = Math.min(Math.max(y, 0), maxScrollY());
+  };
+  const isWhereTheAppPutIt = () => lastAppScrollY !== null && Math.abs(window.scrollY - lastAppScrollY) <= 1;
+
   // A restore is asked for the moment the page finishes loading, which can be
   // before the page has its full height. Scrolling then goes only as far as
   // there is page, and the reader lands short of where they were. So a restore
@@ -77,6 +88,7 @@ window.markdownPreview = window.markdownPreview ?? {};
         if (Math.abs(window.scrollY - y) <= 1) {
           isInPlace = true;
         } else {
+          lastAppScrollY = y;
           window.scrollTo(x, y);
           state.scrolls += 1;
           state.askedForY = y;
@@ -201,7 +213,9 @@ window.markdownPreview = window.markdownPreview ?? {};
     pendingReport = setTimeout(() => {
       pendingReport = null;
       window.webkit?.messageHandlers?.previewScrollChanged?.postMessage(window.markdownPreview.scrollPosition());
-      const sourceOffset = window.markdownPreview.sourceOffsetAtTop();
+      // The place in the source is for the source pane to follow the reader
+      // to, so it is told only when it is the reader who moved.
+      const sourceOffset = isWhereTheAppPutIt() ? null : window.markdownPreview.sourceOffsetAtTop();
       if (sourceOffset !== null) {
         window.webkit?.messageHandlers?.previewSourceOffsetChanged?.postMessage(sourceOffset);
       }

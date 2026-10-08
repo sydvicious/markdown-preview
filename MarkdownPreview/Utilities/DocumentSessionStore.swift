@@ -294,6 +294,12 @@ final class DocumentSessionStore: ObservableObject {
         documentSearchIndex.entry(for: documentID)?.mapping
     }
 
+    /// Whether the document's text has been read for searching yet. It is
+    /// read in the background, or by the first search that needs it.
+    func hasReadTextForSearching(of documentID: String) -> Bool {
+        documentSearchIndex.hasReadText(of: documentID)
+    }
+
     func listSearchSuggestions(prefix: String, limit: Int = 5) -> [String] {
         documentSearchIndex.suggestedCompletions(prefix: prefix, limit: limit)
     }
@@ -339,7 +345,6 @@ final class DocumentSessionStore: ObservableObject {
             }
         }
 
-        let bookmarkStarted = ContinuousClock.now
         let bookmarkData: Data
         do {
             bookmarkData = try suppliedBookmarkData ?? makeBookmarkData(for: url)
@@ -358,30 +363,14 @@ final class DocumentSessionStore: ObservableObject {
             throw error
         }
 
-        let bookmarkMilliseconds = PerfLog.milliseconds(since: bookmarkStarted)
-
-        let resolved = PerfLog.timed { resolveBookmarkURL(from: bookmarkData) }
-        guard let resolvedURL = resolved.value else {
+        guard let resolvedURL = resolveBookmarkURL(from: bookmarkData) else {
             throw CocoaError(.fileNoSuchFile)
         }
         // Whatever stopped the read goes up as it is. A file that is there and
         // is not text the app reads is not a missing file, and saying it is
         // sends the reader looking for one.
-        let loaded = try PerfLog.timed { try readDocument(at: resolvedURL, resolvedFrom: bookmarkData) }
-        let listed = PerfLog.timed {
-            upsertDocument(
-                loaded.value.file,
-                bookmarkData: bookmarkData,
-                modificationDate: loaded.value.modificationDate
-            )
-        }
-        PerfLog.log.info("""
-            [perf] open \(url.lastPathComponent, privacy: .public): \
-            bookmark \(bookmarkMilliseconds, format: .fixed(precision: 1), privacy: .public) ms, \
-            resolve \(resolved.milliseconds, format: .fixed(precision: 1), privacy: .public) ms, \
-            read \(loaded.milliseconds, format: .fixed(precision: 1), privacy: .public) ms, \
-            list \(listed.milliseconds, format: .fixed(precision: 1), privacy: .public) ms
-            """)
+        let loaded = try readDocument(at: resolvedURL, resolvedFrom: bookmarkData)
+        upsertDocument(loaded.file, bookmarkData: bookmarkData, modificationDate: loaded.modificationDate)
     }
 
     func upsertDocument(_ file: MarkdownFile, bookmarkData: Data, modificationDate: Date?) {
@@ -483,10 +472,9 @@ final class DocumentSessionStore: ObservableObject {
             return
         }
 
-        let restored = PerfLog.timed {
-            restoreMigration(from: persisted.sorted(by: { $0.lastOpened > $1.lastOpened }))
-        }
-        let migration = restored.value
+        let migration = restoreMigration(
+            from: persisted.sorted(by: { $0.lastOpened > $1.lastOpened })
+        )
 
         openedDocuments = migration.documents
         knownModificationDates = migration.modificationDates
@@ -496,10 +484,6 @@ final class DocumentSessionStore: ObservableObject {
             idMap: migration.idMap
         )
         documentSearchIndex.rebuild(with: migration.documents.map(\.file))
-        PerfLog.log.info("""
-            [perf] restore: \(migration.documents.count, privacy: .public) documents read in \
-            \(restored.milliseconds, format: .fixed(precision: 1), privacy: .public) ms
-            """)
         if let persistedSelection = userDefaults.string(forKey: persistedSelectionKey) {
             let resolvedSelection = migration.idMap[persistedSelection] ?? persistedSelection
             if migration.documents.contains(where: { $0.id == resolvedSelection }) {
@@ -548,40 +532,23 @@ final class DocumentSessionStore: ObservableObject {
 
     func checkActiveDocumentForChanges(isCompactWidth: Bool) {
         guard let selectedDocumentID else { return }
-        let checked = PerfLog.timed {
-            reloadDocumentIfNeeded(
-                documentID: selectedDocumentID,
-                alertIfMissing: true,
-                isCompactWidth: isCompactWidth
-            )
-        }
-        // Once a second, so only a check slow enough to be felt is worth a line.
-        if checked.milliseconds >= PerfLog.slowCheckMilliseconds {
-            PerfLog.log.info("""
-                [perf] check of the document on screen: \
-                \(checked.milliseconds, format: .fixed(precision: 1), privacy: .public) ms
-                """)
-        }
+        reloadDocumentIfNeeded(
+            documentID: selectedDocumentID,
+            alertIfMissing: true,
+            isCompactWidth: isCompactWidth
+        )
     }
 
     func checkAllDocumentsForChanges(isCompactWidth: Bool) {
         guard !openedDocuments.isEmpty else { return }
         let activeID = selectedDocumentID
         let ids = openedDocuments.map(\.id)
-        let checked = PerfLog.timed {
-            for id in ids where id != activeID {
-                reloadDocumentIfNeeded(
-                    documentID: id,
-                    alertIfMissing: false,
-                    isCompactWidth: isCompactWidth
-                )
-            }
-        }
-        if checked.milliseconds >= PerfLog.slowCheckMilliseconds {
-            PerfLog.log.info("""
-                [perf] check of \(ids.count, privacy: .public) listed documents: \
-                \(checked.milliseconds, format: .fixed(precision: 1), privacy: .public) ms
-                """)
+        for id in ids where id != activeID {
+            reloadDocumentIfNeeded(
+                documentID: id,
+                alertIfMissing: false,
+                isCompactWidth: isCompactWidth
+            )
         }
     }
 
@@ -1027,27 +994,5 @@ final class DocumentSessionStore: ObservableObject {
         }
 
         return path
-    }
-}
-
-/// Times the stages of opening and showing a document, for the `[perf]` lines
-/// in the console. Here while slow loading is being tracked down: filter the
-/// console on `[perf]`.
-enum PerfLog {
-    static let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "Perf")
-
-    /// A check for changes on disk that takes this long is worth a line.
-    static let slowCheckMilliseconds = 5.0
-
-    /// Runs `body`, and says how long it took.
-    static func timed<Value>(_ body: () throws -> Value) rethrows -> (value: Value, milliseconds: Double) {
-        let started = ContinuousClock.now
-        let value = try body()
-        return (value, milliseconds(since: started))
-    }
-
-    static func milliseconds(since started: ContinuousClock.Instant) -> Double {
-        let elapsed = (ContinuousClock.now - started).components
-        return Double(elapsed.seconds) * 1_000 + Double(elapsed.attoseconds) / 1e15
     }
 }

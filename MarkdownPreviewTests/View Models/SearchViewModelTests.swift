@@ -17,6 +17,36 @@ struct SearchViewModelTests {
         return DocumentSessionStore(previewFiles: markdownFiles, disablePersistenceRestore: true)
     }
 
+    /// A document's text is read for searching in the background, because
+    /// reading it takes as long as showing it. With nothing to look for, the
+    /// search in the document does not ask for it. Asking reads it there and
+    /// then if it is not ready, and the search is refreshed every time a
+    /// document is shown, so that was the main actor reading every document
+    /// as it was opened.
+    @Test func withNothingToLookForTheDocumentsTextIsNotReadForSearching() throws {
+        let file = MarkdownFile(url: URL(fileURLWithPath: "/tmp/doc.md"), contents: "alpha beta alpha")
+        // Nothing reads in the background here, so only a search can.
+        let store = DocumentSessionStore(
+            previewFiles: [file],
+            disablePersistenceRestore: true,
+            searchIndexBuild: nil
+        )
+        let id = try #require(store.selectedDocumentID)
+        let viewModel = SearchViewModel(store: store, findPasteboard: InMemoryFindPasteboard())
+
+        viewModel.refreshDetailSearch()
+        #expect(store.hasReadTextForSearching(of: id) == false)
+
+        viewModel.setSearchText("   ")
+        viewModel.flushPendingSearch()
+        #expect(store.hasReadTextForSearching(of: id) == false)
+
+        viewModel.setSearchText("alpha")
+        viewModel.flushPendingSearch()
+        #expect(store.hasReadTextForSearching(of: id))
+        #expect(viewModel.resultCount == 2)
+    }
+
     @Test func inDocumentSearchSelectsFirstMatchAndCountsAll() throws {
         let store = makeStore([("doc.md", "alpha beta alpha")])
         let id = try #require(store.selectedDocumentID)

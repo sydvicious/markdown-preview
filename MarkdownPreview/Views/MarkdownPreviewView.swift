@@ -36,28 +36,52 @@ struct MarkdownPreviewView: View {
     /// Where the reader was in each document, so that coming back to one
     /// finds the place. The session's; without it each view keeps its own.
     var scrollMemory: PreviewScrollMemory? = nil
+    /// Builds the page off the main actor, and keeps the last few built. The
+    /// body runs far more often than the document changes, for every change
+    /// of selection and whenever anything in the window is redrawn, and asks
+    /// each time; only something new to show is built.
+    ///
+    /// It is handed in, and is not this view's own, because this view does not
+    /// last: it goes when the reader switches to Source, or back to the list
+    /// where the list and the document take turns on screen. The pages built
+    /// would go with it, and coming back would build the page again.
+    @ObservedObject var renderer: Renderer
+    /// Whether the reader can see the preview. The window keeps it where it is
+    /// while Source is showing, so that coming back to it loads nothing. While
+    /// it is out of sight it builds nothing and is left as it is; what changed
+    /// in the meantime is caught up with when it shows again.
+    var isShowing: Bool = true
     var onSelectedTextChange: (String?) -> Void = { _ in }
     var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
     var onSearchSelection: (String) -> Void = { _ in }
 
     @ObservedObject private var accessStore = DirectoryAccessStore.shared
     @State private var isRequestingFolderAccess = false
-    /// Builds the page off the main actor, and keeps the last few built. The
-    /// body runs far more often than the document changes, for every change
-    /// of selection and whenever anything in the window is redrawn, and asks
-    /// each time; only something new to show is built.
+
+    /// What builds a document's page.
+    typealias Renderer = LatestResult<RenderingRequest, Rendering>
+
+    /// A renderer for whatever is to outlast the previews it serves: a window,
+    /// for the app.
     ///
-    /// The last eight pages stay built, so going back to a document shows it
-    /// without building it again.
-    @StateObject private var renderer = LatestResult<RenderingRequest, Rendering>(keeping: 8) { request in
-        await MarkdownPreviewView.render(request)
+    /// A page is built when its document is first shown, and then kept, so
+    /// going back to a document never builds it again. Every document shown
+    /// keeps one, the latest: when a document's text or text size changes, its
+    /// new page replaces its old one.
+    static func makeRenderer() -> Renderer {
+        Renderer(
+            keeping: nil,
+            replacing: { newer, older in newer.documentID != nil && newer.documentID == older.documentID }
+        ) { request in
+            await MarkdownPreviewView.render(request)
+        }
     }
 
     /// Why the document's images failed, if any did.
     ///
     /// A file that is simply absent is reported plainly: offering permission for
     /// it would promise a fix that granting cannot deliver.
-    private enum ImageProblem {
+    enum ImageProblem {
         case none
         case unreadable
         case missing
@@ -69,7 +93,7 @@ struct MarkdownPreviewView: View {
     /// What is on disk is not among them. An image that turns up where one
     /// was missing is found when the document, its text size or the folders
     /// the app may read next change.
-    private struct RenderingRequest: Equatable {
+    struct RenderingRequest: Equatable {
         let documentID: String?
         let source: String
         let contentScale: CGFloat
@@ -77,8 +101,15 @@ struct MarkdownPreviewView: View {
         let grantedDirectories: [URL]
     }
 
+    /// What the preview asks its renderer for and whether it is asking: it
+    /// asks again when either changes, and not at all while out of sight.
+    private struct Asking: Equatable {
+        let request: RenderingRequest
+        let isShowing: Bool
+    }
+
     /// The rendered document, and what if anything is wrong with its images.
-    private struct Rendering {
+    struct Rendering {
         let html: String
         let imageProblem: ImageProblem
     }
@@ -97,20 +128,14 @@ struct MarkdownPreviewView: View {
     /// it takes. What is done about the images needs the folders the app has
     /// been granted, and those are the main actor's.
     nonisolated private static func render(_ request: RenderingRequest) async -> Rendering {
-        let built = PerfLog.timed {
-            MarkdownHTMLBuilder.document(for: request.source, contentScale: request.contentScale, softBreak: .lineBreak)
+        let document = MarkdownHTMLBuilder.document(
+            for: request.source,
+            contentScale: request.contentScale,
+            softBreak: .lineBreak
+        )
+        return await MainActor.run {
+            withImages(document, for: request)
         }
-        let finished = await MainActor.run {
-            PerfLog.timed { withImages(built.value, for: request) }
-        }
-        let name = request.documentID.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "(no document)"
-        PerfLog.log.info("""
-            [perf] render \(name, privacy: .public): \
-            \(request.source.utf8.count, privacy: .public) bytes to HTML in \
-            \(built.milliseconds, format: .fixed(precision: 1), privacy: .public) ms off the main actor, images \
-            \(finished.milliseconds, format: .fixed(precision: 1), privacy: .public) ms on it
-            """)
-        return finished.value
     }
 
     /// `WKWebView.loadHTMLString(_:baseURL:)` gives the web content process no
@@ -189,7 +214,8 @@ struct MarkdownPreviewView: View {
                     onSelectedRangesChange: showsThisDocument ? onSelectedRangesChange : { _ in },
                     onSearchSelection: onSearchSelection,
                     onRequestImageAccess: { isRequestingFolderAccess = true },
-                    scrollMemory: scrollMemory
+                    scrollMemory: scrollMemory,
+                    isShowing: isShowing
                 )
             }
             if renderer.isTakingLong {
@@ -200,18 +226,8 @@ struct MarkdownPreviewView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task(id: request) {
-            // What was asked for and of which view's renderer, to tell why a
-            // page is built twice: a renderer that is not the one before is a
-            // view made anew, and the same one is something here that changed.
-            let name = request.documentID.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "(no document)"
-            let asked = String(UInt(bitPattern: ObjectIdentifier(renderer).hashValue), radix: 16).suffix(5)
-            PerfLog.log.info("""
-                [perf] render asked for \(name, privacy: .public) of renderer \(asked, privacy: .public): \
-                scale \(request.contentScale, privacy: .public), \
-                folder \(request.baseURL?.lastPathComponent ?? "(none)", privacy: .public), \
-                \(request.grantedDirectories.count, privacy: .public) folders granted
-                """)
+        .task(id: Asking(request: request, isShowing: isShowing)) {
+            guard isShowing else { return }
             await renderer.ask(request)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -273,12 +289,21 @@ struct MarkdownPreviewView: View {
 }
 
 #if DEBUG
+private struct MarkdownPreviewViewPreviewHost: View {
+    @StateObject private var renderer = MarkdownPreviewView.makeRenderer()
+
+    var body: some View {
+        MarkdownPreviewView(
+            source: MarkdownPreviewFixtures.excerptFile.contents,
+            baseURL: nil,
+            textSize: .large,
+            selections: .constant([MarkdownSelectionRange(location: 0, length: 120)]),
+            renderer: renderer
+        )
+    }
+}
+
 #Preview("Markdown Preview View") {
-    MarkdownPreviewView(
-        source: MarkdownPreviewFixtures.excerptFile.contents,
-        baseURL: nil,
-        textSize: .large,
-        selections: .constant([MarkdownSelectionRange(location: 0, length: 120)])
-    )
+    MarkdownPreviewViewPreviewHost()
 }
 #endif

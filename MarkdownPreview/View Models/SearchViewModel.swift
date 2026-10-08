@@ -241,7 +241,7 @@ final class SearchViewModel: ObservableObject {
            savedSelectionsBeforeDetailSearch[currentDocument.id] == nil {
             savedSelectionsBeforeDetailSearch[currentDocument.id] = store.selections(for: currentDocument.id)
         }
-        detailSearch.refresh(in: currentSearchText)
+        detailSearch.refresh(in: textToSearch(for: detailSearch.query))
         applyDetailSearchSelection()
     }
 
@@ -256,11 +256,22 @@ final class SearchViewModel: ObservableObject {
         return true
     }
 
-    /// The text of the document on screen as a search sees it. The store keeps
-    /// it, so that each search does not read the whole document again.
-    private var currentSearchText: MarkdownTextOffsetMapping {
-        store.currentDocument.flatMap { store.searchMapping(for: $0.id) }
-            ?? MarkdownTextOffsetMapping(sourceText: "")
+    /// The text of the document on screen as a search for `query` sees it.
+    /// The store keeps it, so that each search does not read the whole
+    /// document again.
+    ///
+    /// With nothing to look for, it is not asked for. The store reads a
+    /// document's text in the background, and asking before that is done
+    /// reads it there and then; the search is refreshed whenever a document
+    /// is shown, so asking every time read each document on the main actor as
+    /// it was opened.
+    private func textToSearch(for query: String) -> MarkdownTextOffsetMapping {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let document = store.currentDocument,
+              let text = store.searchMapping(for: document.id) else {
+            return MarkdownTextOffsetMapping(sourceText: "")
+        }
+        return text
     }
 
     private func updateDetailSearch(for query: String) {
@@ -270,7 +281,7 @@ final class SearchViewModel: ObservableObject {
             savedSelectionsBeforeDetailSearch[currentDocument.id] = store.selections(for: currentDocument.id)
         }
 
-        detailSearch.updateQuery(query, in: currentSearchText)
+        detailSearch.updateQuery(query, in: textToSearch(for: query))
         applyDetailSearchSelection()
     }
 

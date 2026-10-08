@@ -17,6 +17,7 @@ struct DetailPreviewPane: View {
     let file: MarkdownFile?
     let mode: Mode
     let textSize: DynamicTypeSize
+    @StateObject private var renderer = MarkdownPreviewView.makeRenderer()
 
     var body: some View {
         Group {
@@ -27,7 +28,8 @@ struct DetailPreviewPane: View {
                         source: file.contents,
                         baseURL: file.url.deletingLastPathComponent(),
                         textSize: textSize,
-                        selections: .constant([])
+                        selections: .constant([]),
+                        renderer: renderer
                     )
                 case .source:
                     MarkdownSourceView(contents: file.contents, textSize: textSize, selections: .constant([]))

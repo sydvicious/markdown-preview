@@ -39,6 +39,10 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
     /// Where the reader was in each document, kept by the session so that it
     /// outlasts this view. Without one the view keeps its own.
     var scrollMemory: PreviewScrollMemory? = nil
+    /// Whether the reader can see the page. It is kept, loaded, behind Source,
+    /// so that coming back to it loads nothing; while it is there it is left
+    /// alone, and what it says is not listened to.
+    var isShowing: Bool = true
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String?
@@ -60,8 +64,10 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         /// Where to put the reader when the page now loading has finished.
         var scrollRestoration: PreviewScrollRestoration.Restoration = .top
         var isLoadingPage = false
-        /// When the page now loading was handed to the web view.
-        var loadStarted: ContinuousClock.Instant?
+        /// Whether the reader can see the page, or it is waiting behind Source.
+        var isShowing = true
+        /// What the page now loading, or last loaded, was loaded against.
+        var loadedBaseURL: URL?
 
         func webView(
             _ webView: WKWebView,
@@ -78,8 +84,13 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
             decisionHandler(.cancel)
         }
 
+        /// The system has taken the page's process away, as it may with one
+        /// kept out of sight. The page is loaded again.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            reloadAfterLosingThePage(in: webView)
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            logPageLoad()
             self.webView?.applySelection(lastSelectedRange)
             // After the selection, which centres itself: on a reload the
             // reader's place wins.
@@ -122,6 +133,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.markdownSource = source
         context.coordinator.webView = webView
+        context.coordinator.isShowing = isShowing
         if let scrollMemory {
             context.coordinator.scrollMemory = scrollMemory
         }
@@ -163,6 +175,23 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         (webView as? MarkdownCopyWebView)?.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
             coordinator?.onSearchSelection(text)
         }
+        // Out of sight behind Source. A page already on its way is loaded,
+        // and nothing else is done to one nobody can see: no selection put
+        // into it, which would scroll it, and no keyboard taken for it.
+        let wasShowing = context.coordinator.isShowing
+        context.coordinator.isShowing = isShowing
+        guard isShowing else {
+            if context.coordinator.lastHTML != html {
+                context.coordinator.load(
+                    html,
+                    baseURL: baseURL,
+                    showing: .init(documentID: documentID, source: source),
+                    in: webView
+                )
+            }
+            return
+        }
+
         let didReceivePreviewOriginatedSelection = PreviewSelectionBridge.isEcho(
             ofPreviewOriginated: context.coordinator.previewOriginatedSelectedRange,
             incoming: selectedRange
@@ -179,6 +208,16 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
                 showing: .init(documentID: documentID, source: source),
                 in: webView
             )
+        } else if !wasShowing {
+            // iOS draws a selection in a web view that has had the keyboard
+            // only while it has it. One the reader touched to select in took
+            // the keyboard then, and gave it up when it went out of sight;
+            // a selection put back into it now is there and is not drawn. So
+            // it takes the keyboard back for the selection it is to show.
+            if selectedRange != nil {
+                webView.becomeFirstResponder()
+            }
+            context.coordinator.comeBackIntoView(selecting: selectedRange)
         } else if shouldApplySelection && !didReceivePreviewOriginatedSelection {
             (webView as? MarkdownCopyWebView)?.applySelection(selectedRange)
         }
@@ -213,6 +252,10 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     /// Where the reader was in each document, kept by the session so that it
     /// outlasts this view. Without one the view keeps its own.
     var scrollMemory: PreviewScrollMemory? = nil
+    /// Whether the reader can see the page. It is kept, loaded, behind Source,
+    /// so that coming back to it loads nothing; while it is there it is left
+    /// alone, and what it says is not listened to.
+    var isShowing: Bool = true
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String?
@@ -234,8 +277,10 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         /// Where to put the reader when the page now loading has finished.
         var scrollRestoration: PreviewScrollRestoration.Restoration = .top
         var isLoadingPage = false
-        /// When the page now loading was handed to the web view.
-        var loadStarted: ContinuousClock.Instant?
+        /// Whether the reader can see the page, or it is waiting behind Source.
+        var isShowing = true
+        /// What the page now loading, or last loaded, was loaded against.
+        var loadedBaseURL: URL?
 
         func webView(
             _ webView: WKWebView,
@@ -252,13 +297,20 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             decisionHandler(.cancel)
         }
 
+        /// The system has taken the page's process away, as it may with one
+        /// kept out of sight. The page is loaded again.
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            reloadAfterLosingThePage(in: webView)
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            logPageLoad()
             self.webView?.applySelection(lastSelectedRange)
             // After the selection, which centres itself: on a reload the
             // reader's place wins.
             restoreScrollPosition(in: webView)
-            self.webView?.takeFirstResponderIfUnclaimed()
+            if isShowing {
+                self.webView?.takeFirstResponderIfUnclaimed()
+            }
         }
     }
 
@@ -297,6 +349,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.markdownSource = source
         context.coordinator.webView = webView
+        context.coordinator.isShowing = isShowing
         if let scrollMemory {
             context.coordinator.scrollMemory = scrollMemory
         }
@@ -335,6 +388,23 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         (webView as? MarkdownCopyWebView)?.searchSelectionHandler = { [weak coordinator = context.coordinator] text in
             coordinator?.onSearchSelection(text)
         }
+        // Out of sight behind Source. A page already on its way is loaded,
+        // and nothing else is done to one nobody can see: no selection put
+        // into it, which would scroll it, and no keyboard taken for it.
+        let wasShowing = context.coordinator.isShowing
+        context.coordinator.isShowing = isShowing
+        guard isShowing else {
+            if context.coordinator.lastHTML != html {
+                context.coordinator.load(
+                    html,
+                    baseURL: baseURL,
+                    showing: .init(documentID: documentID, source: source),
+                    in: webView
+                )
+            }
+            return
+        }
+
         let didReceivePreviewOriginatedSelection = PreviewSelectionBridge.isEcho(
             ofPreviewOriginated: context.coordinator.previewOriginatedSelectedRange,
             incoming: selectedRange
@@ -351,6 +421,9 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
                 showing: .init(documentID: documentID, source: source),
                 in: webView
             )
+        } else if !wasShowing {
+            context.coordinator.comeBackIntoView(selecting: selectedRange)
+            (webView as? MarkdownCopyWebView)?.takeFirstResponderIfUnclaimed()
         } else if shouldApplySelection && !didReceivePreviewOriginatedSelection {
             (webView as? MarkdownCopyWebView)?.applySelection(selectedRange)
             if selectedRange != nil {
@@ -461,16 +534,8 @@ private final class MarkdownCopyWebView: WKWebView {
 
 private extension MarkdownCopyWebView {
     func applySelection(_ selectedRange: MarkdownSelectionRange?) {
-        let placed = PerfLog.timed {
-            MarkdownPreviewWebView.selectionInvocation(source: markdownSource, selectedRange: selectedRange)
-        }
-        if selectedRange != nil {
-            PerfLog.log.info("""
-                [perf] selection placed in the page's terms in \
-                \(placed.milliseconds, format: .fixed(precision: 1), privacy: .public) ms
-                """)
-        }
-        evaluateJavaScript(placed.value)
+        let payload = MarkdownPreviewWebView.selectionInvocation(source: markdownSource, selectedRange: selectedRange)
+        evaluateJavaScript(payload)
     }
 
     func writeBlockRangeToPasteboard(start: Int, end: Int, kind: MarkdownCopyableBlockKind?) {
@@ -593,26 +658,53 @@ extension MarkdownPreviewWebView.Coordinator {
         scrollRestoration = scrollMemory.restoration(for: content)
         loadedContent = content
         lastHTML = html
+        loadedBaseURL = baseURL
         isLoadingPage = true
-        loadStarted = .now
         webView.loadHTMLString(html, baseURL: baseURL)
     }
 
-    /// Says how long the page took, from being handed to the web view to
-    /// having finished loading.
-    func logPageLoad() {
-        guard let loadStarted else { return }
-        self.loadStarted = nil
-        PerfLog.log.info("""
-            [perf] page: \(self.lastHTML?.utf8.count ?? 0, privacy: .public) bytes of HTML loaded in \
-            \(PerfLog.milliseconds(since: loadStarted), format: .fixed(precision: 1), privacy: .public) ms
-            """)
+    /// Loads the page again after its process has gone. Where the reader was
+    /// is put back as for any other load of the same document.
+    func reloadAfterLosingThePage(in webView: WKWebView) {
+        guard let lastHTML, let loadedContent else { return }
+        load(lastHTML, baseURL: loadedBaseURL, showing: loadedContent, in: webView)
+    }
+
+    /// The page is in front of the reader again, after a spell behind Source
+    /// with nothing loaded in the meantime.
+    ///
+    /// WebKit lets go of a page's selection when the page loses the keyboard,
+    /// so the selection is put back. Putting it back brings it to the middle
+    /// of the window, so the reader is then put back where they were: where
+    /// they left the page, or where they went to in the source if they moved
+    /// there. A page still loading does both of these itself when it is done.
+    func comeBackIntoView(selecting selectedRange: MarkdownSelectionRange?) {
+        guard let webView, !isLoadingPage else { return }
+        webView.applySelection(selectedRange)
+        // Unless the selection is one they made in the source since: then the
+        // middle of the window, where putting it back has brought it, is
+        // where they want to be.
+        if selectedRange != nil,
+           scrollMemory.takeSelectionToShow(in: loadedContent?.documentID, for: .preview) {
+            return
+        }
+        let place = loadedContent.map { scrollMemory.restoration(for: $0) } ?? .top
+        webView.evaluateJavaScript(place.script ?? PreviewScriptCall.scrollToOffset(x: 0, y: 0))
     }
 
     /// Puts the reader back where `load` found them, once the page is there to
     /// be scrolled.
     func restoreScrollPosition(in webView: WKWebView) {
         isLoadingPage = false
+        // A selection the reader has made in the source since comes before
+        // the place: it was put into the page as it loaded, which brought it
+        // to the middle of the window, and it is left there. A page nobody
+        // can see leaves that for when it is shown.
+        if isShowing, lastSelectedRange != nil,
+           scrollMemory.takeSelectionToShow(in: loadedContent?.documentID, for: .preview) {
+            scrollRestoration = .top
+            return
+        }
         guard let script = scrollRestoration.script else { return }
         scrollRestoration = .top
         webView.evaluateJavaScript(script)
@@ -657,6 +749,8 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
             guard let payload = PreviewCopyBlockMessage(messageBody: message.body) else { return }
             webView?.writeBlockRangeToPasteboard(start: payload.start, end: payload.end, kind: payload.kind)
         case previewSelectionChangedMessageHandlerName:
+            // Behind Source the selection is the source pane's to change.
+            guard isShowing else { return }
             let payload = PreviewSelectionChangedMessage(messageBody: message.body)
             webView?.currentSelectionText = payload.selectedText
             let selectionRanges = webView.map {
@@ -670,6 +764,10 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
                 lastSelectedRange = selectionRanges.first
                 previewOriginatedSelectedRange = selectionRanges.first
                 onSelectedRangesChange(selectionRanges)
+                if !payload.wasApplied {
+                    // The reader's own: where the source pane goes next.
+                    scrollMemory.rememberSelection(in: loadedContent?.documentID, by: .preview)
+                }
             }
             if payload.selectedText != nil {
                 lastPreviewSelectedText = payload.selectedText
@@ -680,7 +778,10 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
         case previewScrollChangedMessageHandlerName:
             // A page that is still loading is not where the reader left it;
             // what it reports would overwrite the place being kept for them.
+            // Nor is a page behind Source where the reader is: what moves it
+            // there is the app, and the reader is moving in the source.
             guard !isLoadingPage,
+                  isShowing,
                   let loadedContent,
                   let position = PreviewScrollPosition(messageBody: message.body) else {
                 return
@@ -689,6 +790,7 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
         case previewSourceOffsetChangedMessageHandlerName:
             // The same place again, as the source pane will want it.
             guard !isLoadingPage,
+                  isShowing,
                   let loadedContent,
                   let place = PreviewSourceOffsetMessage(messageBody: message.body) else {
                 return

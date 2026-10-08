@@ -365,3 +365,49 @@ test('scrolling reports the place in the source after the place in the page', as
     { name: 'previewSourceOffsetChanged', body: 160 }
   ]);
 });
+
+// The place in the source is told to the app so that the source pane can
+// follow the reader. When it is the app that moved the page, to put the
+// reader back or to show a selection, the reader has gone nowhere, and the
+// source pane has nothing to follow.
+
+test('the app moving the page is not the reader moving, and no place in the source is reported', async () => {
+  const { window, preview, messages } = sourcePage();
+
+  preview.scrollToOffset(0, 420);
+  window.dispatchEvent(new window.Event('scroll'));
+  await tick(150);
+
+  assert.deepEqual(plain(messages), [{ name: 'previewScrollChanged', body: [0, 420, 1400] }]);
+});
+
+test('the reader moving the page after the app did is reported', async () => {
+  const { window, preview, messages } = sourcePage();
+  preview.scrollToOffset(0, 420);
+  window.dispatchEvent(new window.Event('scroll'));
+  await tick(150);
+
+  // The second block ends exactly at the top of the window, so the reader is
+  // at the start of the third.
+  setScrollGeometry(window, { y: 620 });
+  window.dispatchEvent(new window.Event('scroll'));
+  await tick(150);
+
+  assert.deepEqual(plain(messages).slice(1), [
+    { name: 'previewScrollChanged', body: [0, 620, 1400] },
+    { name: 'previewSourceOffsetChanged', body: 220 }
+  ]);
+});
+
+// Another script moves the page to show a selection, and says so. It may ask
+// for further than the page goes, as for a selection on the last lines.
+test('a scroll another script says is the app\'s is not the reader moving', async () => {
+  const { window, preview, messages } = sourcePage();
+
+  preview.noteAppScroll(5000);
+  setScrollGeometry(window, { y: 1400 });
+  window.dispatchEvent(new window.Event('scroll'));
+  await tick(150);
+
+  assert.deepEqual(plain(messages), [{ name: 'previewScrollChanged', body: [0, 1400, 1400] }]);
+});

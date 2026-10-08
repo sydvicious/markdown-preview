@@ -215,11 +215,12 @@ enum PreviewScrollRestoration {
 /// they were, the place each page reports is kept here under its document,
 /// with the text it was reported for.
 ///
-/// The source pane shows the same document, and is opened where the reader
-/// was in the preview, as the preview is where they were in the source. What
-/// the two have in common is the source, so a place is also kept as an offset
-/// into it: the page reports the one at the top of its window, and the source
-/// pane the one at the top of its text.
+/// The source pane shows the same document. Both panes are kept, each where
+/// the reader left it, and one follows the other only when the reader has
+/// moved there since, by scrolling or by selecting something. What the two
+/// have in common is the source, so a place to follow is an offset into it:
+/// the page reports the one at the top of its window when the reader moves
+/// it, and the source pane the one at the top of its text.
 ///
 /// Nothing of it is saved. A document opened in a later launch starts at the
 /// top.
@@ -238,29 +239,41 @@ final class PreviewScrollMemory {
         /// The reader last moved in the source pane, so where the preview was
         /// is no longer where they are.
         var movedInSourceLast = false
+        /// The pane the reader selected something in, if they have not
+        /// scrolled since and the other pane has not yet shown it.
+        var selectionMadeIn: Pane?
+        /// The reader has moved in the preview since the source pane was last
+        /// where they were, and it has not yet gone there.
+        var sourceHasPlaceToFollow = false
     }
 
     private var places: [String: Place] = [:]
 
-    /// Notes where the reader is in the preview of `content`. A page that is
-    /// no document, as in a SwiftUI preview, is not remembered.
+    /// Notes where the preview's page of `content` is, for putting it back
+    /// there when it is loaded again. A page that is no document, as in a
+    /// SwiftUI preview, is not remembered.
+    ///
+    /// The page says this whoever moved it. It is not the reader moving: that
+    /// is `rememberSourceOffset`, which the page sends as well when it was.
     func remember(_ position: PreviewScrollPosition, in content: PreviewScrollRestoration.Content) {
         guard let documentID = content.documentID else { return }
         places[documentID, default: Place()].inPreview = (position, content)
-        places[documentID]?.movedInSourceLast = false
     }
 
-    /// Notes what of the document's source is at the top of `pane`.
+    /// Notes that the reader has moved in `pane`, and what of the document's
+    /// source is now at the top of it. The other pane has somewhere to follow
+    /// them to, and that comes before a selection made earlier: someone who
+    /// selects a thing and then reads on is where they have read to.
     func rememberSourceOffset(_ offset: Int, in documentID: String?, by pane: Pane) {
         guard let documentID, offset >= 0 else { return }
         places[documentID, default: Place()].sourceOffset = offset
-        if pane == .source {
-            places[documentID]?.movedInSourceLast = true
-        }
+        places[documentID]?.selectionMadeIn = nil
+        places[documentID]?.movedInSourceLast = pane == .source
+        places[documentID]?.sourceHasPlaceToFollow = pane == .preview
     }
 
     /// What of the document's source the reader was last at, in either pane.
-    /// The source pane opens there.
+    /// A source pane that is given the document's text afresh opens there.
     func sourceOffset(for documentID: String?) -> Int? {
         guard let documentID else { return nil }
         return places[documentID]?.sourceOffset
@@ -285,17 +298,62 @@ final class PreviewScrollMemory {
     func forget(documentID: String) {
         places.removeValue(forKey: documentID)
     }
+
+    /// Notes that the reader selected something in `pane`.
+    ///
+    /// The selection is the same in both panes, so the other one shows it when
+    /// it is next in front of the reader, and that comes before the place kept
+    /// for it. Until they scroll: someone who selects a thing and then reads on
+    /// is where they have read to, and the other pane goes there.
+    func rememberSelection(in documentID: String?, by pane: Pane) {
+        guard let documentID else { return }
+        places[documentID, default: Place()].selectionMadeIn = pane
+    }
+
+    /// Where a source pane that has kept its text is to go on being shown
+    /// again: the place in the source the reader moved to in the preview, if
+    /// they have since it was last where they were. Nil leaves it where it
+    /// is. Asking takes it, so it is followed once.
+    ///
+    /// The preview is not asked this way. Where it goes is `restoration`.
+    func takePlaceToFollow(in documentID: String?, for pane: Pane) -> Int? {
+        guard pane == .source,
+              let documentID,
+              let place = places[documentID],
+              place.sourceHasPlaceToFollow else {
+            return nil
+        }
+        places[documentID]?.sourceHasPlaceToFollow = false
+        return place.sourceOffset
+    }
+
+    /// Whether `pane` is to show a selection the reader made in the other one,
+    /// and not the place kept for it. Asking takes it: the selection is shown
+    /// once, and after that the pane is wherever the reader leaves it.
+    func takeSelectionToShow(in documentID: String?, for pane: Pane) -> Bool {
+        guard let documentID,
+              let madeIn = places[documentID]?.selectionMadeIn,
+              madeIn != pane else {
+            return false
+        }
+        places[documentID]?.selectionMadeIn = nil
+        return true
+    }
 }
 
 struct PreviewSelectionChangedMessage {
     var selectedText: String?
     var displayRangeResult: Any?
+    /// The selection is one the app put into the page, and not one the reader
+    /// made there.
+    var wasApplied = false
 
     init(messageBody: Any) {
         let payload = messageBody as? [String: Any]
         let selectedText = (payload?["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.selectedText = selectedText?.isEmpty == false ? selectedText : nil
         displayRangeResult = payload?["ranges"]
+        wasApplied = (payload?["applied"] as? Bool) ?? false
     }
 }
 

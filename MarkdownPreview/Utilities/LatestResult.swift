@@ -16,8 +16,10 @@ import Combine
 /// finishes; and one that outlasts `patience` is said to be taking long, which
 /// is when the preview shows that it is working.
 ///
-/// The last few results are kept, so that going back to a document does not
-/// build its page again.
+/// Results are kept, so that going back to a document does not build its page
+/// again: as many as asked for, or all of them. A result can be said to
+/// replace another, as the page of a document replaces the page of how the
+/// document was before it changed.
 @MainActor
 final class LatestResult<Request: Equatable & Sendable, Result: Sendable>: ObservableObject {
     /// The last result finished, and what was asked for to get it.
@@ -32,7 +34,9 @@ final class LatestResult<Request: Equatable & Sendable, Result: Sendable>: Obser
     private let patience: @Sendable () async -> Void
     /// The results kept, the one shown longest ago first.
     private var kept: [(request: Request, result: Result)] = []
-    private let capacity: Int
+    /// How many to keep, or nil to keep them all.
+    private let capacity: Int?
+    private let replaces: (_ newer: Request, _ older: Request) -> Bool
     /// What is being worked out, if anything is.
     private var underWay: Request?
     /// Counts the requests that started work, so that one finishing can tell
@@ -40,17 +44,22 @@ final class LatestResult<Request: Equatable & Sendable, Result: Sendable>: Obser
     private var latestStarted = 0
 
     /// - Parameters:
-    ///   - capacity: how many results to keep, the current one among them.
+    ///   - capacity: how many results to keep, the current one among them, or
+    ///     nil to keep every one.
+    ///   - replacing: whether a result for `newer` leaves one for `older` not
+    ///     worth keeping.
     ///   - work: works out the result. It is awaited from the main actor and
     ///     runs wherever it puts itself, which should be somewhere else.
     ///   - patience: returns when a request has been under way long enough to
     ///     say so.
     init(
-        keeping capacity: Int = 1,
+        keeping capacity: Int? = 1,
+        replacing: @escaping (_ newer: Request, _ older: Request) -> Bool = { _, _ in false },
         work: @escaping @Sendable (Request) async -> Result,
         patience: @escaping @Sendable () async -> Void = { try? await Task.sleep(for: .milliseconds(500)) }
     ) {
-        self.capacity = max(1, capacity)
+        self.capacity = capacity.map { max(1, $0) }
+        self.replaces = replacing
         self.work = work
         self.patience = patience
     }
@@ -89,10 +98,16 @@ final class LatestResult<Request: Equatable & Sendable, Result: Sendable>: Obser
         let result = await work(request)
         wait.cancel()
 
-        // Kept whether or not it is still wanted: the work has been done, and
-        // it may be wanted again.
+        guard latestStarted == started else {
+            // No longer the one wanted. The work has been done and it may be
+            // wanted again, so it is kept, unless what is kept already
+            // includes something newer that replaces it.
+            if !kept.contains(where: { replaces($0.request, request) }) {
+                keep(result, for: request)
+            }
+            return
+        }
         keep(result, for: request)
-        guard latestStarted == started else { return }
         current = (request, result)
         underWay = nil
         isTakingLong = false
@@ -105,12 +120,13 @@ final class LatestResult<Request: Equatable & Sendable, Result: Sendable>: Obser
         isTakingLong = false
     }
 
-    /// Keeps `result` as the one shown last, and lets go of the one shown
-    /// longest ago if there is no room.
+    /// Keeps `result` as the one shown last. It takes the place of whatever
+    /// it replaces, and if there is a limit and no room, the one shown longest
+    /// ago goes.
     private func keep(_ result: Result, for request: Request) {
-        kept.removeAll { $0.request == request }
+        kept.removeAll { $0.request == request || replaces(request, $0.request) }
         kept.append((request, result))
-        if kept.count > capacity {
+        if let capacity, kept.count > capacity {
             kept.removeFirst(kept.count - capacity)
         }
     }

@@ -9,7 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadPage, block, plain, setScrollGeometry } from './preview-page.mjs';
+import { loadPage, block, plain, select, reports, setScrollGeometry } from './preview-page.mjs';
 
 const twoBlocks =
   block(0, 12, 'First <strong>bold</strong> text') +
@@ -106,4 +106,73 @@ test('the selection is brought to the middle of the view', () => {
   // 900 below the top of the view, which is itself 1000 down the page, centred
   // in a 600-point view: 900 + 1000 - 300 + 10.
   assert.deepEqual(plain(scrolls), [[{ top: 1610, behavior: 'auto' }]]);
+});
+
+// A selection the reader makes in the page is somewhere the source pane should
+// go when it is shown. One the app put into the page is not: it came from the
+// source pane, or from a search, and the page saying it back is an echo. So
+// the page says which a selection is.
+
+test('a selection the app put there is reported as applied', () => {
+  const { preview } = page();
+  preview.applySelection(14, 30, 7, 14, 30, 16);
+
+  const snapshot = plain(preview.selectionSnapshot());
+
+  assert.equal(snapshot.applied, true);
+  assert.deepEqual(snapshot.ranges, [{ blockStart: 14, blockEnd: 30, displayLocation: 7, displayLength: 9 }]);
+});
+
+test('a selection the reader makes is not reported as applied', () => {
+  const { window, preview, document } = page();
+  const text = document.querySelectorAll('.md-block')[1].firstChild;
+  select(window, text, 0, text, 6);
+
+  assert.equal('applied' in plain(preview.selectionSnapshot()), false);
+});
+
+test('a selection the reader makes after one was applied is the reader\'s', () => {
+  const { window, preview, document } = page();
+  preview.applySelection(14, 30, 7, 14, 30, 16);
+  const text = document.querySelectorAll('.md-block')[1].firstChild;
+  select(window, text, 0, text, 6);
+
+  assert.equal('applied' in plain(preview.selectionSnapshot()), false);
+});
+
+// The same span, selected by hand after the app's selection was cleared, is
+// the reader's doing and not the app's.
+test('clearing the selection forgets what was applied', () => {
+  const { window, preview, document } = page();
+  preview.applySelection(14, 30, 7, 14, 30, 16);
+  preview.applySelection(null, null, null, null, null, null);
+  const text = document.querySelectorAll('.md-block')[1].firstChild;
+  select(window, text, 7, text, 16);
+
+  assert.equal('applied' in plain(preview.selectionSnapshot()), false);
+});
+
+test('a change of selection the app made is reported to it as applied', async () => {
+  const { document, preview, messages } = page();
+  preview.applySelection(14, 30, 7, 14, 30, 16);
+  document.dispatchEvent(new document.defaultView.Event('selectionchange'));
+  await reports(messages);
+
+  assert.equal(plain(messages).at(-1).body.applied, true);
+});
+
+// Showing a selection moves the page. That is the app's doing, and the source
+// pane is not to be sent after it as if the reader had scrolled there.
+test('bringing a selection into view is not the reader moving', async () => {
+  const loaded = loadPage(twoBlocks, ['scroll', 'selection', 'apply-selection']);
+  const { window, preview, messages, scrolls } = loaded;
+  setScrollGeometry(window, { y: 0, pageHeight: 3000, viewportHeight: 600 });
+  window.Range.prototype.getBoundingClientRect = () => ({ top: 900, left: 0, width: 100, height: 20 });
+
+  preview.applySelection(14, 30, 7, 14, 30, 16);
+  assert.equal(scrolls.length, 1);
+  window.dispatchEvent(new window.Event('scroll'));
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  assert.deepEqual(plain(messages).filter((message) => message.name === 'previewSourceOffsetChanged'), []);
 });
