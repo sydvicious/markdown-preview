@@ -16,6 +16,33 @@ struct MarkdownFile: Identifiable, Equatable {
         url.lastPathComponent
     }
 
+    /// The path this document is listed under. See `listedPath(of:)`.
+    var listedPath: String {
+        Self.listedPath(of: url)
+    }
+
+    /// The path a document at `url` is listed under, which is what the list,
+    /// the saved session and everything kept for each document know it by. It
+    /// is the same however the system spelled the path it handed over.
+    ///
+    /// `/var`, `/tmp` and `/etc` are links to the same names under `/private`,
+    /// and a path may arrive with or without that in front. `standardizedFileURL`
+    /// takes it off, but only when it finds the file at the shorter path, and
+    /// a sandboxed app cannot see a file outside its container unless it is
+    /// holding that file's security scope. So the one file came out as
+    /// `/var/mobile/…` when it was opened, with the scope held, and as
+    /// `/private/var/mobile/…` a second later when its bookmark was asked
+    /// where it led, and was taken for a document that had been moved. Here
+    /// it comes off whether or not the file can be seen.
+    static func listedPath(of url: URL) -> String {
+        let path = url.standardizedFileURL.path
+        let linked = ["/private/var", "/private/tmp", "/private/etc"]
+        guard linked.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) else {
+            return path
+        }
+        return String(path.dropFirst("/private".count))
+    }
+
     /// Thrown for a file that iCloud keeps and has not delivered to this
     /// device. It has been asked for.
     struct NotDelivered: Error {}

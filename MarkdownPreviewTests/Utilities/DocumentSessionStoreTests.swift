@@ -284,7 +284,11 @@ struct DocumentSessionStoreTests {
 
         try FileManager.default.removeItem(at: fileURL)
 
-        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        let restoredStore = DocumentSessionStore(
+            disablePersistenceRestore: false,
+            userDefaults: defaults,
+            documentReader: .readingAtOnce
+        )
         restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
 
         #expect(restoredStore.openedDocuments.isEmpty)
@@ -324,7 +328,11 @@ struct DocumentSessionStoreTests {
         store.persistDocuments(to: defaults)
         store.persistSelectedDocument(to: defaults)
 
-        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        let restoredStore = DocumentSessionStore(
+            disablePersistenceRestore: false,
+            userDefaults: defaults,
+            documentReader: .readingAtOnce
+        )
         restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth, userDefaults: defaults)
 
         #expect(restoredStore.openedDocuments.count == 2)
@@ -360,7 +368,11 @@ struct DocumentSessionStoreTests {
 
         try FileManager.default.removeItem(at: betaURL)
 
-        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        let restoredStore = DocumentSessionStore(
+            disablePersistenceRestore: false,
+            userDefaults: defaults,
+            documentReader: .readingAtOnce
+        )
         restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
 
         #expect(restoredStore.openedDocuments.map(\.id) == [alphaURL.standardizedFileURL.path])
@@ -423,7 +435,11 @@ struct DocumentSessionStoreTests {
         defaults.set(legacyID, forKey: "selectedMarkdownDocumentID")
         defaults.set([legacyID: "xxLarge"], forKey: "markdownDocumentTextSizes")
 
-        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        let restoredStore = DocumentSessionStore(
+            disablePersistenceRestore: false,
+            userDefaults: defaults,
+            documentReader: .readingAtOnce
+        )
         restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
 
         #expect(restoredStore.openedDocuments.count == 1)
@@ -462,7 +478,11 @@ struct DocumentSessionStoreTests {
         store.persistDocuments(to: defaults)
         store.persistSelectedDocument(to: defaults)
 
-        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        let restoredStore = DocumentSessionStore(
+            disablePersistenceRestore: false,
+            userDefaults: defaults,
+            documentReader: .readingAtOnce
+        )
         restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
         try restoredStore.openDocument(at: gammaURL)
 
@@ -574,7 +594,11 @@ struct DocumentSessionStoreTests {
     @MainActor
     private static func restoresOneDocument(_ resolvedID: String, fromSuiteNamed suiteName: String) -> Bool {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return false }
-        let restoredStore = DocumentSessionStore(disablePersistenceRestore: false, userDefaults: defaults)
+        let restoredStore = DocumentSessionStore(
+            disablePersistenceRestore: false,
+            userDefaults: defaults,
+            documentReader: .readingAtOnce
+        )
         restoredStore.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
 
         return restoredStore.openedDocuments.map(\.id) == [resolvedID]

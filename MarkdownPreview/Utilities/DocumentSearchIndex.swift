@@ -61,7 +61,7 @@ final class DocumentSearchIndex {
         // crash at every launch.
         listingsByDocumentID = Dictionary(
             documents.map { file in
-                (file.url.standardizedFileURL.path, Listing(fileName: file.fileName, contents: file.contents))
+                (file.listedPath, Listing(fileName: file.fileName, contents: file.contents))
             },
             uniquingKeysWith: { first, _ in first }
         )
@@ -71,7 +71,7 @@ final class DocumentSearchIndex {
     }
 
     func upsert(_ file: MarkdownFile) {
-        let documentID = file.url.standardizedFileURL.path
+        let documentID = file.listedPath
         // The same text as before is already read, or is being read.
         if listingsByDocumentID[documentID]?.contents == file.contents {
             listingsByDocumentID[documentID]?.fileName = file.fileName

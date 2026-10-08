@@ -103,8 +103,8 @@ final class ContentViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // A document whose file iCloud had not delivered when it was opened,
-        // or when the list was restored, turns up later, or fails to.
+        // A document whose file iCloud had not delivered when it was opened
+        // turns up later, or fails to.
         store.lateArrivals
             .sink { [weak self] arrival in
                 self?.take(arrival)
@@ -116,8 +116,7 @@ final class ContentViewModel: ObservableObject {
     /// goes on screen as it would have, or they are told why it did not come.
     private func take(_ arrival: DocumentSessionStore.LateArrival) {
         switch arrival {
-        case .arrived(_, let isShown):
-            guard isShown else { return }
+        case .arrived:
             detailMode = .preview
             preferredCompactColumn = usesSingleColumnNavigation ? .detail : .sidebar
             search.refreshDetailSearch()

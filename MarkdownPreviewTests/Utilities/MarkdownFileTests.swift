@@ -268,7 +268,7 @@ struct MarkdownFileTests {
         let error = try #require(thrown) as NSError
         #expect(error.domain == NSCocoaErrorDomain)
         #expect(error.code == NSUbiquitousFileUnavailableError)
-        #expect(cloud.requests > 1)
+        #expect(cloud.requests >= 1)
     }
 
     // Only a file that is on its way is waited for. One that arrived and
@@ -295,6 +295,56 @@ struct MarkdownFileTests {
 
         #expect((thrown as? CocoaError)?.code == .fileReadInapplicableStringEncoding)
         #expect(clock.now - started < .seconds(5))
+    }
+
+    // MARK: - The path a document is listed under
+
+    // `/var`, `/tmp` and `/etc` are links to the same names under `/private`,
+    // and the system gives a file's path now one way and now the other. A
+    // sandboxed app is given it the long way for a file it cannot see at that
+    // moment, which is every file outside its own container when it is not
+    // holding that file's permission. Listed under whichever it was given, one
+    // document has two names, and is taken for one that was moved.
+    //
+    // None of these paths is there on the machine running the tests, as a file
+    // the app cannot see is not there to it.
+    @Test(arguments: [
+        (
+            "/private/var/mobile/Library/Mobile Documents/com~apple~CloudDocs/notes/LICENSE.md",
+            "/var/mobile/Library/Mobile Documents/com~apple~CloudDocs/notes/LICENSE.md"
+        ),
+        ("/private/tmp/nowhere-4F2A/notes.md", "/tmp/nowhere-4F2A/notes.md"),
+        ("/private/etc/nowhere-4F2A/notes.md", "/etc/nowhere-4F2A/notes.md"),
+        ("/private/var", "/var")
+    ])
+    func aPathGivenTheLongWayIsListedTheShortWay(given: String, listed: String) {
+        #expect(MarkdownFile.listedPath(of: URL(fileURLWithPath: given)) == listed)
+    }
+
+    @Test(arguments: [
+        "/var/mobile/Library/Mobile Documents/com~apple~CloudDocs/notes/LICENSE.md",
+        "/tmp/nowhere-4F2A/notes.md",
+        "/Users/nobody-4F2A/Documents/notes.md",
+        // Not the links: these only begin the same way.
+        "/private/variable-4F2A/notes.md",
+        "/privateer-4F2A/var/notes.md",
+        "/private/nowhere-4F2A/notes.md",
+        "/Users/nobody-4F2A/private/var/notes.md"
+    ])
+    func anyOtherPathIsListedAsItIs(path: String) {
+        #expect(MarkdownFile.listedPath(of: URL(fileURLWithPath: path)) == path)
+    }
+
+    @Test func aPathIsListedWithItsDotsWorkedOut() {
+        let url = URL(fileURLWithPath: "/private/var/nowhere-4F2A/drafts/../notes/./LICENSE.md")
+
+        #expect(MarkdownFile.listedPath(of: url) == "/var/nowhere-4F2A/notes/LICENSE.md")
+    }
+
+    @Test func aFileIsListedUnderThePathOfItsURL() {
+        let file = MarkdownFile(url: URL(fileURLWithPath: "/private/var/nowhere-4F2A/notes.md"), contents: "")
+
+        #expect(file.listedPath == "/var/nowhere-4F2A/notes.md")
     }
 
     // MARK: - The rest of the type

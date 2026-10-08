@@ -542,7 +542,16 @@ struct ContentView: View {
 
     /// The document on screen in Source, if Source is what is showing.
     private var documentShowingInSource: UUID? {
-        isShowingPreview ? nil : store.currentDocument?.stableID
+        isShowingPreview ? nil : documentWithTextOnScreen
+    }
+
+    /// The document on screen, once its file has been read. At launch the
+    /// list is back before any file is, and a document is given a pane when
+    /// there is text to put in it: one given a pane before would load an empty
+    /// page, and then the page.
+    private var documentWithTextOnScreen: UUID? {
+        guard let document = store.currentDocument, document.isRead else { return nil }
+        return document.stableID
     }
 
     /// A preview pane for each document that has been shown in Preview, one on
@@ -595,7 +604,7 @@ struct ContentView: View {
 
     /// The document on screen in Preview, if Preview is what is showing.
     private var documentShowingInPreview: UUID? {
-        isShowingPreview ? store.currentDocument?.stableID : nil
+        isShowingPreview ? documentWithTextOnScreen : nil
     }
 
     private var isShowingPreview: Bool {
@@ -1317,7 +1326,7 @@ private struct AppLoadedPreviewHost: View {
     var body: some View {
         ContentView(
             previewFiles: [MarkdownPreviewFixtures.appLoadedFile],
-            selectedPreviewFileID: MarkdownPreviewFixtures.appLoadedFile.url.standardizedFileURL.path,
+            selectedPreviewFileID: MarkdownPreviewFixtures.appLoadedFile.listedPath,
             showsSourceInPreview: showsSource,
             disablePersistenceRestore: true,
             disableLiveFileMonitoring: true
