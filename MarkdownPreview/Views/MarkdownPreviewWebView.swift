@@ -17,6 +17,8 @@ private let copyBlockMessageHandlerName = "copyBlock"
 private let previewSelectionChangedMessageHandlerName = "previewSelectionChanged"
 private let previewScrollChangedMessageHandlerName = "previewScrollChanged"
 private let previewSourceOffsetChangedMessageHandlerName = "previewSourceOffsetChanged"
+/// The page's content has been read; see `content-read.js`.
+private let previewContentReadMessageHandlerName = "previewContentRead"
 /// Internal so the tests can check the image-access button really reaches the
 /// app.
 let requestImageAccessMessageHandlerName = "requestImageAccess"
@@ -65,7 +67,12 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         var scrollMemory = PreviewScrollMemory()
         /// Where to put the reader when the page now loading has finished.
         var scrollRestoration: PreviewScrollRestoration.Restoration = .top
+        /// The page now loading has not been given its selection and the
+        /// reader's place yet.
         var isLoadingPage = false
+        /// The page in the web view is the one now loading, and not still
+        /// the one before it. What a page says is listened to from then.
+        var hasPageBegunToArrive = false
         /// Whether the reader can see the page, or it is waiting behind Source.
         var isShowing = true
         /// What the page now loading, or last loaded, was loaded against.
@@ -96,13 +103,17 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
             reloadAfterLosingThePage(in: webView)
         }
 
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            guard navigation === pageNavigation else { return }
+            hasPageBegunToArrive = true
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard navigation === pageNavigation else { return }
             SparePreviewWebView.warmAfterAPageHasLoaded()
-            self.webView?.applySelection(lastSelectedRange)
-            // After the selection, which centres itself: on a reload the
-            // reader's place wins.
-            restoreScrollPosition(in: webView)
+            // Done already, as a rule, when the page said its content had
+            // been read. This is for a page that never said so.
+            placeReaderInPage(webView)
         }
     }
 
@@ -120,6 +131,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         userContent.add(context.coordinator, name: requestImageAccessMessageHandlerName)
         userContent.add(context.coordinator, name: previewScrollChangedMessageHandlerName)
         userContent.add(context.coordinator, name: previewSourceOffsetChangedMessageHandlerName)
+        userContent.add(context.coordinator, name: previewContentReadMessageHandlerName)
         webView.navigationDelegate = context.coordinator
         webView.markdownReading = reading
         context.coordinator.webView = webView
@@ -222,6 +234,9 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: previewSourceOffsetChangedMessageHandlerName
         )
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: previewContentReadMessageHandlerName
+        )
     }
 }
 #elseif os(macOS)
@@ -268,7 +283,12 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         var scrollMemory = PreviewScrollMemory()
         /// Where to put the reader when the page now loading has finished.
         var scrollRestoration: PreviewScrollRestoration.Restoration = .top
+        /// The page now loading has not been given its selection and the
+        /// reader's place yet.
         var isLoadingPage = false
+        /// The page in the web view is the one now loading, and not still
+        /// the one before it. What a page says is listened to from then.
+        var hasPageBegunToArrive = false
         /// Whether the reader can see the page, or it is waiting behind Source.
         var isShowing = true
         /// What the page now loading, or last loaded, was loaded against.
@@ -299,16 +319,17 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             reloadAfterLosingThePage(in: webView)
         }
 
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            guard navigation === pageNavigation else { return }
+            hasPageBegunToArrive = true
+        }
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard navigation === pageNavigation else { return }
             SparePreviewWebView.warmAfterAPageHasLoaded()
-            self.webView?.applySelection(lastSelectedRange)
-            // After the selection, which centres itself: on a reload the
-            // reader's place wins.
-            restoreScrollPosition(in: webView)
-            if isShowing {
-                self.webView?.takeFirstResponderIfUnclaimed()
-            }
+            // Done already, as a rule, when the page said its content had
+            // been read. This is for a page that never said so.
+            placeReaderInPage(webView)
         }
     }
 
@@ -326,6 +347,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         userContent.add(context.coordinator, name: requestImageAccessMessageHandlerName)
         userContent.add(context.coordinator, name: previewScrollChangedMessageHandlerName)
         userContent.add(context.coordinator, name: previewSourceOffsetChangedMessageHandlerName)
+        userContent.add(context.coordinator, name: previewContentReadMessageHandlerName)
         webView.navigationDelegate = context.coordinator
         webView.markdownReading = reading
         context.coordinator.webView = webView
@@ -420,6 +442,9 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: previewScrollChangedMessageHandlerName)
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: previewSourceOffsetChangedMessageHandlerName
+        )
+        webView.configuration.userContentController.removeScriptMessageHandler(
+            forName: previewContentReadMessageHandlerName
         )
     }
 }
@@ -721,7 +746,32 @@ extension MarkdownPreviewWebView.Coordinator {
         lastHTML = html
         loadedBaseURL = baseURL
         isLoadingPage = true
+        hasPageBegunToArrive = false
         pageNavigation = webView.loadHTMLString(html, baseURL: baseURL)
+    }
+
+    /// Puts the selection into the page now loading, and the reader back
+    /// where they were. Done once for each page: when the page says its
+    /// content has been read, or, for one that never says so, when it has
+    /// loaded.
+    ///
+    /// It used to wait for the page to have loaded, which a page does not say
+    /// until everything it refers to has arrived. An image from the network
+    /// keeps that back for as long as the network takes, with the text on
+    /// screen all the while and the reader not yet where they were. What an
+    /// image moves when it does arrive, the page puts right itself; see
+    /// `notePlacing` in the scrolling script.
+    func placeReaderInPage(_ webView: WKWebView) {
+        guard isLoadingPage else { return }
+        self.webView?.applySelection(lastSelectedRange)
+        // After the selection, which centres itself: on a reload the
+        // reader's place wins.
+        restoreScrollPosition(in: webView)
+        #if os(macOS)
+        if isShowing {
+            self.webView?.takeFirstResponderIfUnclaimed()
+        }
+        #endif
     }
 
     /// Loads the page again after its process has gone. Where the reader was
@@ -849,6 +899,12 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
                 return
             }
             scrollMemory.remember(position, in: loadedContent)
+        case previewContentReadMessageHandlerName:
+            // Said by the page now loading, and not by the one it is taking
+            // the place of, which may still have been saying things when
+            // this one was asked for.
+            guard hasPageBegunToArrive, let webView = message.webView else { return }
+            placeReaderInPage(webView)
         case previewSourceOffsetChangedMessageHandlerName:
             // The same place again, as the source pane will want it.
             guard !isLoadingPage,

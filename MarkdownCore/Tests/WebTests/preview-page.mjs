@@ -98,6 +98,22 @@ export const plain = (value) => (value === undefined ? undefined : JSON.parse(JS
 
 export const tick = (milliseconds = 0) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+/// Waits for the page to have loaded: everything it refers to has arrived.
+///
+/// A page made by `loadPage` says so a moment after it is made, and whatever
+/// last put the page where it is, is done over when it does. A test that
+/// counts what one restore does starts after that, as a restore asked for in
+/// a page that has long since loaded does.
+export function hasLoaded(window) {
+  return new Promise((resolve) => {
+    if (window.document.readyState === 'complete') {
+      resolve();
+    } else {
+      window.addEventListener('load', () => resolve(), { once: true });
+    }
+  });
+}
+
 /// Waits until the page has said at least `count` things to the app, and then
 /// a moment more for anything else already on its way.
 ///

@@ -19,6 +19,17 @@ struct MarkdownWebResourcesTests {
         }
     }
 
+    // The page tells the app when its content has been read, and the app then
+    // calls into the other scripts. So the script that says so runs after
+    // them all, and the scripts are installed in the order they are listed.
+    @Test func theScriptThatSaysTheContentHasBeenReadIsTheLastToRun() {
+        #expect(MarkdownWebResources.Script.allCases.last?.rawValue == "content-read")
+        #expect(
+            MarkdownWebResources.script(.contentRead)
+                .contains("window.webkit?.messageHandlers?.previewContentRead?.postMessage(")
+        )
+    }
+
     // The app calls these by name. A function renamed in a script and not in
     // the app fails silently in a web view: the call simply finds nothing.
     @Test func theScriptsDefineTheFunctionsTheAppCalls() {

@@ -23,6 +23,34 @@ window.markdownPreview = window.markdownPreview ?? {};
   };
   const isWhereTheAppPutIt = () => lastAppScrollY !== null && Math.abs(window.scrollY - lastAppScrollY) <= 1;
 
+  // The reader is put back as soon as the page's content is there, which is
+  // before its images are, and an image that arrives above their place moves
+  // it. A restore keeps at it for a couple of seconds, and an image from the
+  // network can take longer than that. So whatever last put the page where it
+  // is, is done once more when the page says that everything has arrived,
+  // unless the reader has moved the page since: then it is theirs.
+  //
+  // `again` does the placing over, looking afresh for where the place is.
+  // Another script that places the page, to show a selection, says so here.
+  let placing = null;
+  let readerHasMoved = false;
+  window.markdownPreview.notePlacing = (again) => {
+    placing = again;
+    readerHasMoved = false;
+  };
+  // Forgets a placing, if it is still the last: a selection that has been
+  // cleared is not somewhere to bring the page back to.
+  window.markdownPreview.forgetPlacing = (which) => {
+    if (placing === which) {
+      placing = null;
+    }
+  };
+  window.addEventListener('load', () => {
+    if (placing !== null && !readerHasMoved) {
+      placing();
+    }
+  });
+
   // A restore is asked for the moment the page finishes loading, which can be
   // before the page has its full height. Scrolling then goes only as far as
   // there is page, and the reader lands short of where they were. So a restore
@@ -65,6 +93,7 @@ window.markdownPreview = window.markdownPreview ?? {};
   // looks at where the page is, and only one that finds it in place counts.
   const restore = (x, target, hasLanded) => {
     stopRestoring('replaced');
+    window.markdownPreview.notePlacing(() => restore(x, target, hasLanded));
     const state = { tries: 0, scrolls: 0, askedForY: null, maxY: null, ended: null };
     restoreState = state;
     let isInPlace = false;
@@ -108,7 +137,10 @@ window.markdownPreview = window.markdownPreview ?? {};
 
   // Once the reader moves the page themselves, it is theirs.
   for (const type of ['wheel', 'touchstart', 'mousedown', 'keydown']) {
-    window.addEventListener(type, () => stopRestoring('the reader took over'), { passive: true });
+    window.addEventListener(type, () => {
+      readerHasMoved = true;
+      stopRestoring('the reader took over');
+    }, { passive: true });
   }
 
   // Puts the reader the same distance down the page as before. That has landed
@@ -212,6 +244,14 @@ window.markdownPreview = window.markdownPreview ?? {};
 
     pendingReport = setTimeout(() => {
       pendingReport = null;
+      // Until the page has loaded, where it is is where the app has put it so
+      // far, and that may be short of where the reader was: the page is not
+      // yet as tall as it will be. Told to the app as the reader's place, it
+      // would be kept in place of the one being put back. Once the reader
+      // moves the page it is their place, loaded or not.
+      if (document.readyState !== 'complete' && !readerHasMoved) {
+        return;
+      }
       window.webkit?.messageHandlers?.previewScrollChanged?.postMessage(window.markdownPreview.scrollPosition());
       // The place in the source is for the source pane to follow the reader
       // to, so it is told only when it is the reader who moved.

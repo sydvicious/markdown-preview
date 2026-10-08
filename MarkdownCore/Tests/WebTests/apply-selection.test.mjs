@@ -176,3 +176,51 @@ test('bringing a selection into view is not the reader moving', async () => {
 
   assert.deepEqual(plain(messages).filter((message) => message.name === 'previewSourceOffsetChanged'), []);
 });
+
+// A selection is put into the page as soon as its content is there, and
+// brought to the middle of the window. An image that arrives above it
+// afterwards moves it out of the middle, so it is brought back there when the
+// page has loaded, unless the reader has moved the page since.
+
+test('a selection brought into view is brought back there once the page has loaded', () => {
+  const loaded = loadPage(twoBlocks, ['scroll', 'selection', 'apply-selection']);
+  const { window, preview, scrolls } = loaded;
+  setScrollGeometry(window, { y: 0, pageHeight: 3000, viewportHeight: 600 });
+  window.Range.prototype.getBoundingClientRect = () => ({ top: 900, left: 0, width: 100, height: 20 });
+
+  preview.applySelection(14, 30, 7, 14, 30, 16);
+  assert.deepEqual(plain(scrolls).map(([to]) => to.top), [610]);
+
+  // It was in the middle of the window. An image 800 tall arrives above it.
+  window.Range.prototype.getBoundingClientRect = () => ({ top: 290 + 800, left: 0, width: 100, height: 20 });
+  window.dispatchEvent(new window.Event('load'));
+
+  assert.deepEqual(plain(scrolls).map(([to]) => to.top), [610, 1410]);
+});
+
+test('a selection the reader has scrolled away from is left where they put it', () => {
+  const loaded = loadPage(twoBlocks, ['scroll', 'selection', 'apply-selection']);
+  const { window, preview, scrolls } = loaded;
+  setScrollGeometry(window, { y: 0, pageHeight: 3000, viewportHeight: 600 });
+  window.Range.prototype.getBoundingClientRect = () => ({ top: 900, left: 0, width: 100, height: 20 });
+
+  preview.applySelection(14, 30, 7, 14, 30, 16);
+  window.dispatchEvent(new window.Event('wheel'));
+  window.dispatchEvent(new window.Event('load'));
+
+  assert.equal(scrolls.length, 1);
+});
+
+test('a selection that was cleared is not brought anywhere when the page has loaded', () => {
+  const loaded = loadPage(twoBlocks, ['scroll', 'selection', 'apply-selection']);
+  const { window, preview, scrolls } = loaded;
+  setScrollGeometry(window, { y: 0, pageHeight: 3000, viewportHeight: 600 });
+  window.Range.prototype.getBoundingClientRect = () => ({ top: 900, left: 0, width: 100, height: 20 });
+
+  preview.applySelection(14, 30, 7, 14, 30, 16);
+  preview.applySelection(null, null, null, null, null, null);
+  window.dispatchEvent(new window.Event('load'));
+
+  assert.equal(scrolls.length, 1);
+});
+

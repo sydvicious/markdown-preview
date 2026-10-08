@@ -9,7 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadPage, plain, setScrollGeometry, tick } from './preview-page.mjs';
+import { hasLoaded, loadPage, plain, setScrollGeometry, tick } from './preview-page.mjs';
 
 const page = () => loadPage('<p class="md-block">A long document.</p>', ['scroll']);
 
@@ -120,6 +120,7 @@ test('a scroll that did not take is made again until it does', async () => {
 // second try had been made.
 test('a restore that never takes stops after forty tries', async () => {
   const { window, preview, scrolls, scrolling } = page();
+  await hasLoaded(window);
   setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
 
   scrolling.ignored = true;
@@ -132,6 +133,7 @@ test('a restore that never takes stops after forty tries', async () => {
 // What a restore did, for a test to say when one does not end where it should.
 test('a restore says what it did', async () => {
   const { window, preview } = page();
+  await hasLoaded(window);
   setScrollGeometry(window, { pageHeight: 700, viewportHeight: 600 });
   assert.equal(plain(preview.restoreState()), null);
 
@@ -411,3 +413,125 @@ test('a scroll another script says is the app\'s is not the reader moving', asyn
 
   assert.deepEqual(plain(messages), [{ name: 'previewScrollChanged', body: [0, 1400, 1400] }]);
 });
+
+// The reader is put back as soon as the page's content is there, which is
+// before its images are, and one that arrives above their place moves it. A
+// restore keeps at it for a couple of seconds, and an image from the network
+// can take longer than that. So whatever last put the page where it is, is
+// done once more when the page says that everything has arrived.
+
+test('a place put back before the page has loaded is put back again when it has', async () => {
+  const { window, preview, scrolls } = page();
+  setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
+
+  preview.scrollToOffset(0, 900);
+  await tick(120);
+  assert.deepEqual(plain(scrolls), [[0, 900]], 'put back, and the restore is over');
+
+  // An image arrives above, and the page is no longer where it was put.
+  setScrollGeometry(window, { y: 400, pageHeight: 3500 });
+  window.dispatchEvent(new window.Event('load'));
+
+  assert.deepEqual(plain(scrolls), [[0, 900], [0, 900]]);
+});
+
+test('a place in the source is found again where it is once the page has loaded', async () => {
+  const body = '<p class="md-block" data-source-start="0" data-source-end="100">One</p>'
+    + '<p class="md-block" data-source-start="100" data-source-end="200">Two</p>';
+  const { window, document, preview, scrolls } = loadPage(body, ['scroll']);
+  setScrollGeometry(window, { y: 0, pageHeight: 4000, viewportHeight: 600 });
+  const [first, second] = document.querySelectorAll('.md-block');
+  // Where each block is, measured from the top of the page.
+  const layOut = (tops) => {
+    first.getBoundingClientRect = () => ({ top: tops[0] - window.scrollY, bottom: tops[1] - window.scrollY, height: tops[1] - tops[0] });
+    second.getBoundingClientRect = () => ({ top: tops[1] - window.scrollY, bottom: tops[1] + 400 - window.scrollY, height: 400 });
+  };
+  layOut([0, 1000]);
+
+  preview.scrollToSourceOffset(100);
+  assert.deepEqual(plain(scrolls).at(-1), [0, 1000]);
+
+  // Past the couple of seconds a restore lasts, an image arrives in the first
+  // block, and the second starts further down.
+  await tick(2300);
+  const before = scrolls.length;
+  layOut([0, 1800]);
+  window.dispatchEvent(new window.Event('load'));
+
+  assert.equal(scrolls.length, before + 1);
+  assert.deepEqual(plain(scrolls).at(-1), [0, 1800]);
+});
+
+for (const type of ['wheel', 'touchstart', 'mousedown', 'keydown']) {
+  test(`a page the reader has moved by ${type} is left where they put it when it has loaded`, async () => {
+    const { window, preview, scrolls } = page();
+    setScrollGeometry(window, { pageHeight: 3000, viewportHeight: 600 });
+
+    preview.scrollToOffset(0, 900);
+    await tick(120);
+    window.dispatchEvent(new window.Event(type));
+    setScrollGeometry(window, { y: 400 });
+    window.dispatchEvent(new window.Event('load'));
+
+    assert.deepEqual(plain(scrolls), [[0, 900]]);
+  });
+}
+
+test('a page nothing has put anywhere is left alone when it has loaded', () => {
+  const { window, scrolls } = page();
+  setScrollGeometry(window, { y: 0, pageHeight: 3000, viewportHeight: 600 });
+
+  window.dispatchEvent(new window.Event('load'));
+
+  assert.deepEqual(plain(scrolls), []);
+});
+
+// Until the page has loaded, where it is is where the app has put it so far,
+// which may be short of where the reader was: the page is not yet as tall as
+// it will be. Told to the app as the reader's place, that would be kept in
+// place of the place being put back.
+const stillLoading = (document) => Object.defineProperty(document, 'readyState', { value: 'interactive', configurable: true });
+const loaded = (document) => Object.defineProperty(document, 'readyState', { value: 'complete', configurable: true });
+const placesTold = (messages) => plain(messages).filter((message) => message.name === 'previewScrollChanged');
+
+test('where the app puts a page that is still loading is not told as the reader\'s place', async () => {
+  const { window, document, preview, messages } = page();
+  await tick(20);
+  stillLoading(document);
+  setScrollGeometry(window, { y: 0, pageHeight: 700, viewportHeight: 600 });
+
+  preview.scrollToOffset(0, 900);
+  window.dispatchEvent(new window.Event('scroll'));
+  await tick(160);
+
+  assert.deepEqual(placesTold(messages), []);
+});
+
+test('where the reader moves a page that is still loading is told', async () => {
+  const { window, document, preview, messages } = page();
+  await tick(20);
+  stillLoading(document);
+  setScrollGeometry(window, { y: 0, pageHeight: 3000, viewportHeight: 600 });
+
+  preview.scrollToOffset(0, 900);
+  window.dispatchEvent(new window.Event('wheel'));
+  setScrollGeometry(window, { y: 1200 });
+  window.dispatchEvent(new window.Event('scroll'));
+  await tick(160);
+
+  assert.deepEqual(placesTold(messages).map((message) => message.body), [[0, 1200, 2400]]);
+});
+
+test('where the app puts a page that has loaded is told, as it was', async () => {
+  const { window, document, preview, messages } = page();
+  await tick(20);
+  loaded(document);
+  setScrollGeometry(window, { y: 0, pageHeight: 3000, viewportHeight: 600 });
+
+  preview.scrollToOffset(0, 900);
+  window.dispatchEvent(new window.Event('scroll'));
+  await tick(160);
+
+  assert.deepEqual(placesTold(messages).map((message) => message.body), [[0, 900, 2400]]);
+});
+

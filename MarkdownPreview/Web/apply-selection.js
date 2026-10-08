@@ -9,6 +9,19 @@ window.markdownPreview = window.markdownPreview ?? {};
 // a block, named by its source offsets, and an offset into that block's
 // rendered text. Called with nulls, it clears the selection. Returns whether a
 // selection was made.
+// Brings what the app last selected to the middle of the window.
+const bringAppliedSelectionIntoView = () => {
+  const boundingRect = window.markdownPreview.appliedRange?.getBoundingClientRect();
+  if (!boundingRect) {
+    return;
+  }
+  const top = boundingRect.top + window.scrollY - (window.innerHeight / 2) + (boundingRect.height / 2);
+  // The app's doing, which the page's scrolling script is told, so that
+  // the source pane is not sent after it as if the reader had gone there.
+  window.markdownPreview?.noteAppScroll?.(Math.max(top, 0));
+  window.scrollTo({ top: Math.max(top, 0), behavior: 'auto' });
+};
+
 window.markdownPreview.applySelection = (
   startBlockStart, startBlockEnd, startOffset, endBlockStart, endBlockEnd, endOffset
 ) => {
@@ -16,6 +29,9 @@ window.markdownPreview.applySelection = (
   if (selection) {
     selection.removeAllRanges();
   }
+  // Whatever was selected before is no longer somewhere to bring the page
+  // back to when it has loaded.
+  window.markdownPreview?.forgetPlacing?.(bringAppliedSelectionIntoView);
   // What the app last selected here, so that the page can say of a selection
   // whether it is that or one the reader has made since.
   window.markdownPreview.appliedRange = null;
@@ -67,14 +83,12 @@ window.markdownPreview.applySelection = (
   selection?.addRange(range);
   window.markdownPreview.appliedRange = range.cloneRange();
 
-  const boundingRect = range.getBoundingClientRect();
-  if (boundingRect) {
-    const top = boundingRect.top + window.scrollY - (window.innerHeight / 2) + (boundingRect.height / 2);
-    // The app's doing, which the page's scrolling script is told, so that
-    // the source pane is not sent after it as if the reader had gone there.
-    window.markdownPreview?.noteAppScroll?.(Math.max(top, 0));
-    window.scrollTo({ top: Math.max(top, 0), behavior: 'auto' });
-  }
+  bringAppliedSelectionIntoView();
+  // The selection goes in as soon as the page's content is there, and an
+  // image that arrives above it afterwards moves it out of the middle. So it
+  // is brought back there when the page has loaded, unless the reader has
+  // moved the page since; see `notePlacing` in the scrolling script.
+  window.markdownPreview?.notePlacing?.(bringAppliedSelectionIntoView);
 
   return true;
 };

@@ -38,6 +38,9 @@ public enum MarkdownWebResources {
         case selectedHTML = "selected-html"
         /// Selecting a span of the rendered document.
         case applySelection = "apply-selection"
+        /// Tells the app that the page's content has been read. The last, so
+        /// that by the time the app hears it the others have all run.
+        case contentRead = "content-read"
     }
 
     /// The source of `script`.
