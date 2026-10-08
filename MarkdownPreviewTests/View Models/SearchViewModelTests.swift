@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 
+import Combine
 import Foundation
 import Testing
 import MarkdownCore
@@ -287,5 +288,81 @@ struct SearchViewModelTests {
         viewModel.seedFromPasteboardIfEmpty()
 
         #expect(viewModel.searchText == "beta")
+    }
+
+    // MARK: - Announcing only what changed
+
+    /// How often the view model announces that it will change while `work` is
+    /// done.
+    private func announcements(of viewModel: SearchViewModel, during work: () -> Void) -> Int {
+        var count = 0
+        let watching = viewModel.objectWillChange.sink { count += 1 }
+        defer { watching.cancel() }
+        work()
+        return count
+    }
+
+    // The window is redrawn, all of it, whenever the search announces a
+    // change, and the search is refreshed each time the list or the document
+    // on screen changes. Most refreshes find what was found before.
+    @Test func refreshingWithNothingToLookForAnnouncesNothing() {
+        let store = makeStore([("doc.md", "alpha beta alpha")])
+        let viewModel = SearchViewModel(store: store, findPasteboard: InMemoryFindPasteboard())
+
+        let announced = announcements(of: viewModel) {
+            viewModel.refreshDetailSearch()
+        }
+
+        #expect(announced == 0)
+    }
+
+    @Test func refreshingASearchThatFindsWhatItFoundBeforeAnnouncesNothing() {
+        let store = makeStore([("doc.md", "alpha beta alpha")])
+        let viewModel = SearchViewModel(store: store, findPasteboard: InMemoryFindPasteboard())
+        viewModel.setSearchText("alpha")
+        viewModel.flushPendingSearch()
+
+        let announced = announcements(of: viewModel) {
+            viewModel.refreshDetailSearch()
+        }
+
+        #expect(announced == 0)
+        #expect(viewModel.resultCount == 2)
+    }
+
+    @Test func refreshingASearchThatFindsSomethingElseAnnouncesIt() throws {
+        let store = makeStore([
+            ("a.md", "alpha in a"),
+            ("b.md", "alpha alpha in b")
+        ])
+        let viewModel = SearchViewModel(store: store, findPasteboard: InMemoryFindPasteboard())
+        viewModel.setSearchText("alpha")
+        viewModel.flushPendingSearch()
+        store.selectedDocumentID = try #require(store.openedDocuments.first { $0.file.fileName == "b.md" }).id
+
+        let announced = announcements(of: viewModel) {
+            viewModel.refreshDetailSearch()
+        }
+
+        #expect(announced == 1)
+        #expect(viewModel.resultCount == 2)
+    }
+
+    @Test func settingTheSelectedTextToWhatItIsAnnouncesNothing() {
+        let viewModel = SearchViewModel(store: makeStore([]), findPasteboard: InMemoryFindPasteboard())
+
+        #expect(announcements(of: viewModel) { viewModel.previewSelectedText = nil } == 0)
+        #expect(announcements(of: viewModel) { viewModel.previewSelectedText = "alpha" } == 1)
+        #expect(announcements(of: viewModel) { viewModel.previewSelectedText = "alpha" } == 0)
+        #expect(viewModel.previewSelectedText == "alpha")
+    }
+
+    @Test func settingTheFocusedFieldToWhatItIsAnnouncesNothing() {
+        let viewModel = SearchViewModel(store: makeStore([]), findPasteboard: InMemoryFindPasteboard())
+
+        #expect(announcements(of: viewModel) { viewModel.focusedField = nil } == 0)
+        #expect(announcements(of: viewModel) { viewModel.focusedField = .list } == 1)
+        #expect(announcements(of: viewModel) { viewModel.focusedField = .list } == 0)
+        #expect(viewModel.focusedField == .list)
     }
 }

@@ -18,7 +18,8 @@ struct ContentView: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
-    @EnvironmentObject private var commandCenter: MarkdownAppCommandCenter
+    /// Told what the window offers, and not watched. See `EnvironmentValues.commandCenter`.
+    @Environment(\.commandCenter) private var commandCenter
     @EnvironmentObject private var fileOpenState: FileOpenState
     @State private var pendingSearchFocusTask: Task<Void, Never>?
     @StateObject private var viewModel: ContentViewModel
@@ -246,7 +247,7 @@ struct ContentView: View {
         }
         .onDisappear {
             pendingSearchFocusTask?.cancel()
-            commandCenter.reset()
+            commandCenter?.reset()
         }
         #if os(iOS)
         .onChange(of: scenePhase) { _, newPhase in
@@ -742,7 +743,7 @@ struct ContentView: View {
     }
 
     private func syncCommandCenter() {
-        commandCenter.update(
+        commandCenter?.update(
             canFind: viewModel.canFind,
             handleFind: viewModel.handleFindCommand,
             canProjectFind: viewModel.canProjectFind,
@@ -1284,7 +1285,6 @@ private final class MacFirstResponderSinkNSView: NSView {
 #if DEBUG
 #Preview("App - Loaded") {
     AppLoadedPreviewHost()
-        .environmentObject(MarkdownAppCommandCenter())
         .environmentObject(FileOpenState())
         .frame(width: 393, height: 852)
 }
@@ -1294,7 +1294,6 @@ private final class MacFirstResponderSinkNSView: NSView {
         disablePersistenceRestore: true,
         disableLiveFileMonitoring: true
     )
-        .environmentObject(MarkdownAppCommandCenter())
         .environmentObject(FileOpenState())
         .frame(width: 393, height: 852)
 }
@@ -1332,7 +1331,6 @@ private struct AppLoadedPreviewHost: View {
             disableLiveFileMonitoring: true
         )
         .id(showsSource)
-        .environmentObject(MarkdownAppCommandCenter())
         .task {
             guard showsSource else { return }
             try? await Task.sleep(for: .milliseconds(2000))

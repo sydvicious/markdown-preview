@@ -39,7 +39,16 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var detailSearch = MarkdownSearchSession()
     /// Latest non-empty rendered-preview selection text, published from the
     /// preview web view so selection-driven find can use it.
-    @Published var previewSelectedText: String?
+    ///
+    /// Announced only when it changes: the window sets it to nil each time
+    /// another document is shown, and it nearly always is nil.
+    var previewSelectedText: String? {
+        willSet {
+            if newValue != previewSelectedText {
+                objectWillChange.send()
+            }
+        }
+    }
     /// Which search field currently holds keyboard focus, mirrored from the
     /// View's `@FocusState`.
     ///
@@ -49,7 +58,15 @@ final class SearchViewModel: ObservableObject {
     /// another app had searched for; writing it unfocused meant the app pushed
     /// its own term back out. Between the two the app fought every other app on
     /// the system over a buffer it was not currently using.
-    @Published var focusedField: SearchField?
+    ///
+    /// Announced only when it changes.
+    var focusedField: SearchField? {
+        willSet {
+            if newValue != focusedField {
+                objectWillChange.send()
+            }
+        }
+    }
 
     private let store: DocumentSessionStore
     /// Where the search term is shared from and published to. Handed in, so
@@ -241,7 +258,15 @@ final class SearchViewModel: ObservableObject {
            savedSelectionsBeforeDetailSearch[currentDocument.id] == nil {
             savedSelectionsBeforeDetailSearch[currentDocument.id] = store.selections(for: currentDocument.id)
         }
-        detailSearch.refresh(in: textToSearch(for: detailSearch.query))
+        // The window is redrawn whenever this announces a change, and a
+        // refresh nearly always finds what was found before. Changing the
+        // session where it is kept announces one whatever comes of it, so it
+        // is worked out beside it and put back only if it differs.
+        var refreshed = detailSearch
+        refreshed.refresh(in: textToSearch(for: detailSearch.query))
+        if refreshed != detailSearch {
+            detailSearch = refreshed
+        }
         applyDetailSearchSelection()
     }
 

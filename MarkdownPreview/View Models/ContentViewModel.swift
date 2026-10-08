@@ -43,11 +43,27 @@ final class ContentViewModel: ObservableObject {
     @Published var isImporterPresented = false
     /// Whether the layout shows one column at a time (iPhone). Mirrored from the
     /// View's size class so command/focus logic can read it without the View env.
-    @Published var usesSingleColumnNavigation = false
+    ///
+    /// This and the next are announced only when they change. The View copies
+    /// them in when it appears and whenever either might have changed, and an
+    /// announcement redraws the whole window.
+    var usesSingleColumnNavigation = false {
+        willSet {
+            if newValue != usesSingleColumnNavigation {
+                objectWillChange.send()
+            }
+        }
+    }
     /// Whether the app is foregrounded. Mirrored from the View's scene phase so
     /// file-list filtering only hides files while the app is active (a background
     /// system search should not unexpectedly filter the list).
-    @Published var isSearchHostAppActive = true
+    var isSearchHostAppActive = true {
+        willSet {
+            if newValue != isSearchHostAppActive {
+                objectWillChange.send()
+            }
+        }
+    }
     /// Latest request for the View to move keyboard focus (see `SearchFocusRequest`).
     @Published private(set) var focusRequest: SearchFocusRequest?
 
@@ -239,9 +255,18 @@ final class ContentViewModel: ObservableObject {
         store.persistSelectedDocument()
     }
 
-    func restorePersistedDocumentsIfNeeded(isCompactWidth: Bool) {
-        store.restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth)
-        seedBundledSampleIfNeeded(isCompactWidth: isCompactWidth)
+    func restorePersistedDocumentsIfNeeded(isCompactWidth: Bool, userDefaults: UserDefaults = .standard) {
+        // What the store changes is passed on to the window a turn later (see
+        // `init`), and this is called as the window appears, when that turn
+        // comes after its first frame: on a Mac, most of a second after. The
+        // list belongs in that frame, so the restore is announced here and
+        // now. It is not the middle of a view update, which is what passing it
+        // on later is there to keep clear of.
+        if !store.didRestoreDocuments {
+            objectWillChange.send()
+        }
+        store.restorePersistedDocumentsIfNeeded(isCompactWidth: isCompactWidth, userDefaults: userDefaults)
+        seedBundledSampleIfNeeded(isCompactWidth: isCompactWidth, userDefaults: userDefaults)
         refreshSeededSampleIfNeeded(isCompactWidth: isCompactWidth)
         if isCompactWidth, store.selectedDocumentID != nil {
             preferredCompactColumn = .detail

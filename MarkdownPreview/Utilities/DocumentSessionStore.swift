@@ -216,21 +216,7 @@ struct DocumentReader {
         },
         readInBackground: { urls, deliver in
             Task.detached(priority: .userInitiated) {
-                let clock = ContinuousClock()
-                var looking = Duration.zero
-                let results = urls.map { url in
-                    readSaved(url, isInTrash: { url in
-                        let looked = clock.now
-                        defer { looking += clock.now - looked }
-                        return DocumentSessionStore.isInTrash(url)
-                    })
-                }
-                let components = looking.components
-                let milliseconds = Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1e15
-                Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "Session").info("""
-                    [read] restore: seeing that \(urls.count) files are not in the Trash took \
-                    \(milliseconds, format: .fixed(precision: 1)) ms on a background thread
-                    """)
+                let results = urls.map { readSaved($0) }
                 await deliver(results)
             }
         }
@@ -327,7 +313,6 @@ final class DocumentSessionStore: ObservableObject {
         let url: URL
         let bookmarkData: Data
         let lastOpened: Date
-        let since = ContinuousClock.now
     }
 
     /// A listed document being read in the background, and whether its
@@ -377,7 +362,6 @@ final class DocumentSessionStore: ObservableObject {
     /// its security scope held while it is read, and the system allows an app
     /// only so many at once.
     private static let documentsReadAtATime = 16
-    private var restoreStarted: ContinuousClock.Instant?
     /// Where the reader was in each listed document's preview. Kept here, with
     /// the rest of what is kept for each document, so that it outlasts the
     /// view that shows them. The preview knows a document by its `stableID`.
@@ -571,12 +555,7 @@ final class DocumentSessionStore: ObservableObject {
         // sends the reader looking for one.
         let loaded: (file: MarkdownFile, modificationDate: Date?)
         do {
-            Self.log.info("[read] open: reading \(resolvedURL.lastPathComponent, privacy: .public)")
             loaded = try readDocument(at: resolvedURL, resolvedFrom: bookmarkData)
-            Self.log.info("""
-                [read] open: \(resolvedURL.lastPathComponent, privacy: .public) is dated \
-                \(Self.describe(loaded.modificationDate), privacy: .public)
-                """)
         } catch is MarkdownFile.NotDelivered {
             return openWhenDelivered(resolvedURL, bookmarkData: bookmarkData)
         }
@@ -593,7 +572,6 @@ final class DocumentSessionStore: ObservableObject {
             // iCloud took back the contents of a file that is open here. The
             // reader has its text. Any newer is found by the check for changes
             // on disk, once it can be read.
-            Self.log.info("[read] open: \(url.lastPathComponent, privacy: .public) is listed; shown as it was")
             openedDocuments[index].lastOpened = Date()
             selectedDocumentID = id
             return .shown
@@ -610,10 +588,6 @@ final class DocumentSessionStore: ObservableObject {
     private func wait(for awaited: AwaitedDocument) {
         awaitedDocuments.append(awaited)
         let holdsScope = startSecurityScope(of: awaited.url, resolvedFrom: awaited.bookmarkData)
-        Self.log.info("""
-            [read] open: \(awaited.url.lastPathComponent, privacy: .public) is not delivered; waiting for it \
-            in the background, holdsScope=\(holdsScope)
-            """)
         let (id, url) = (awaited.id, awaited.url)
         documentReader.readWhenDelivered(url) { [weak self] result in
             self?.stopWaiting(forDocument: id, at: url, holdingScope: holdsScope, with: result)
@@ -632,29 +606,16 @@ final class DocumentSessionStore: ObservableObject {
             }
         }
         // It may have been opened again in the meantime, and found there.
-        guard let index = awaitedDocuments.firstIndex(where: { $0.id == id }) else {
-            Self.log.info("[read] \(url.lastPathComponent, privacy: .public) is no longer waited for; nothing done")
-            return
-        }
+        guard let index = awaitedDocuments.firstIndex(where: { $0.id == id }) else { return }
         let awaited = awaitedDocuments.remove(at: index)
-        let waited = ContinuousClock.now - awaited.since
 
         switch result {
         case .success(let file):
             let modificationDate = modificationDateWithinAccess(for: url)
             knownLocations[awaited.bookmarkData] = url
             upsertDocument(file, bookmarkData: awaited.bookmarkData, modificationDate: modificationDate)
-            Self.log.info("""
-                [read] open: \(url.lastPathComponent, privacy: .public) arrived after \
-                \(waited, privacy: .public); listed and shown
-                """)
             lateArrivals.send(.arrived(id: id))
         case .failure(let error):
-            let nsError = error as NSError
-            Self.log.info("""
-                [read] open: \(url.lastPathComponent, privacy: .public) did not arrive after \
-                \(waited, privacy: .public): \(nsError.domain, privacy: .public) \(nsError.code)
-                """)
             lateArrivals.send(.failedToOpen(url, error))
         }
     }
@@ -769,9 +730,6 @@ final class DocumentSessionStore: ObservableObject {
             return
         }
 
-        let clock = ContinuousClock()
-        let started = clock.now
-        restoreStarted = started
         let migration = restoreMigration(
             from: persisted.sorted(by: { $0.lastOpened > $1.lastOpened })
         )
@@ -794,11 +752,6 @@ final class DocumentSessionStore: ObservableObject {
         } else {
             selectedDocumentID = nil
         }
-        Self.log.info("""
-            [read] restore: listed \(migration.documents.count) of \(persisted.count) saved documents in \
-            \(Self.milliseconds(clock.now - started), format: .fixed(precision: 1)) ms on the main thread, \
-            asking their bookmarks where they are and looking at no file
-            """)
 
         // The one on screen first: it is the one the reader is waiting for.
         let onScreen = currentDocument?.stableID
@@ -824,34 +777,17 @@ final class DocumentSessionStore: ObservableObject {
                 holdsScope: startSecurityScope(of: document.file.url, resolvedFrom: document.bookmarkData)
             ))
         }
-        guard !reads.isEmpty else {
-            if let restoreStarted {
-                Self.log.info("""
-                    [read] restore: nothing left to read in the background, \
-                    \(Self.milliseconds(ContinuousClock.now - restoreStarted), format: .fixed(precision: 0)) ms \
-                    after the restore began
-                    """)
-                self.restoreStarted = nil
-            }
-            return
-        }
+        guard !reads.isEmpty else { return }
 
         isReadingInBackground = true
-        let asked = ContinuousClock.now
         documentReader.readInBackground(reads.map(\.url)) { [weak self] results in
-            self?.take(results, of: reads, askedFor: asked)
+            self?.take(results, of: reads)
         }
     }
 
     /// Gives the documents read in the background their text, and has the
     /// next of them read.
-    private func take(
-        _ results: [Result<MarkdownFile, Error>],
-        of reads: [BackgroundRead],
-        askedFor asked: ContinuousClock.Instant
-    ) {
-        let clock = ContinuousClock()
-        let back = clock.now
+    private func take(_ results: [Result<MarkdownFile, Error>], of reads: [BackgroundRead]) {
         // The list is changed once for all of them, and not once for each.
         var documents = openedDocuments
         var undelivered: [UUID] = []
@@ -877,18 +813,8 @@ final class DocumentSessionStore: ObservableObject {
                 documentSearchIndex.upsert(file)
             case .failure(let error) where error is MarkdownFile.NotDelivered:
                 undelivered.append(read.stableID)
-            case .failure(let error) where error is DocumentReader.InTrash:
-                Self.log.info("""
-                    [read] restore: \(read.url.lastPathComponent, privacy: .public) is in the Trash; \
-                    dropped from the list
-                    """)
-                unreadable.append(documents[index].id)
-            case .failure(let error):
-                let nsError = error as NSError
-                Self.log.info("""
-                    [read] restore: \(read.url.lastPathComponent, privacy: .public) could not be read, \
-                    \(nsError.domain, privacy: .public) \(nsError.code); dropped from the list
-                    """)
+            case .failure:
+                // In the Trash, not there, or not text the app reads.
                 unreadable.append(documents[index].id)
             }
         }
@@ -896,11 +822,6 @@ final class DocumentSessionStore: ObservableObject {
         openedDocuments = documents
         unreadable.forEach(dropFromTheList)
         undelivered.forEach(waitForText(ofDocument:))
-        Self.log.info("""
-            [read] restore: \(reads.count) read in the background, back after \
-            \(Self.milliseconds(back - asked), format: .fixed(precision: 1)) ms; taking them took \
-            \(Self.milliseconds(clock.now - back), format: .fixed(precision: 1)) ms on the main thread
-            """)
 
         isReadingInBackground = false
         readNextDocumentsInBackground()
@@ -914,19 +835,8 @@ final class DocumentSessionStore: ObservableObject {
               !document.isRead else { return }
         let url = document.file.url
         let holdsScope = startSecurityScope(of: url, resolvedFrom: document.bookmarkData)
-        Self.log.info("""
-            [read] restore: \(url.lastPathComponent, privacy: .public) is not delivered; listed with no text \
-            and waited for in the background, holdsScope=\(holdsScope)
-            """)
-        let since = ContinuousClock.now
         documentReader.readWhenDelivered(url) { [weak self] result in
-            self?.stopWaitingForText(
-                ofDocument: stableID,
-                at: url,
-                holdingScope: holdsScope,
-                since: since,
-                with: result
-            )
+            self?.stopWaitingForText(ofDocument: stableID, at: url, holdingScope: holdsScope, with: result)
         }
     }
 
@@ -934,7 +844,6 @@ final class DocumentSessionStore: ObservableObject {
         ofDocument stableID: UUID,
         at url: URL,
         holdingScope holdsScope: Bool,
-        since: ContinuousClock.Instant,
         with result: Result<MarkdownFile, Error>
     ) {
         defer {
@@ -944,7 +853,6 @@ final class DocumentSessionStore: ObservableObject {
         }
         guard let index = openedDocuments.firstIndex(where: { $0.stableID == stableID }),
               !openedDocuments[index].isRead else { return }
-        let waited = ContinuousClock.now - since
 
         switch result {
         case .success(let file):
@@ -955,17 +863,7 @@ final class DocumentSessionStore: ObservableObject {
                 knownModificationDates[id] = modificationDate
             }
             documentSearchIndex.upsert(file)
-            Self.log.info("""
-                [read] restore: \(url.lastPathComponent, privacy: .public) arrived after \
-                \(waited, privacy: .public); it has its text
-                """)
-        case .failure(let error):
-            let nsError = error as NSError
-            Self.log.info("""
-                [read] restore: \(url.lastPathComponent, privacy: .public) did not arrive after \
-                \(waited, privacy: .public), \(nsError.domain, privacy: .public) \(nsError.code); \
-                dropped from the list
-                """)
+        case .failure:
             dropFromTheList(openedDocuments[index].id)
         }
     }
@@ -978,18 +876,6 @@ final class DocumentSessionStore: ObservableObject {
             selectedDocumentID = nil
         }
         removeDocument(id: id, isCompactWidth: false)
-    }
-
-    /// A date as the log gives it: to the millisecond, so that two can be
-    /// told apart, or that there is none.
-    private static func describe(_ date: Date?) -> String {
-        guard let date else { return "nothing" }
-        return String(format: "%.3f", date.timeIntervalSince1970)
-    }
-
-    private static func milliseconds(_ duration: Duration) -> Double {
-        let components = duration.components
-        return Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1e15
     }
 
     func restorePersistedDocumentsIfNeeded(isCompactWidth: Bool) {
@@ -1114,18 +1000,12 @@ final class DocumentSessionStore: ObservableObject {
                 [track] Bookmark for \(document.id, privacy: .public) resolves to \
                 \(MarkdownFile.listedPath(of: url), privacy: .public)
                 """)
-            Self.log.info("""
-                [read] check: reading \(url.lastPathComponent, privacy: .public) again, as moved: its bookmark \
-                leads to \(MarkdownFile.listedPath(of: url), privacy: .public) and it is listed at \
-                \(document.id, privacy: .public)
-                """)
             let loaded: (file: MarkdownFile, modificationDate: Date?)
             switch reading(at: url, resolvedFrom: document.bookmarkData) {
             case .read(let read):
                 loaded = read
             case .notDelivered:
                 // Not missing: followed there when it can be read there.
-                Self.log.info("[read] check: \(url.lastPathComponent, privacy: .public) is not delivered where it went; left as it is")
                 return
             case .failed:
                 Self.log.info("[track] Could not read it at \(MarkdownFile.listedPath(of: url), privacy: .public)")
@@ -1167,16 +1047,13 @@ final class DocumentSessionStore: ObservableObject {
             }
         }
 
-        Self.log.info("""
-            [read] check: reading \(url.lastPathComponent, privacy: .public) again, where its bookmark leads: \
-            it is dated \(Self.describe(currentModificationDate), privacy: .public) and the date known is \
-            \(Self.describe(self.knownModificationDates[document.id]), privacy: .public)
-            """)
         switch reading(at: url, resolvedFrom: document.bookmarkData) {
         case .read(let loaded):
             take(loaded, for: document, at: index)
         case .notDelivered:
-            Self.log.info("[read] check: \(url.lastPathComponent, privacy: .public) is not delivered; left as it is")
+            // Not missing. The reader keeps the text they have, and the next
+            // check asks again.
+            break
         case .failed:
             Self.log.info("[track] Could not read \(document.id, privacy: .public), where its bookmark still says it is")
             handleMissingDocument(
@@ -1212,41 +1089,19 @@ final class DocumentSessionStore: ObservableObject {
     /// settle it: the document is where it was, and stays as it is. The check then asks where the bookmark's file is,
     /// which finds one that was moved, put in the Trash or deleted.
     private func lookWhereTheFileWas(for document: OpenedDocument, at index: Int) -> Bool {
-        guard let location = knownLocations[document.bookmarkData] else {
-            Self.log.info("""
-                [read] check: \(document.file.fileName, privacy: .public) has not been found anywhere yet; \
-                asking its bookmark
-                """)
-            return false
-        }
-        guard MarkdownFile.listedPath(of: location) == document.id else {
-            Self.log.info("""
-                [read] check: \(document.file.fileName, privacy: .public) was last found at \
-                \(MarkdownFile.listedPath(of: location), privacy: .public) and is listed at \
-                \(document.id, privacy: .public); asking its bookmark
-                """)
+        guard let location = knownLocations[document.bookmarkData],
+              MarkdownFile.listedPath(of: location) == document.id else {
             return false
         }
 
         let modificationDate = withSecurityScope(of: location, resolvedFrom: document.bookmarkData) {
             modificationDateWithinAccess(for: location)
         }
-        guard let modificationDate else {
-            Self.log.info("""
-                [read] check: \(document.file.fileName, privacy: .public) has no date where it was last found, \
-                scopeRefused=\(self.bookmarksWithRefusedScope.contains(document.bookmarkData)); asking its bookmark
-                """)
-            return false
-        }
+        guard let modificationDate else { return false }
 
         if let knownDate = knownModificationDates[document.id], modificationDate <= knownDate {
             return true
         }
-        Self.log.info("""
-            [read] check: reading \(location.lastPathComponent, privacy: .public) again, where it was: it is \
-            dated \(Self.describe(modificationDate), privacy: .public) and the date known is \
-            \(Self.describe(self.knownModificationDates[document.id]), privacy: .public)
-            """)
         switch reading(at: location, resolvedFrom: document.bookmarkData) {
         case .read(let loaded):
             take(loaded, for: document, at: index)
@@ -1254,7 +1109,6 @@ final class DocumentSessionStore: ObservableObject {
         case .notDelivered:
             // The file is there and newer, and its text has not come. The
             // reader keeps the text they have, and the next check asks again.
-            Self.log.info("[read] check: \(location.lastPathComponent, privacy: .public) is not delivered; left as it is")
             return true
         case .failed:
             return false

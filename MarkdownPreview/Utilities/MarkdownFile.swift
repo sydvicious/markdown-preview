@@ -5,7 +5,6 @@
 
 import Foundation
 import UniformTypeIdentifiers
-import os
 
 struct MarkdownFile: Identifiable, Equatable {
     let id = UUID()
@@ -104,33 +103,22 @@ struct MarkdownFile: Identifiable, Equatable {
     /// asked for, and `NotDelivered` is thrown; `loadWhenDelivered` is the
     /// read that waits.
     static func load(from url: URL, cloud: CloudDelivery = .system) throws -> MarkdownFile {
-        let clock = ContinuousClock()
-        let started = clock.now
-        var attempt = Attempt()
-        do {
-            let file = try read(url, cloud: cloud, noting: &attempt)
-            log.info("""
-                [read] \(url.lastPathComponent, privacy: .public): read \(attempt.bytes ?? 0) bytes in \
-                \(milliseconds(clock.now - started), format: .fixed(precision: 1)) ms on \(threadName(), privacy: .public); \
-                \(describe(attempt, of: url), privacy: .public)
-                """)
-            return file
-        } catch is NotDelivered {
-            log.info("""
-                [read] \(url.lastPathComponent, privacy: .public): not delivered, so asked for and not read; \
-                \(milliseconds(clock.now - started), format: .fixed(precision: 1)) ms on \(threadName(), privacy: .public); \
-                \(describe(attempt, of: url), privacy: .public)
-                """)
+        let state = try cloud.state(url)
+        switch state {
+        case .notInCloud, .current:
+            break
+        case .outOfDate:
+            try cloud.request(url)
+        case .notDelivered:
+            try cloud.request(url)
             throw NotDelivered()
-        } catch {
-            let nsError = error as NSError
-            log.info("""
-                [read] \(url.lastPathComponent, privacy: .public): failed with \(nsError.domain, privacy: .public) \
-                \(nsError.code) in \(milliseconds(clock.now - started), format: .fixed(precision: 1)) ms on \
-                \(threadName(), privacy: .public); \(describe(attempt, of: url), privacy: .public)
-                """)
-            throw error
         }
+
+        let data = try readData(from: url, state: state, cloud: cloud)
+        guard let text = decodedText(from: data) else {
+            throw CocoaError(.fileReadInapplicableStringEncoding)
+        }
+        return MarkdownFile(url: url, contents: text)
     }
 
     /// Reads `url` when iCloud has delivered it, looking again every `pause`
@@ -148,127 +136,17 @@ struct MarkdownFile: Identifiable, Equatable {
     ) async throws -> MarkdownFile {
         let clock = ContinuousClock()
         let started = clock.now
-        var tries = 0
-        var lastState: CloudState?
-        log.info("""
-            [read] \(url.lastPathComponent, privacy: .public): waiting up to \
-            \(milliseconds(patience) / 1000, format: .fixed(precision: 0)) s for iCloud to deliver it
-            """)
 
         while true {
-            tries += 1
-            var attempt = Attempt()
             do {
-                let file = try read(url, cloud: cloud, noting: &attempt)
-                log.info("""
-                    [read] \(url.lastPathComponent, privacy: .public): delivered after \
-                    \(milliseconds(clock.now - started), format: .fixed(precision: 0)) ms and \(tries) tries; \
-                    read \(attempt.bytes ?? 0) bytes on \(threadName(), privacy: .public); \
-                    \(describe(attempt, of: url), privacy: .public)
-                    """)
-                return file
+                return try load(from: url, cloud: cloud)
             } catch is NotDelivered {
-                if attempt.state != lastState {
-                    lastState = attempt.state
-                    log.info("""
-                        [read] \(url.lastPathComponent, privacy: .public): still waiting at \
-                        \(milliseconds(clock.now - started), format: .fixed(precision: 0)) ms, try \(tries), on \
-                        \(threadName(), privacy: .public); \(describe(attempt, of: url), privacy: .public)
-                        """)
-                }
                 guard clock.now - started < patience else {
-                    log.info("""
-                        [read] \(url.lastPathComponent, privacy: .public): gave up after \
-                        \(milliseconds(clock.now - started), format: .fixed(precision: 0)) ms and \(tries) tries; \
-                        \(describe(attempt, of: url), privacy: .public); \
-                        iCloud's reason: \(downloadingError(of: url), privacy: .public)
-                        """)
                     throw CocoaError(.ubiquitousFileUnavailable)
                 }
                 try await Task.sleep(for: pause)
-            } catch {
-                let nsError = error as NSError
-                log.info("""
-                    [read] \(url.lastPathComponent, privacy: .public): failed while waiting, with \
-                    \(nsError.domain, privacy: .public) \(nsError.code), after \
-                    \(milliseconds(clock.now - started), format: .fixed(precision: 0)) ms and \(tries) tries; \
-                    \(describe(attempt, of: url), privacy: .public)
-                    """)
-                throw error
             }
         }
-    }
-
-    /// What one try at reading a file found, for the log.
-    private struct Attempt {
-        var state: CloudState?
-        var bytes: Int?
-        var readTheCopyBeingUploaded = false
-    }
-
-    private static func read(_ url: URL, cloud: CloudDelivery, noting attempt: inout Attempt) throws -> MarkdownFile {
-        let state = try cloud.state(url)
-        attempt.state = state
-        switch state {
-        case .notInCloud, .current:
-            break
-        case .outOfDate:
-            try cloud.request(url)
-        case .notDelivered:
-            try cloud.request(url)
-            throw NotDelivered()
-        }
-
-        let data = try readData(from: url, state: state, cloud: cloud, noting: &attempt)
-        attempt.bytes = data.count
-        guard let text = decodedText(from: data) else {
-            throw CocoaError(.fileReadInapplicableStringEncoding)
-        }
-        return MarkdownFile(url: url, contents: text)
-    }
-
-    // MARK: - What the log says of a read. Filter the console on `[read]`.
-
-    private static let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "Read")
-
-    private static func threadName() -> String {
-        Thread.isMainThread ? "the main thread" : "a background thread"
-    }
-
-    private static func milliseconds(_ duration: Duration) -> Double {
-        let components = duration.components
-        return Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1e15
-    }
-
-    /// What iCloud said of the file, and what the file system says: a file
-    /// whose contents are somewhere else, whoever keeps them, is `dataless`.
-    private static func describe(_ attempt: Attempt, of url: URL) -> String {
-        var parts: [String] = []
-        if let state = attempt.state {
-            parts.append("iCloud=\(state)")
-        } else {
-            parts.append("iCloud was not asked")
-        }
-        var info = stat()
-        if lstat(url.path, &info) == 0 {
-            parts.append("dataless=\(info.st_flags & UInt32(SF_DATALESS) != 0)")
-        } else {
-            parts.append("dataless=unknown (errno \(errno))")
-        }
-        if attempt.readTheCopyBeingUploaded {
-            parts.append("read the copy being uploaded")
-        }
-        return parts.joined(separator: ", ")
-    }
-
-    private static func downloadingError(of url: URL) -> String {
-        var asked = url
-        asked.removeAllCachedResourceValues()
-        guard let error = try? asked.resourceValues(forKeys: [.ubiquitousItemDownloadingErrorKey])
-            .ubiquitousItemDownloadingError else {
-            return "none given"
-        }
-        return "\(error.domain) \(error.code): \(error.localizedDescription)"
     }
 
     /// The text `data` holds, or nil if it is not text the app reads.
@@ -288,17 +166,11 @@ struct MarkdownFile: Identifiable, Equatable {
     }
 
     /// One coordinated read of the file's bytes.
-    private static func readData(
-        from url: URL,
-        state: CloudState,
-        cloud: CloudDelivery,
-        noting attempt: inout Attempt
-    ) throws -> Data {
+    private static func readData(from url: URL, state: CloudState, cloud: CloudDelivery) throws -> Data {
         do {
             return try coordinatedReadData(from: url)
         } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
             if let uploadedData = tryCoordinatedUploadingReadData(from: url) {
-                attempt.readTheCopyBeingUploaded = true
                 return uploadedData
             }
             // iCloud said the file was here, and there is nothing to read

@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 
+import Combine
 import Testing
 
 @MainActor
@@ -239,5 +240,79 @@ struct MarkdownAppCommandCenterTests {
         for capability in Capability.allCases {
             #expect(capability.isOffered(by: center) == (capability == .find), "\(capability)")
         }
+    }
+
+    // MARK: - Announcing only what changed
+
+    /// How often the center announces that it will change while `work` is done.
+    private func announcements(of center: MarkdownAppCommandCenter, during work: () -> Void) -> Int {
+        var count = 0
+        let watching = center.objectWillChange.sink { count += 1 }
+        defer { watching.cancel() }
+        work()
+        return count
+    }
+
+    // The window tells the center what it offers after nearly every change,
+    // and the menus are redrawn whenever the center announces one. Most of the
+    // time what it offers is what it offered before.
+    @Test func anUpdateThatOffersWhatWasOfferedBeforeAnnouncesNothing() {
+        let center = MarkdownAppCommandCenter()
+        update(center, logging: Log(), offering: [.find, .removeFromList])
+
+        let announced = announcements(of: center) {
+            update(center, logging: Log(), offering: [.find, .removeFromList])
+        }
+
+        #expect(announced == 0)
+    }
+
+    @Test func anUpdateThatChangesOneCapabilityAnnouncesOnce() {
+        let center = MarkdownAppCommandCenter()
+        update(center, logging: Log(), offering: [.find])
+
+        let announced = announcements(of: center) {
+            update(center, logging: Log(), offering: [.find, .removeFromList])
+        }
+
+        #expect(announced == 1)
+        #expect(center.canRemoveFromList)
+    }
+
+    @Test(arguments: Command.allCases)
+    func anUpdateThatAnnouncesNothingStillReplacesTheHandlers(command: Command) {
+        let center = MarkdownAppCommandCenter()
+        let earlier = Log()
+        let later = Log()
+        update(center, logging: earlier, offering: Set(Capability.allCases))
+
+        update(center, logging: later, offering: Set(Capability.allCases))
+        command.perform(on: center)
+
+        #expect(earlier.performed.isEmpty)
+        #expect(later.performed == [command])
+    }
+
+    @Test func resettingACenterThatOffersNothingAnnouncesNothing() {
+        let center = MarkdownAppCommandCenter()
+
+        let announced = announcements(of: center) {
+            center.reset()
+        }
+
+        #expect(announced == 0)
+    }
+
+    @Test func resettingACenterAnnouncesEachCapabilityItTakesAway() {
+        let center = MarkdownAppCommandCenter()
+        update(center, logging: Log(), offering: [.find, .removeFromList])
+
+        let announced = announcements(of: center) {
+            center.reset()
+        }
+
+        #expect(announced == 2)
+        #expect(!center.canFind)
+        #expect(!center.canRemoveFromList)
     }
 }

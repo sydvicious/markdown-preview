@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 
+import Combine
 import Foundation
 import SwiftUI
 import Testing
@@ -786,5 +787,54 @@ struct ContentViewModelTests {
         #expect(viewModel.store.openedDocuments.isEmpty)
         #expect(viewModel.store.missingActiveDocumentAlert == nil)
         #expect(viewModel.preferredCompactColumn == (isCompactWidth ? .sidebar : .detail))
+    }
+
+    // MARK: - Announcing only what changed
+
+    // The window copies what it knows of its layout and of the app being in
+    // front into the view model, when it appears and whenever either might
+    // have changed. Each announcement redraws the window.
+    @Test func tellingTheViewModelWhatItAlreadyKnowsAnnouncesNothing() {
+        let viewModel = ContentViewModel(disablePersistenceRestore: true, findPasteboard: InMemoryFindPasteboard())
+        var announced = 0
+        let watching = viewModel.objectWillChange.sink { announced += 1 }
+        defer { watching.cancel() }
+
+        // What a view model takes them to be until it is told.
+        #expect(!viewModel.usesSingleColumnNavigation)
+        #expect(viewModel.isSearchHostAppActive)
+
+        viewModel.usesSingleColumnNavigation = false
+        viewModel.isSearchHostAppActive = true
+        #expect(announced == 0)
+
+        viewModel.usesSingleColumnNavigation = true
+        #expect(announced == 1)
+        viewModel.isSearchHostAppActive = false
+        #expect(announced == 2)
+    }
+
+    // What the store changes reaches the window a turn later, and at launch
+    // that turn comes after the window's first frame. The restore is done as
+    // the window appears, and the list it brings back belongs in that frame.
+    @Test func restoringTheSavedListIsAnnouncedAtOnce() throws {
+        let suiteName = "ContentViewModelTests.\(#function).\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let viewModel = ContentViewModel(disablePersistenceRestore: false, findPasteboard: InMemoryFindPasteboard())
+        var announced = 0
+        let watching = viewModel.objectWillChange.sink { announced += 1 }
+        defer { watching.cancel() }
+
+        viewModel.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
+        let announcedByTheRestore = announced
+
+        #expect(viewModel.store.didRestoreDocuments)
+        #expect(announcedByTheRestore >= 1)
+
+        // Only the first time: there is nothing to restore after that.
+        viewModel.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
+        #expect(announced == announcedByTheRestore)
     }
 }

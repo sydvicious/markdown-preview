@@ -45,34 +45,39 @@ final class MarkdownAppCommandCenter: ObservableObject {
         canRemoveFromList: Bool,
         handleRemoveFromList: @escaping () -> Void
     ) {
-        self.canFind = canFind
+        // Whoever draws the menus is redrawn each time one of these announces
+        // a change, and this is called after nearly everything the window
+        // does, nearly always offering what it offered before. So only what
+        // differs is set. The handlers are taken every time: they are not
+        // watched, and a later one may close over something newer.
+        set(\.canFind, to: canFind)
         self.handleFind = handleFind
-        self.canProjectFind = canProjectFind
+        set(\.canProjectFind, to: canProjectFind)
         self.handleProjectFind = handleProjectFind
-        self.canUseSelectionForFind = canUseSelectionForFind
+        set(\.canUseSelectionForFind, to: canUseSelectionForFind)
         self.handleUseSelectionForFind = handleUseSelectionForFind
-        self.canFindNext = canFindNext
+        set(\.canFindNext, to: canFindNext)
         self.handleFindNext = handleFindNext
-        self.canFindPrevious = canFindPrevious
+        set(\.canFindPrevious, to: canFindPrevious)
         self.handleFindPrevious = handleFindPrevious
-        self.canIncreaseTextSize = canIncreaseTextSize
+        set(\.canIncreaseTextSize, to: canIncreaseTextSize)
         self.handleIncreaseTextSize = handleIncreaseTextSize
-        self.canDecreaseTextSize = canDecreaseTextSize
+        set(\.canDecreaseTextSize, to: canDecreaseTextSize)
         self.handleDecreaseTextSize = handleDecreaseTextSize
         self.handleCancelSearch = handleCancelSearch
-        self.canRemoveFromList = canRemoveFromList
+        set(\.canRemoveFromList, to: canRemoveFromList)
         self.handleRemoveFromList = handleRemoveFromList
     }
 
     func reset() {
-        canFind = false
-        canProjectFind = false
-        canUseSelectionForFind = false
-        canFindNext = false
-        canFindPrevious = false
-        canIncreaseTextSize = false
-        canDecreaseTextSize = false
-        canRemoveFromList = false
+        set(\.canFind, to: false)
+        set(\.canProjectFind, to: false)
+        set(\.canUseSelectionForFind, to: false)
+        set(\.canFindNext, to: false)
+        set(\.canFindPrevious, to: false)
+        set(\.canIncreaseTextSize, to: false)
+        set(\.canDecreaseTextSize, to: false)
+        set(\.canRemoveFromList, to: false)
         handleFind = nil
         handleProjectFind = nil
         handleUseSelectionForFind = nil
@@ -82,6 +87,13 @@ final class MarkdownAppCommandCenter: ObservableObject {
         handleDecreaseTextSize = nil
         handleCancelSearch = nil
         handleRemoveFromList = nil
+    }
+
+    /// Sets a capability if it is not already so. Setting one announces a
+    /// change whether or not the value is a new one.
+    private func set(_ capability: ReferenceWritableKeyPath<MarkdownAppCommandCenter, Bool>, to value: Bool) {
+        guard self[keyPath: capability] != value else { return }
+        self[keyPath: capability] = value
     }
 
     func performFind() {
@@ -118,5 +130,25 @@ final class MarkdownAppCommandCenter: ObservableObject {
 
     func performRemoveFromList() {
         handleRemoveFromList?()
+    }
+}
+
+private struct CommandCenterKey: EnvironmentKey {
+    static let defaultValue: MarkdownAppCommandCenter? = nil
+}
+
+extension EnvironmentValues {
+    /// The app's command center, for a view that tells it what the window
+    /// offers and reads nothing back.
+    ///
+    /// Handed over this way, and not as an environment object, because a view
+    /// is redrawn whenever an environment object it declares announces a
+    /// change, whether or not it reads anything of it. The window's content
+    /// only ever writes to the center, and it writes after nearly every
+    /// change, so as an environment object each of those redrew the whole
+    /// window a second time. The menus, which do read it, observe it.
+    var commandCenter: MarkdownAppCommandCenter? {
+        get { self[CommandCenterKey.self] }
+        set { self[CommandCenterKey.self] = newValue }
     }
 }

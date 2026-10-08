@@ -115,7 +115,7 @@ struct MarkdownPreviewApp: App {
         #if os(macOS)
         Window("Markdown Preview", id: "main") {
             ContentView()
-                .environmentObject(commandCenter)
+                .environment(\.commandCenter, commandCenter)
                 .environmentObject(fileOpenState)
                 .frame(minWidth: Self.minimumWindowWidth)
         }
@@ -125,7 +125,7 @@ struct MarkdownPreviewApp: App {
         #else
         WindowGroup {
             ContentView()
-                .environmentObject(commandCenter)
+                .environment(\.commandCenter, commandCenter)
                 .environmentObject(fileOpenState)
                 .onOpenURL { url in
                     fileOpenState.enqueue(url)
