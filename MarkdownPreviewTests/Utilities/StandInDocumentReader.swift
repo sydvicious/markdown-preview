@@ -17,6 +17,8 @@ import Testing
 final class StandInDocumentReader {
     /// The names of the files that have not been delivered.
     var undelivered: Set<String> = []
+    /// The names of the files that are in the Trash.
+    var inTrash: Set<String> = []
     /// The files read where the store asked, which is the main actor.
     private(set) var readsOnTheSpot: [String] = []
     /// The files asked for in the background, one list for each time of asking.
@@ -79,7 +81,12 @@ final class StandInDocumentReader {
     func finishBackgroundReads() throws {
         try #require(!batches.isEmpty)
         let batch = batches.removeFirst()
-        batch.deliver(batch.urls.map { url in Result { try read(url) } })
+        batch.deliver(batch.urls.map { url in
+            guard !undelivered.contains(url.lastPathComponent) else {
+                return .failure(MarkdownFile.NotDelivered())
+            }
+            return DocumentReader.readSaved(url, isInTrash: { inTrash.contains($0.lastPathComponent) })
+        })
     }
 
     /// Everything asked for in the background has been read, and whatever
@@ -102,10 +109,13 @@ final class StandInDocumentReader {
 final class SecurityScopeCount {
     private(set) var held = 0
     private(set) var mostHeld = 0
+    /// How many times one has been taken, released since or not.
+    private(set) var taken = 0
 
     var scope: SecurityScope {
         SecurityScope(
             start: { [self] _ in
+                taken += 1
                 held += 1
                 mostHeld = max(mostHeld, held)
                 return true
@@ -237,7 +247,7 @@ extension DocumentReader {
             read: system.read,
             readWhenDelivered: system.readWhenDelivered,
             readInBackground: { urls, deliver in
-                deliver(urls.map { url in Result { try MarkdownFile.load(from: url) } })
+                deliver(urls.map { DocumentReader.readSaved($0) })
             }
         )
     }

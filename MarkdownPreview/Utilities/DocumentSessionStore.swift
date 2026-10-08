@@ -216,11 +216,44 @@ struct DocumentReader {
         },
         readInBackground: { urls, deliver in
             Task.detached(priority: .userInitiated) {
-                let results = urls.map { url in Result { try MarkdownFile.load(from: url) } }
+                let clock = ContinuousClock()
+                var looking = Duration.zero
+                let results = urls.map { url in
+                    readSaved(url, isInTrash: { url in
+                        let looked = clock.now
+                        defer { looking += clock.now - looked }
+                        return DocumentSessionStore.isInTrash(url)
+                    })
+                }
+                let components = looking.components
+                let milliseconds = Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1e15
+                Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "Session").info("""
+                    [read] restore: seeing that \(urls.count) files are not in the Trash took \
+                    \(milliseconds, format: .fixed(precision: 1)) ms on a background thread
+                    """)
                 await deliver(results)
             }
         }
     )
+
+    /// Thrown for a saved document whose file is in the Trash.
+    struct InTrash: Error {}
+
+    /// Reads the file of one of the documents in the saved list, once and
+    /// waiting for nothing, unless it is in the Trash: a document thrown away
+    /// since the list was saved is not one to bring back.
+    ///
+    /// A bookmark follows its file into the Trash, and so says nothing is
+    /// wrong. Whether that is where the file is, and whether it is there at
+    /// all, are asked of the file system, and are asked here, where the file
+    /// is read, which is not the main actor.
+    static func readSaved(
+        _ url: URL,
+        isInTrash: (URL) -> Bool = DocumentSessionStore.isInTrash
+    ) -> Result<MarkdownFile, Error> {
+        guard !isInTrash(url) else { return .failure(InTrash()) }
+        return Result { try MarkdownFile.load(from: url) }
+    }
 }
 
 @MainActor
@@ -764,7 +797,7 @@ final class DocumentSessionStore: ObservableObject {
         Self.log.info("""
             [read] restore: listed \(migration.documents.count) of \(persisted.count) saved documents in \
             \(Self.milliseconds(clock.now - started), format: .fixed(precision: 1)) ms on the main thread, \
-            reading none; their text is read in the background
+            asking their bookmarks where they are and looking at no file
             """)
 
         // The one on screen first: it is the one the reader is waiting for.
@@ -844,6 +877,12 @@ final class DocumentSessionStore: ObservableObject {
                 documentSearchIndex.upsert(file)
             case .failure(let error) where error is MarkdownFile.NotDelivered:
                 undelivered.append(read.stableID)
+            case .failure(let error) where error is DocumentReader.InTrash:
+                Self.log.info("""
+                    [read] restore: \(read.url.lastPathComponent, privacy: .public) is in the Trash; \
+                    dropped from the list
+                    """)
+                unreadable.append(documents[index].id)
             case .failure(let error):
                 let nsError = error as NSError
                 Self.log.info("""
@@ -1319,6 +1358,12 @@ final class DocumentSessionStore: ObservableObject {
     /// missing file is. If the system cannot say, the file is taken not to be
     /// in the Trash.
     private func isInTrashWithinAccess(_ url: URL) -> Bool {
+        Self.isInTrash(url)
+    }
+
+    /// Whether the file is in the Trash, for a caller that holds the file's
+    /// security scope, on whatever thread it is.
+    nonisolated static func isInTrash(_ url: URL) -> Bool {
         var relationship: FileManager.URLRelationship = .other
         do {
             try FileManager.default.getRelationship(&relationship, of: .trashDirectory, in: [], toItemAt: url)
@@ -1481,29 +1526,19 @@ final class DocumentSessionStore: ObservableObject {
         persistTextSizes(to: .standard)
     }
 
-    /// Works out the list the saved one comes to now, without reading a file:
-    /// where each bookmark leads says where its document is and what it is
-    /// called. A document whose file is not there, or is in the Trash, is left
-    /// out. One whose file cannot be read is found out when it is read.
+    /// Works out the list the saved one comes to now, from the bookmarks
+    /// alone: where each leads says where its document is and what it is
+    /// called. No file is looked at. A document whose file is not there, is in
+    /// the Trash, or cannot be read is found out when the file is read, in the
+    /// background, and leaves the list then.
     private func restoreMigration(from persisted: [PersistedDocument]) -> RestoreMigration {
         var restored: [OpenedDocument] = []
         var idMap: [String: String] = [:]
-        let clock = ContinuousClock()
-        var resolving = Duration.zero
-        var looking = Duration.zero
 
         for entry in persisted {
-            let asked = clock.now
-            let resolved = resolveBookmarkURL(from: entry.bookmarkData)
-            resolving += clock.now - asked
-            guard let url = resolved else { continue }
-
-            let looked = clock.now
-            let (isThere, inTrash) = withSecurityScope(of: url, resolvedFrom: entry.bookmarkData) {
-                (modificationDateWithinAccess(for: url) != nil, isInTrashWithinAccess(url))
-            }
-            looking += clock.now - looked
-            guard isThere, !inTrash else { continue }
+            // A file that has been deleted has, as a rule, a bookmark that
+            // leads nowhere, and is not listed at all.
+            guard let url = resolveBookmarkURL(from: entry.bookmarkData) else { continue }
 
             knownLocations[entry.bookmarkData] = url
             let resolvedID = MarkdownFile.listedPath(of: url)
@@ -1527,12 +1562,6 @@ final class DocumentSessionStore: ObservableObject {
             )
         }
 
-        Self.log.info("""
-            [read] restore: of the time on the main thread, \
-            \(Self.milliseconds(resolving), format: .fixed(precision: 1)) ms asking the bookmarks where their \
-            files are and \(Self.milliseconds(looking), format: .fixed(precision: 1)) ms seeing that each is \
-            there and not in the Trash
-            """)
         return RestoreMigration(documents: restored, idMap: idMap)
     }
 

@@ -47,6 +47,27 @@ struct RestoredDocumentTests {
         #expect(store.openedDocuments.allSatisfy { !$0.isRead && $0.file.contents.isEmpty })
     }
 
+    // Whether a file is there, and whether it is in the Trash, are asked of
+    // the file system holding the file's security scope. They are asked where
+    // the file is read, in the background, and not here first: the only scope
+    // a launch takes on the main actor is the one held for the read.
+    @Test func restoringTheListLooksAtNoFileOnTheMainActor() throws {
+        let fixture = try SavedDocumentsFixture()
+        defer { fixture.cleanUp() }
+        let scopes = SecurityScopeCount()
+
+        let store = try Self.relaunched(
+            fixture,
+            holding: ["alpha.md", "beta.md", "gamma.md"],
+            onScreen: "beta.md",
+            scope: scopes.scope
+        )
+
+        #expect(store.listedNames == ["alpha.md", "beta.md", "gamma.md"])
+        #expect(fixture.reader.backgroundReads == [["beta.md"]])
+        #expect(scopes.taken == 1)
+    }
+
     @Test func aRestoredDocumentHasItsTextOnceItIsRead() throws {
         let fixture = try SavedDocumentsFixture()
         defer { fixture.cleanUp() }
@@ -235,6 +256,65 @@ struct RestoredDocumentTests {
         #expect(store.selectedDocumentID == nil)
         #expect(store.textSize(for: beta) == .defaultValue)
         #expect(store.document(named: "alpha.md")?.isRead == true)
+    }
+
+    // A file in the Trash is still where its bookmark leads, so its document
+    // is in the list until the file is looked at, which is when it is read.
+    @Test func aSavedDocumentFoundInTheTrashIsDropped() throws {
+        let fixture = try SavedDocumentsFixture()
+        defer { fixture.cleanUp() }
+        fixture.save(try fixture.makeStore(holding: "alpha.md", "beta.md"))
+        fixture.reader.inTrash = ["beta.md"]
+
+        let store = fixture.relaunch()
+        #expect(store.listedNames == ["alpha.md", "beta.md"])
+
+        try fixture.reader.finishAllBackgroundReads()
+
+        #expect(store.listedNames == ["alpha.md"])
+        #expect(store.selectedDocumentID == nil)
+        #expect(store.missingActiveDocumentAlert == nil)
+        #expect(store.document(named: "alpha.md")?.isRead == true)
+    }
+
+    // MARK: - Reading one of the saved documents
+
+    @Test func aSavedDocumentInTheTrashIsNotRead() throws {
+        let fixture = try SavedDocumentsFixture()
+        defer { fixture.cleanUp() }
+        let url = try fixture.write("notes.md", holding: "# Notes")
+
+        let result = DocumentReader.readSaved(url, isInTrash: { _ in true })
+
+        #expect(throws: DocumentReader.InTrash.self) {
+            try result.get()
+        }
+    }
+
+    @Test func aSavedDocumentThatIsNotInTheTrashIsRead() throws {
+        let fixture = try SavedDocumentsFixture()
+        defer { fixture.cleanUp() }
+        let url = try fixture.write("notes.md", holding: "# Notes")
+
+        let result = DocumentReader.readSaved(url, isInTrash: { _ in false })
+
+        #expect(try result.get().contents == "# Notes")
+    }
+
+    @Test func aSavedDocumentWhoseFileIsNotThereCannotBeRead() throws {
+        let fixture = try SavedDocumentsFixture()
+        defer { fixture.cleanUp() }
+
+        let result = DocumentReader.readSaved(fixture.url(of: "gone.md"), isInTrash: { _ in false })
+
+        var thrown: (any Error)?
+        do {
+            _ = try result.get()
+        } catch {
+            thrown = error
+        }
+        let error = try #require(thrown)
+        #expect(!(error is DocumentReader.InTrash))
     }
 
     // MARK: - Files iCloud has not delivered
