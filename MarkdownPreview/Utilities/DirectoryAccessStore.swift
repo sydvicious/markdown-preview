@@ -59,7 +59,7 @@ final class DirectoryAccessStore: ObservableObject {
     /// launch, not a reason to lose it now.
     private var sessionDirectories: [URL] = []
 
-    private static let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "DirectoryAccess")
+    nonisolated private static let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "DirectoryAccess")
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -119,9 +119,20 @@ final class DirectoryAccessStore: ObservableObject {
     /// read may well succeed anyway, and failing early would make macOS behave
     /// worse than it needs to.
     func withAccess<T>(to url: URL, perform body: () -> T) -> T {
+        Self.withAccess(to: url, grantedBy: grantedDirectories, perform: body)
+    }
+
+    /// The same, under the grants in `directories`, for work done away from
+    /// the main actor: the folders are the ones this store held when the work
+    /// was asked for, and each carries the scope that is taken here.
+    nonisolated static func withAccess<T>(
+        to url: URL,
+        grantedBy directories: [URL],
+        perform body: () -> T
+    ) -> T {
         guard let directory = DirectoryContainment.directory(
             covering: url,
-            from: grantedDirectories
+            from: directories
         ) else {
             return body()
         }

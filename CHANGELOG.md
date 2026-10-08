@@ -5,6 +5,7 @@
 
 ## 0.11
 
+- What is done about a document's images as its page is built, pointing each at the app and finding the ones that are missing or cannot be read, is done off the main actor with the rest of the build. It was done on it, once the HTML was ready: 29 ms for a 505 KB document.
 - Opening a document no longer asks every listed document's bookmark where it leads. That was to find a listed document that had been moved to where the file being opened is, and one that is still where it was last found has not been. It cost a couple of milliseconds for each document in the list, for each one opened.
 - Checking the listed documents for changes on disk costs about a tenth of what it did: 3 ms where it was 30 to 40 for a list of 25, every ten seconds, and under half a millisecond where it was 5 for the document on screen, every second. Each check asked where the document's bookmark led now and whether that was the Trash, which is how a file that has been moved or thrown away is found. A file that is still where it was last found is neither, so the check looks there first and asks only if nothing is there.
 - A document shown in Preview for the first time appears sooner. Each document has a web view of its own, and a web view takes most of a second to start before it shows anything; one is now started ahead of need, half a second after a page has loaded, for the next document to take. None is started at launch: that was tried, and made a launch slower.

@@ -117,34 +117,33 @@ struct MarkdownPreviewView: View {
     /// What the button that stands in for an unreadable image says, and its
     /// tooltip. The same wording as the banner above the preview, so there is
     /// one set of strings to localize.
-    private static let accessButtonLabel = String(localized: "Allow…")
-    private static let accessExplanation = String(localized: "Images in this document need permission to load.")
+    nonisolated private static let accessButtonLabel = String(localized: "Allow…")
+    nonisolated private static let accessExplanation = String(
+        localized: "Images in this document need permission to load."
+    )
 
     /// Renders the document with local image references pointed at the app's own
     /// URL scheme, and any image the app is not allowed to read replaced by a
     /// button that asks for access.
     ///
-    /// The HTML is built here, off the main actor, which is most of the time
-    /// it takes. What is done about the images needs the folders the app has
-    /// been granted, and those are the main actor's.
+    /// All of it is done off the main actor. What is done about the images
+    /// needs the folders the app has been granted, which are the main actor's
+    /// to keep; the request carries them as they were when it was made.
     nonisolated private static func render(_ request: RenderingRequest) async -> Rendering {
         let document = MarkdownHTMLBuilder.document(
             for: request.source,
             contentScale: request.contentScale,
             softBreak: .lineBreak
         )
-        return await MainActor.run {
-            withImages(document, for: request)
-        }
+        return withImages(document, for: request)
     }
 
     /// `WKWebView.loadHTMLString(_:baseURL:)` gives the web content process no
     /// read access to the file system, so a relative image reference never loads
     /// however correct the base URL is. `MarkdownImageSchemeHandler` serves those
     /// URLs from the app process instead.
-    private static func withImages(_ document: String, for request: RenderingRequest) -> Rendering {
+    nonisolated private static func withImages(_ document: String, for request: RenderingRequest) -> Rendering {
         guard let baseURL = request.baseURL else { return Rendering(html: document, imageProblem: .none) }
-        let accessStore = DirectoryAccessStore.shared
 
         // Every step here is a privileged read: the rewrite checks each image
         // exists, and telling an unreadable file from an absent one means
@@ -153,7 +152,7 @@ struct MarkdownPreviewView: View {
         // would fail, and every unresolved image would be classified
         // `.unreadable` — offering access for files that are simply not there,
         // precisely the promise the distinction exists to avoid making.
-        return accessStore.withAccess(to: baseURL) {
+        return DirectoryAccessStore.withAccess(to: baseURL, grantedBy: request.grantedDirectories) {
             let rewritten = MarkdownImageURL.rewritingLocalImages(in: document, relativeTo: baseURL)
             let unresolved = MarkdownImageURL.unresolvedLocalImages(in: rewritten, relativeTo: baseURL)
             guard !unresolved.isEmpty else { return Rendering(html: rewritten, imageProblem: .none) }
@@ -163,7 +162,7 @@ struct MarkdownPreviewView: View {
             // they are left to the default redaction.
             Self.log.debug("""
                 Unresolved images: \(unresolved.map { "\($0.source) (\($0.reason))" }.joined(separator: ", ")); \
-                grants: \(accessStore.grantedDirectories.map(\.path).joined(separator: ", "))
+                grants: \(request.grantedDirectories.map(\.path).joined(separator: ", "))
                 """)
 
             // Access is the actionable problem, so it wins when both are present.
@@ -184,7 +183,7 @@ struct MarkdownPreviewView: View {
         }
     }
 
-    private static let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "Images")
+    nonisolated private static let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "Images")
 
     var body: some View {
         let request = RenderingRequest(

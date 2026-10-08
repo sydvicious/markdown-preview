@@ -416,4 +416,43 @@ struct DirectoryAccessStoreTests {
         #expect(result == "read")
         #expect(runs == 1)
     }
+
+    // MARK: - Working under a grant, away from the main actor
+
+    /// The preview works out what to do about a document's images away from
+    /// the main actor, with the folders that were granted when it was asked.
+    /// So the same work can be done with a list of granted folders in hand,
+    /// and no store.
+    @Test func workUnderAGrantCanBeDoneAwayFromTheMainActor() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        let folder = try fixture.makeFolder("Docs")
+        let store = fixture.launch()
+        store.grantAccess(to: folder)
+        let granted = store.grantedDirectories
+        let image = folder.appendingPathComponent("photo.png")
+
+        let result = await Task.detached {
+            DirectoryAccessStore.withAccess(to: image, grantedBy: granted) {
+                Thread.isMainThread ? "on the main thread" : "read"
+            }
+        }.value
+
+        #expect(result == "read")
+    }
+
+    @Test func workAwayFromTheMainActorWithNoGrantStillRuns() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        let folder = try fixture.makeFolder("Docs")
+        let image = folder.appendingPathComponent("photo.png")
+
+        let result = await Task.detached {
+            DirectoryAccessStore.withAccess(to: image, grantedBy: []) {
+                Thread.isMainThread ? "on the main thread" : "read"
+            }
+        }.value
+
+        #expect(result == "read")
+    }
 }
