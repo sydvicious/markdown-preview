@@ -33,6 +33,9 @@ struct MarkdownPreviewView: View {
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
     var selectionSynchronizer: PreviewSelectionSynchronizer?
+    /// Where the reader was in each document, so that coming back to one
+    /// finds the place. The session's; without it each view keeps its own.
+    var scrollMemory: PreviewScrollMemory? = nil
     var onSelectedTextChange: (String?) -> Void = { _ in }
     var onSelectedRangesChange: ([MarkdownSelectionRange]) -> Void = { _ in }
     var onSearchSelection: (String) -> Void = { _ in }
@@ -185,7 +188,8 @@ struct MarkdownPreviewView: View {
                     onSelectedTextChange: showsThisDocument ? onSelectedTextChange : { _ in },
                     onSelectedRangesChange: showsThisDocument ? onSelectedRangesChange : { _ in },
                     onSearchSelection: onSearchSelection,
-                    onRequestImageAccess: { isRequestingFolderAccess = true }
+                    onRequestImageAccess: { isRequestingFolderAccess = true },
+                    scrollMemory: scrollMemory
                 )
             }
             if renderer.isTakingLong {

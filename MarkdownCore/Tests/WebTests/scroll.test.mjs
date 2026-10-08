@@ -229,3 +229,139 @@ test('scrolling is reported to the app, a burst of it once', async () => {
 
   assert.deepEqual(plain(messages), [{ name: 'previewScrollChanged', body: [0, 640, 2400] }]);
 });
+
+// The source pane shows the same document as text. So that it can be opened
+// where the reader was in the preview, and the preview where they were in the
+// source, a place in the page is also told, and asked for, as a place in the
+// source: each block knows the stretch of source it shows.
+
+const threeBlocks =
+  '<div class="md-block" data-source-start="0" data-source-end="100">One</div>\n' +
+  '<div class="md-block" data-source-start="110" data-source-end="210">Two</div>\n' +
+  '<div class="md-block" data-source-start="220" data-source-end="300">Three</div>';
+
+// jsdom lays nothing out, so each block is told where it is in the page: its
+// top and its height. Where it is in the window follows from how far the page
+// is scrolled.
+function layOut(window, blocks) {
+  window.document.querySelectorAll('[data-source-start]').forEach((element, index) => {
+    element.getBoundingClientRect = () => {
+      const { top, height } = blocks[index];
+      const inWindow = top - window.scrollY;
+      return { top: inWindow, bottom: inWindow + height, height, left: 0, right: 0, width: 0 };
+    };
+  });
+}
+
+const blocksAsLaidOut = [{ top: 0, height: 200 }, { top: 220, height: 400 }, { top: 640, height: 160 }];
+
+function sourcePage(body = threeBlocks, layout = blocksAsLaidOut) {
+  const loaded = loadPage(body, ['scroll']);
+  setScrollGeometry(loaded.window, { x: 0, y: 0, pageHeight: 2000, viewportHeight: 600 });
+  layOut(loaded.window, layout);
+  return loaded;
+}
+
+test('at the top of the page the reader is at the start of the source', () => {
+  const { preview } = sourcePage();
+
+  assert.equal(preview.sourceOffsetAtTop(), 0);
+});
+
+test('part of the way down a block is the same part of the way through its source', () => {
+  const { window, preview } = sourcePage();
+  // Half of the second block is above the top of the window.
+  setScrollGeometry(window, { y: 420 });
+
+  assert.equal(preview.sourceOffsetAtTop(), 160);
+});
+
+test('between two blocks the reader is at the start of the next', () => {
+  const { window, preview } = sourcePage();
+  setScrollGeometry(window, { y: 210 });
+
+  assert.equal(preview.sourceOffsetAtTop(), 110);
+});
+
+test('past the last block the reader is at its end', () => {
+  const { window, preview } = sourcePage();
+  setScrollGeometry(window, { y: 900 });
+
+  assert.equal(preview.sourceOffsetAtTop(), 300);
+});
+
+test('a page with no blocks has no place in the source', () => {
+  const { window, preview } = page();
+  setScrollGeometry(window, { y: 300, pageHeight: 3000, viewportHeight: 600 });
+
+  assert.equal(preview.sourceOffsetAtTop(), null);
+});
+
+test('the reader can be put at a place in the source', () => {
+  const { preview, scrolls } = sourcePage();
+
+  preview.scrollToSourceOffset(160);
+
+  assert.deepEqual(plain(scrolls), [[0, 420]]);
+});
+
+test('a place in the source between two blocks is the top of the next block', () => {
+  const { preview, scrolls } = sourcePage();
+
+  preview.scrollToSourceOffset(105);
+
+  assert.deepEqual(plain(scrolls), [[0, 220]]);
+});
+
+test('the start of the source is the top of the page', () => {
+  const { window, preview, scrolls } = sourcePage();
+  setScrollGeometry(window, { y: 420 });
+
+  preview.scrollToSourceOffset(0);
+
+  assert.deepEqual(plain(scrolls), [[0, 0]]);
+});
+
+test('a place past the end of the source is the bottom of the last block', () => {
+  const { preview, scrolls } = sourcePage();
+
+  preview.scrollToSourceOffset(5000);
+
+  assert.deepEqual(plain(scrolls), [[0, 800]]);
+});
+
+// An image that arrives late pushes everything under it down. The place asked
+// for is a place in the source, so it is looked for again where it is now.
+test('a place in the source is found again when the page moves under it', async () => {
+  const { window, preview, scrolls } = sourcePage();
+  preview.scrollToSourceOffset(160);
+  assert.deepEqual(plain(scrolls), [[0, 420]]);
+
+  layOut(window, [{ top: 0, height: 500 }, { top: 520, height: 400 }, { top: 940, height: 160 }]);
+  await tick(120);
+
+  assert.deepEqual(plain(scrolls.at(-1)), [0, 720]);
+});
+
+test('a page with no blocks is not scrolled to a place in the source', async () => {
+  const { window, preview, scrolls } = page();
+  setScrollGeometry(window, { y: 300, pageHeight: 3000, viewportHeight: 600 });
+
+  preview.scrollToSourceOffset(160);
+  await tick(120);
+
+  assert.deepEqual(plain(scrolls), []);
+});
+
+test('scrolling reports the place in the source after the place in the page', async () => {
+  const { window, messages } = sourcePage();
+
+  setScrollGeometry(window, { y: 420 });
+  window.dispatchEvent(new window.Event('scroll'));
+  await tick(150);
+
+  assert.deepEqual(plain(messages), [
+    { name: 'previewScrollChanged', body: [0, 420, 1400] },
+    { name: 'previewSourceOffsetChanged', body: 160 }
+  ]);
+});

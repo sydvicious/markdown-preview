@@ -5,6 +5,7 @@
 
 ## 0.11
 
+- The reader's place in each document is kept while the app is running. Going to another document and back returns to where they were; it used to start at the top. Preview and Source keep the same place: switching from one to the other opens at what the reader was looking at, by where it is in the source. Nothing of it is saved, so a document opened after the next launch starts at the top.
 - A `<`, `>`, `&` or quote with a combining mark after it is escaped in the page, as any other is. It was written out as it stood, because the replacement that escaped it compared whole characters and took the two for one that did not match. A quote left like that inside an attribute ends the attribute early.
 - Building a page takes about a third of the time it did, and so does reading a document's text for searching: for a 505 KB document, 83 ms where it was 257 ms, and 91 ms where it was 268 ms, in a release build. More than half the time went on escaping text for HTML, done as five replacements over every word; it is one pass now, and none over a word with nothing in it to escape. Splitting a document into lines looks for line endings a byte at a time.
 - The preview's HTML is built off the main actor, so the window goes on answering while a large document is opened. The page that was showing stays until the next is ready. If that takes more than half a second, a progress spinner covers it. The last eight pages stay built, so going back to a document shows it without building it again.

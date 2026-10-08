@@ -45,6 +45,27 @@ enum PreviewScriptCall {
     static func scrollToFraction(x: Double, ofMaxY fraction: Double) -> String {
         "window.markdownPreview?.scrollToFraction?.(\(x), \(fraction));"
     }
+
+    /// Scrolls to a place in the source: the block that shows it, and as far
+    /// down that block as the place is through the block's source.
+    static func scrollToSourceOffset(_ offset: Int) -> String {
+        "window.markdownPreview?.scrollToSourceOffset?.(\(offset));"
+    }
+}
+
+/// What of the source is at the top of the page, as the page reports it: an
+/// offset into the source, in UTF-16 units.
+struct PreviewSourceOffsetMessage: Equatable {
+    var offset: Int
+
+    init?(messageBody: Any) {
+        guard let number = messageBody as? NSNumber,
+              number.doubleValue.isFinite,
+              number.doubleValue >= 0 else {
+            return nil
+        }
+        offset = Int(number.doubleValue)
+    }
 }
 
 struct PreviewDisplaySelectionRange: Equatable {
@@ -141,6 +162,9 @@ enum PreviewScrollRestoration {
         case offset(x: Double, y: Double)
         /// The same way down the page as before, as a share of how far it scrolls.
         case fraction(x: Double, ofMaxY: Double)
+        /// At a place in the source, which is where the reader was in the
+        /// source pane.
+        case sourceOffset(Int)
 
         /// The script that carries it out, or nil when there is nothing to do.
         var script: String? {
@@ -151,6 +175,8 @@ enum PreviewScrollRestoration {
                 return PreviewScriptCall.scrollToOffset(x: x, y: y)
             case let .fraction(x, fraction):
                 return PreviewScriptCall.scrollToFraction(x: x, ofMaxY: fraction)
+            case let .sourceOffset(offset):
+                return PreviewScriptCall.scrollToSourceOffset(offset)
             }
         }
     }
@@ -179,6 +205,85 @@ enum PreviewScrollRestoration {
             return .fraction(x: position.x, ofMaxY: position.y / position.maxY)
         }
         return .offset(x: position.x, y: position.y)
+    }
+}
+
+/// Where the reader was in each document, for as long as the app is running.
+///
+/// The preview has one page, and loading another document's into it starts at
+/// the top. So that going to another document and back leaves the reader where
+/// they were, the place each page reports is kept here under its document,
+/// with the text it was reported for.
+///
+/// The source pane shows the same document, and is opened where the reader
+/// was in the preview, as the preview is where they were in the source. What
+/// the two have in common is the source, so a place is also kept as an offset
+/// into it: the page reports the one at the top of its window, and the source
+/// pane the one at the top of its text.
+///
+/// Nothing of it is saved. A document opened in a later launch starts at the
+/// top.
+final class PreviewScrollMemory {
+    /// The pane a place in the source was reported by.
+    enum Pane {
+        case preview
+        case source
+    }
+
+    private struct Place {
+        /// Where the reader was in the preview's page, to the pixel.
+        var inPreview: (position: PreviewScrollPosition, content: PreviewScrollRestoration.Content)?
+        /// What of the source was at the top of the pane they were last in.
+        var sourceOffset: Int?
+        /// The reader last moved in the source pane, so where the preview was
+        /// is no longer where they are.
+        var movedInSourceLast = false
+    }
+
+    private var places: [String: Place] = [:]
+
+    /// Notes where the reader is in the preview of `content`. A page that is
+    /// no document, as in a SwiftUI preview, is not remembered.
+    func remember(_ position: PreviewScrollPosition, in content: PreviewScrollRestoration.Content) {
+        guard let documentID = content.documentID else { return }
+        places[documentID, default: Place()].inPreview = (position, content)
+        places[documentID]?.movedInSourceLast = false
+    }
+
+    /// Notes what of the document's source is at the top of `pane`.
+    func rememberSourceOffset(_ offset: Int, in documentID: String?, by pane: Pane) {
+        guard let documentID, offset >= 0 else { return }
+        places[documentID, default: Place()].sourceOffset = offset
+        if pane == .source {
+            places[documentID]?.movedInSourceLast = true
+        }
+    }
+
+    /// What of the document's source the reader was last at, in either pane.
+    /// The source pane opens there.
+    func sourceOffset(for documentID: String?) -> Int? {
+        guard let documentID else { return nil }
+        return places[documentID]?.sourceOffset
+    }
+
+    /// Where to put the reader in a page of `content` that is about to load.
+    ///
+    /// If they last moved in the source pane, at that place in the source.
+    /// Otherwise where they last were in this document's page, by the rule
+    /// that keeps their place when a document on screen is redrawn: the offset
+    /// if its text has changed since, the same way down the page if it has
+    /// not. The top if they have not been in the document at all.
+    func restoration(for content: PreviewScrollRestoration.Content) -> PreviewScrollRestoration.Restoration {
+        guard let documentID = content.documentID, let place = places[documentID] else { return .top }
+        if place.movedInSourceLast, let sourceOffset = place.sourceOffset {
+            return sourceOffset > 0 ? .sourceOffset(sourceOffset) : .top
+        }
+        guard let inPreview = place.inPreview else { return .top }
+        return PreviewScrollRestoration.restoration(of: inPreview.position, from: inPreview.content, to: content)
+    }
+
+    func forget(documentID: String) {
+        places.removeValue(forKey: documentID)
     }
 }
 

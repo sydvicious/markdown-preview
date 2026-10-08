@@ -20,8 +20,45 @@ private final class MarkdownCopyTextView: UITextView {
     }
 }
 
+private extension UITextView {
+    /// How far down the text the top of what is showing is.
+    private var topOfWhatIsShowing: CGFloat {
+        contentOffset.y + adjustedContentInset.top
+    }
+
+    /// The offset into the text of the character at the top of what is
+    /// showing.
+    var characterOffsetAtTop: Int {
+        guard topOfWhatIsShowing > textContainerInset.top else { return 0 }
+        let point = CGPoint(x: textContainerInset.left + 1, y: topOfWhatIsShowing + 1)
+        guard let position = closestPosition(to: point) else { return 0 }
+        return offset(from: beginningOfDocument, to: position)
+    }
+
+    /// Scrolls so that the line the character at `offset` is on is at the top.
+    func scrollToTop(characterAt offset: Int) {
+        let length = (text ?? "").utf16.count
+        guard let position = position(from: beginningOfDocument, offset: min(max(offset, 0), length)) else {
+            return
+        }
+        layoutIfNeeded()
+        let line = caretRect(for: position)
+        guard line.minY.isFinite else { return }
+
+        let highest = -adjustedContentInset.top
+        let lowest = max(highest, contentSize.height - bounds.height + adjustedContentInset.bottom)
+        let wanted = line.minY - textContainerInset.top - adjustedContentInset.top
+        setContentOffset(CGPoint(x: contentOffset.x, y: min(max(wanted, highest), lowest)), animated: false)
+    }
+}
+
 struct SelectableSourceTextView: UIViewRepresentable {
     let text: String
+    /// Which document this is, and where the reader was in each. With both,
+    /// the text opens at the place in the source they were at in the preview,
+    /// and says where they go from there. With neither it opens at the top.
+    var documentID: String? = nil
+    var scrollMemory: PreviewScrollMemory? = nil
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
     var onSearchSelection: (String) -> Void = { _ in }
@@ -30,6 +67,21 @@ struct SelectableSourceTextView: UIViewRepresentable {
         var selections: Binding<[MarkdownSelectionRange]>
         var onSearchSelection: (String) -> Void
         var isApplyingSelection = false
+        var documentID: String?
+        var scrollMemory: PreviewScrollMemory?
+        /// Counts the times the view has put the reader somewhere, so that a
+        /// placing that a later one has overtaken does nothing more.
+        var placings = 0
+
+        /// Says where the reader is when it is the reader who moved. The view
+        /// putting them somewhere is not that.
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            guard scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating,
+                  let textView = scrollView as? UITextView else {
+                return
+            }
+            scrollMemory?.rememberSourceOffset(textView.characterOffsetAtTop, in: documentID, by: .source)
+        }
 
         init(selections: Binding<[MarkdownSelectionRange]>, onSearchSelection: @escaping (String) -> Void) {
             self.selections = selections
@@ -88,16 +140,25 @@ struct SelectableSourceTextView: UIViewRepresentable {
         view.text = text
         applySelection(to: view, from: selections, coordinator: context.coordinator)
         context.coordinator.isApplyingSelection = false
+        context.coordinator.documentID = documentID
+        context.coordinator.scrollMemory = scrollMemory
+        placeReader(in: view, coordinator: context.coordinator, isAnotherDocument: false)
         return view
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         context.coordinator.selections = $selections
         context.coordinator.onSearchSelection = onSearchSelection
+        context.coordinator.scrollMemory = scrollMemory
+        let isAnotherDocument = context.coordinator.documentID != documentID
+        context.coordinator.documentID = documentID
         if uiView.text != text {
             context.coordinator.isApplyingSelection = true
             uiView.text = text
             context.coordinator.isApplyingSelection = false
+        }
+        if isAnotherDocument {
+            placeReader(in: uiView, coordinator: context.coordinator, isAnotherDocument: true)
         }
         if uiView.textColor != .label {
             uiView.textColor = .label
@@ -111,6 +172,33 @@ struct SelectableSourceTextView: UIViewRepresentable {
 
     private static func font(for textSize: DynamicTypeSize) -> UIFont {
         UIFont.monospacedSystemFont(ofSize: 16 * textSize.scaleFactor, weight: .regular)
+    }
+
+    /// Puts the reader where they last were in this document, in either pane.
+    /// A document they have not been in is left where a selection puts it, or
+    /// at the top if the view was showing another.
+    ///
+    /// The text has no layout until the turn after it is set, and where a line
+    /// is far down a long document is a guess until the text above it is laid
+    /// out. So it is done on the next turn, and again on the one after.
+    private func placeReader(in textView: UITextView, coordinator: Coordinator, isAnotherDocument: Bool) {
+        coordinator.placings += 1
+        let placing = coordinator.placings
+        guard let offset = scrollMemory?.sourceOffset(for: documentID) else {
+            if isAnotherDocument {
+                textView.scrollToTop(characterAt: 0)
+            }
+            return
+        }
+
+        DispatchQueue.main.async {
+            guard coordinator.placings == placing else { return }
+            textView.scrollToTop(characterAt: offset)
+            DispatchQueue.main.async {
+                guard coordinator.placings == placing else { return }
+                textView.scrollToTop(characterAt: offset)
+            }
+        }
     }
 
     private func applySelection(
@@ -181,6 +269,34 @@ private final class MarkdownCopyTextView: NSTextView {
         guard !didWriteSelection else { return }
         super.copy(sender)
     }
+
+    /// The offset into the text of the character at the top of what is
+    /// showing.
+    var characterOffsetAtTop: Int {
+        let top = visibleRect.minY
+        guard top > textContainerInset.height else { return 0 }
+        return characterIndexForInsertion(at: NSPoint(x: textContainerInset.width + 1, y: top + 1))
+    }
+
+    /// Scrolls so that the line the character at `offset` is on is at the top.
+    ///
+    /// Where a line is on screen is asked of the text view as an input client
+    /// would ask it, which is the same whichever text system the view is
+    /// using. It needs the view to be in a window.
+    func scrollToTop(characterAt offset: Int) {
+        guard let window else { return }
+        guard offset > 0 else {
+            scroll(.zero)
+            return
+        }
+
+        let length = (string as NSString).length
+        let place = NSRange(location: min(offset, length), length: 0)
+        let onScreen = firstRect(forCharacterRange: place, actualRange: nil)
+        let inView = convert(window.convertFromScreen(onScreen), from: nil)
+        guard inView.minY.isFinite else { return }
+        scroll(NSPoint(x: 0, y: max(0, inView.minY - textContainerInset.height)))
+    }
 }
 
 private final class WidthTrackingScrollView: NSScrollView {
@@ -204,6 +320,11 @@ private final class WidthTrackingScrollView: NSScrollView {
 
 struct SelectableSourceTextView: NSViewRepresentable {
     let text: String
+    /// Which document this is, and where the reader was in each. With both,
+    /// the text opens at the place in the source they were at in the preview,
+    /// and says where they go from there. With neither it opens at the top.
+    var documentID: String? = nil
+    var scrollMemory: PreviewScrollMemory? = nil
     let textSize: DynamicTypeSize
     @Binding var selections: [MarkdownSelectionRange]
     var onSearchSelection: (String) -> Void = { _ in }
@@ -212,6 +333,25 @@ struct SelectableSourceTextView: NSViewRepresentable {
         var selections: Binding<[MarkdownSelectionRange]>
         var onSearchSelection: (String) -> Void
         var isApplyingSelection = false
+        var documentID: String?
+        var scrollMemory: PreviewScrollMemory?
+        /// Set while the view is putting the reader somewhere, and while it is
+        /// first laid out. What moves the text then is not the reader.
+        var isPlacingReader = true
+        /// Counts the times the view has put the reader somewhere, so that a
+        /// placing that a later one has overtaken does nothing more.
+        var placings = 0
+
+        /// The text moved under its scroll view. If it was the reader who
+        /// moved it, says where they are now.
+        @objc func textDidScroll(_ notification: Notification) {
+            guard !isPlacingReader,
+                  let clipView = notification.object as? NSClipView,
+                  let textView = clipView.documentView as? MarkdownCopyTextView else {
+                return
+            }
+            scrollMemory?.rememberSourceOffset(textView.characterOffsetAtTop, in: documentID, by: .source)
+        }
 
         init(selections: Binding<[MarkdownSelectionRange]>, onSearchSelection: @escaping (String) -> Void) {
             self.selections = selections
@@ -294,17 +434,38 @@ struct SelectableSourceTextView: NSViewRepresentable {
         applySelection(to: textView, from: selections, coordinator: context.coordinator)
         context.coordinator.isApplyingSelection = false
         textView.takeFirstResponderIfUnclaimed()
+
+        context.coordinator.documentID = documentID
+        context.coordinator.scrollMemory = scrollMemory
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.textDidScroll(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
+        placeReader(in: textView, coordinator: context.coordinator, isAnotherDocument: false)
         return scrollView
+    }
+
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        NotificationCenter.default.removeObserver(coordinator)
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.selections = $selections
         context.coordinator.onSearchSelection = onSearchSelection
-        guard let textView = nsView.documentView as? NSTextView else { return }
+        context.coordinator.scrollMemory = scrollMemory
+        guard let textView = nsView.documentView as? MarkdownCopyTextView else { return }
+        let isAnotherDocument = context.coordinator.documentID != documentID
+        context.coordinator.documentID = documentID
         if textView.string != text {
             context.coordinator.isApplyingSelection = true
             textView.string = text
             context.coordinator.isApplyingSelection = false
+        }
+        if isAnotherDocument {
+            placeReader(in: textView, coordinator: context.coordinator, isAnotherDocument: true)
         }
         let desiredFont = Self.font(for: textSize)
         if textView.font != desiredFont {
@@ -324,6 +485,39 @@ struct SelectableSourceTextView: NSViewRepresentable {
 
     private static func font(for textSize: DynamicTypeSize) -> NSFont {
         NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize * textSize.scaleFactor, weight: .regular)
+    }
+
+    /// Puts the reader where they last were in this document, in either pane.
+    /// A document they have not been in is left where a selection puts it, or
+    /// at the top if the view was showing another.
+    ///
+    /// The view has no window until the turn after it is made, and where a
+    /// line is far down a long document is a guess until the text above it is
+    /// laid out. So it is done on the next turn, and again on the one after.
+    /// Until then nothing the text does is taken for the reader moving it.
+    private func placeReader(in textView: MarkdownCopyTextView, coordinator: Coordinator, isAnotherDocument: Bool) {
+        coordinator.placings += 1
+        let placing = coordinator.placings
+        coordinator.isPlacingReader = true
+
+        let offset = scrollMemory?.sourceOffset(for: documentID)
+        if offset == nil, isAnotherDocument {
+            textView.scroll(.zero)
+        }
+
+        DispatchQueue.main.async {
+            guard coordinator.placings == placing else { return }
+            if let offset {
+                textView.scrollToTop(characterAt: offset)
+            }
+            DispatchQueue.main.async {
+                guard coordinator.placings == placing else { return }
+                if let offset {
+                    textView.scrollToTop(characterAt: offset)
+                }
+                coordinator.isPlacingReader = false
+            }
+        }
     }
 
     private func applySelection(

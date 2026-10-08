@@ -57,6 +57,7 @@ window.markdownPreview = window.markdownPreview ?? {};
     const state = { tries: 0, scrolls: 0, askedForY: null, maxY: null, ended: null };
     restoreState = state;
     let isInPlace = false;
+    let wantedY = null;
 
     const attempt = () => {
       restoreTimer = null;
@@ -64,8 +65,12 @@ window.markdownPreview = window.markdownPreview ?? {};
 
       const maxY = maxScrollY();
       const y = Math.min(target(maxY), maxY);
-      if (maxY !== state.maxY) {
+      // In place is only in place for as long as the place stays where it is.
+      // It moves when the page changes height, and for a place in the source
+      // when what is above it does.
+      if (maxY !== state.maxY || y !== wantedY) {
         state.maxY = maxY;
+        wantedY = y;
         isInPlace = false;
       }
       if (!isInPlace) {
@@ -108,6 +113,81 @@ window.markdownPreview = window.markdownPreview ?? {};
     restore(x, (maxY) => fraction * maxY, () => false);
   };
 
+  // The source pane shows the same document as text. So that it can open
+  // where the reader was here, and this page where they were there, a place in
+  // the page is also a place in the source: each block says what stretch of
+  // the source it shows, and part of the way down a block is taken for the
+  // same part of the way through its source.
+  const sourceBlocks = () => Array.from(document.querySelectorAll('[data-source-start][data-source-end]'))
+    .map((element) => ({
+      element,
+      start: Number(element.getAttribute('data-source-start')),
+      end: Number(element.getAttribute('data-source-end'))
+    }))
+    .filter(({ start, end }) => Number.isFinite(start) && Number.isFinite(end) && end > start);
+
+  // The place in the source at the top of the window, or null for a page with
+  // no blocks.
+  window.markdownPreview.sourceOffsetAtTop = () => {
+    const blocks = sourceBlocks();
+    if (blocks.length === 0) {
+      return null;
+    }
+    if (window.scrollY <= 0) {
+      return 0;
+    }
+
+    for (const { element, start, end } of blocks) {
+      const rect = element.getBoundingClientRect();
+      if (rect.bottom <= 0) {
+        continue;
+      }
+      // A block that starts below the top of the window: the reader is in the
+      // space above it, which is the start of it.
+      if (rect.top >= 0 || rect.height <= 0) {
+        return start;
+      }
+      return Math.round(start + (-rect.top / rect.height) * (end - start));
+    }
+    return blocks[blocks.length - 1].end;
+  };
+
+  // How far down the page a place in the source is, as the page is laid out
+  // now, or null for a page with no blocks.
+  const pageYForSourceOffset = (offset) => {
+    const blocks = sourceBlocks();
+    if (blocks.length === 0) {
+      return null;
+    }
+    if (offset <= 0) {
+      return 0;
+    }
+
+    let bottomOfLast = 0;
+    for (const { element, start, end } of blocks) {
+      const rect = element.getBoundingClientRect();
+      const top = rect.top + window.scrollY;
+      if (offset < start) {
+        return top;
+      }
+      if (offset < end) {
+        return top + ((offset - start) / (end - start)) * rect.height;
+      }
+      bottomOfLast = top + rect.height;
+    }
+    return bottomOfLast;
+  };
+
+  // Puts the reader at a place in the source. Where that is in the page moves
+  // as the page settles, an image arriving above it for one, so it is looked
+  // for again at each try for as long as a restore lasts.
+  window.markdownPreview.scrollToSourceOffset = (offset) => {
+    if (pageYForSourceOffset(offset) === null) {
+      return;
+    }
+    restore(window.scrollX, () => pageYForSourceOffset(offset) ?? 0, () => false);
+  };
+
   // Tells the app where the reader is, so a reload can put them back. Scrolling
   // fires far more often than the answer is needed, so it is reported at most
   // ten times a second.
@@ -121,6 +201,10 @@ window.markdownPreview = window.markdownPreview ?? {};
     pendingReport = setTimeout(() => {
       pendingReport = null;
       window.webkit?.messageHandlers?.previewScrollChanged?.postMessage(window.markdownPreview.scrollPosition());
+      const sourceOffset = window.markdownPreview.sourceOffsetAtTop();
+      if (sourceOffset !== null) {
+        window.webkit?.messageHandlers?.previewSourceOffsetChanged?.postMessage(sourceOffset);
+      }
     }, 100);
   }, { passive: true });
 })();

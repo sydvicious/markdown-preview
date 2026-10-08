@@ -203,6 +203,10 @@ final class DocumentSessionStore: ObservableObject {
     @Published var missingActiveDocumentAlert: MissingActiveDocumentAlert?
     private let documentSearchIndex: DocumentSearchIndex
     private let securityScope: SecurityScope
+    /// Where the reader was in each listed document's preview. Kept here, with
+    /// the rest of what is kept for each document, so that it outlasts the
+    /// view that shows them. The preview knows a document by its `stableID`.
+    let previewScrollMemory = PreviewScrollMemory()
 
     /// Bookmarks whose security scope the system refused during this launch.
     ///
@@ -412,6 +416,7 @@ final class DocumentSessionStore: ObservableObject {
         let idsToDelete = offsets.map { sortedDocuments[$0].id }
         for document in openedDocuments where idsToDelete.contains(document.id) {
             bookmarksWithRefusedScope.remove(document.bookmarkData)
+            previewScrollMemory.forget(documentID: document.stableID.uuidString)
         }
         openedDocuments.removeAll(where: { idsToDelete.contains($0.id) })
         idsToDelete.forEach {
@@ -434,6 +439,7 @@ final class DocumentSessionStore: ObservableObject {
         let wasSelected = selectedDocumentID == id
         for document in openedDocuments where document.id == id {
             bookmarksWithRefusedScope.remove(document.bookmarkData)
+            previewScrollMemory.forget(documentID: document.stableID.uuidString)
         }
         openedDocuments.removeAll(where: { $0.id == id })
         knownModificationDates.removeValue(forKey: id)
@@ -714,6 +720,7 @@ final class DocumentSessionStore: ObservableObject {
         if let existingIndex = openedDocuments.firstIndex(where: { $0.id == newID }) {
             openedDocuments[existingIndex].file = file
             bookmarksWithRefusedScope.remove(openedDocuments[index].bookmarkData)
+            previewScrollMemory.forget(documentID: openedDocuments[index].stableID.uuidString)
             openedDocuments.remove(at: index)
         } else {
             openedDocuments[index].id = newID

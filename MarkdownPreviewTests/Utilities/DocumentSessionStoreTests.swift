@@ -807,4 +807,50 @@ struct DocumentSessionStoreTests {
         #expect(store.searchMapping(for: documentID) === read)
         #expect(store.searchMapping(for: "/tmp/search-mapping/not-listed.md") == nil)
     }
+
+    // MARK: - Where the reader was in each preview
+
+    /// What the preview knows a listed document by, with its text.
+    @MainActor
+    private static func previewContent(
+        of fileName: String,
+        in store: DocumentSessionStore
+    ) throws -> PreviewScrollRestoration.Content {
+        let document = try #require(store.openedDocuments.first { $0.file.fileName == fileName })
+        return .init(documentID: document.stableID.uuidString, source: document.file.contents)
+    }
+
+    @MainActor
+    @Test func aDocumentRemovedFromTheListIsForgottenByTheScrollMemory() throws {
+        let (store, ids) = Self.makeStoreWithBetaOnScreen()
+        let alpha = try Self.previewContent(of: "alpha.md", in: store)
+        let beta = try Self.previewContent(of: "beta.md", in: store)
+        let halfway = PreviewScrollPosition(x: 0, y: 600, maxY: 1200)
+        store.previewScrollMemory.remember(halfway, in: alpha)
+        store.previewScrollMemory.remember(halfway, in: beta)
+
+        store.removeDocument(id: try #require(ids["beta.md"]), isCompactWidth: false)
+
+        #expect(store.previewScrollMemory.restoration(for: beta) == .top)
+        #expect(store.previewScrollMemory.restoration(for: alpha) == .fraction(x: 0, ofMaxY: 0.5))
+    }
+
+    @MainActor
+    @Test func documentsDeletedFromTheListAreForgottenByTheScrollMemory() throws {
+        let (store, _) = Self.makeStoreWithBetaOnScreen()
+        let alpha = try Self.previewContent(of: "alpha.md", in: store)
+        let beta = try Self.previewContent(of: "beta.md", in: store)
+        let gamma = try Self.previewContent(of: "gamma.md", in: store)
+        let halfway = PreviewScrollPosition(x: 0, y: 600, maxY: 1200)
+        for content in [alpha, beta, gamma] {
+            store.previewScrollMemory.remember(halfway, in: content)
+        }
+
+        // The list is in name order: alpha, beta, gamma.
+        store.deleteDocuments(at: IndexSet([0, 2]), isCompactWidth: false)
+
+        #expect(store.previewScrollMemory.restoration(for: alpha) == .top)
+        #expect(store.previewScrollMemory.restoration(for: gamma) == .top)
+        #expect(store.previewScrollMemory.restoration(for: beta) == .fraction(x: 0, ofMaxY: 0.5))
+    }
 }

@@ -25,6 +25,11 @@ This document tracks planned work for MarkdownPreviewApp.
   - Find out why a launch builds the page on screen twice. Each `[perf] render asked for` line names the renderer it was asked of: two renderers is a view made twice, and one is something it is made from that changed.
   - Take the `[perf]` timing lines out once this is closed.
 
+### Switching to Source and back rebuilds the preview.
+  - The detail pane shows the preview or the source and not both. Switching to Source removes the preview, and with it the pages it had built and its web view. Coming back builds the HTML again, makes a new web view and loads the page into it: a blank pane, and the spinner for a large document.
+  - First, keep the built pages somewhere that outlasts the preview, with the session, so that coming back skips the build and pays only for a new web view to load the page.
+  - Then keep the web view alive behind Source, hidden, so that coming back loads nothing. Focus, the hand-off of the selection, and what Copy acts on all assume that only one pane exists.
+
 ### A line selected by triple-click in the preview does not stay a line.
   - Clicking three times on a line in the preview highlights the line and a strip below it, into the block after. Switching to Source and back highlights the line's words alone. The highlight should be the line alone from the click.
   - After that trip through Source, a copy from the preview is expected to be the words and not the line: no `#` or list marker, and no line ending. Confirm it with a paste.

@@ -488,6 +488,8 @@ struct ContentView: View {
             if let document = store.currentDocument {
                 MarkdownSourceView(
                     contents: document.file.contents,
+                    documentID: document.stableID.uuidString,
+                    scrollMemory: store.previewScrollMemory,
                     textSize: store.textSize(for: document.id),
                     selections: Binding(
                         get: { store.selections(for: document.id) },
@@ -512,6 +514,7 @@ struct ContentView: View {
                         set: { store.setSelections($0, for: document.id, text: document.file.contents) }
                     ),
                     selectionSynchronizer: previewSelectionSynchronizer,
+                    scrollMemory: store.previewScrollMemory,
                     onSelectedTextChange: { previewSelectedText = $0 },
                     onSelectedRangesChange: { ranges in
                         store.setSelections(ranges, for: document.id, text: document.file.contents)

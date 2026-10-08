@@ -792,6 +792,187 @@ struct PreviewScrollRestorationTests {
         #expect(restoration == .top)
     }
 
+    // MARK: - Where the reader was in each document
+
+    private let notes = "/tmp/notes/notes.md"
+    private let nearTheTop = PreviewScrollPosition(x: 0, y: 300, maxY: 2400)
+    private let atTheTop = PreviewScrollPosition(x: 0, y: 0, maxY: 2400)
+
+    /// To another document and back: each is where it was left.
+    @Test func aDocumentGoneBackToIsPutBackWhereItWasLeft() {
+        let memory = PreviewScrollMemory()
+        memory.remember(halfway, in: Content(documentID: plan, source: "the plan"))
+        memory.remember(nearTheTop, in: Content(documentID: notes, source: "the notes"))
+
+        #expect(
+            memory.restoration(for: Content(documentID: plan, source: "the plan"))
+                == .fraction(x: 0, ofMaxY: 0.5)
+        )
+        #expect(
+            memory.restoration(for: Content(documentID: notes, source: "the notes"))
+                == .fraction(x: 0, ofMaxY: 0.125)
+        )
+    }
+
+    @Test func aDocumentNotSeenBeforeStartsAtTheTop() {
+        let memory = PreviewScrollMemory()
+        memory.remember(halfway, in: Content(documentID: plan, source: "the plan"))
+
+        #expect(memory.restoration(for: Content(documentID: notes, source: "the notes")) == .top)
+    }
+
+    /// The same rule as for a document edited while it is on screen: its
+    /// height may have changed, and the offset is what stays true above the
+    /// edit.
+    @Test func aDocumentEditedWhileTheReaderWasAwayKeepsItsOffset() {
+        let memory = PreviewScrollMemory()
+        memory.remember(halfway, in: Content(documentID: plan, source: "before"))
+
+        #expect(memory.restoration(for: Content(documentID: plan, source: "after")) == .offset(x: 0, y: 1200))
+    }
+
+    @Test func theLastPlaceReportedIsTheOneKept() {
+        let memory = PreviewScrollMemory()
+        let content = Content(documentID: plan, source: "the plan")
+        memory.remember(nearTheTop, in: content)
+        memory.remember(halfway, in: content)
+
+        #expect(memory.restoration(for: content) == .fraction(x: 0, ofMaxY: 0.5))
+    }
+
+    @Test func aDocumentScrolledBackToTheTopStartsAtTheTop() {
+        let memory = PreviewScrollMemory()
+        let content = Content(documentID: plan, source: "the plan")
+        memory.remember(halfway, in: content)
+        memory.remember(atTheTop, in: content)
+
+        #expect(memory.restoration(for: content) == .top)
+    }
+
+    @Test func forgettingADocumentLeavesTheOthers() {
+        let memory = PreviewScrollMemory()
+        let planContent = Content(documentID: plan, source: "the plan")
+        let notesContent = Content(documentID: notes, source: "the notes")
+        memory.remember(halfway, in: planContent)
+        memory.remember(nearTheTop, in: notesContent)
+
+        memory.forget(documentID: plan)
+
+        #expect(memory.restoration(for: planContent) == .top)
+        #expect(memory.restoration(for: notesContent) == .fraction(x: 0, ofMaxY: 0.125))
+    }
+
+    /// A page with no identity, as in a SwiftUI preview, is nobody's to come
+    /// back to.
+    @Test func aPageThatIsNoDocumentIsNotRemembered() {
+        let memory = PreviewScrollMemory()
+        let content = Content(documentID: nil, source: "same")
+        memory.remember(halfway, in: content)
+
+        #expect(memory.restoration(for: content) == .top)
+    }
+
+    // MARK: - The same place in the preview and in the source
+
+    /// The page says where the reader is twice over: where in the page, and
+    /// what of the source is at the top of it. The second is what the source
+    /// pane opens at.
+    @Test func whereTheReaderIsInThePreviewIsAPlaceInTheSourceToo() {
+        let memory = PreviewScrollMemory()
+        let content = Content(documentID: plan, source: "the plan")
+        memory.remember(halfway, in: content)
+        memory.rememberSourceOffset(4200, in: plan, by: .preview)
+
+        #expect(memory.sourceOffset(for: plan) == 4200)
+        // And the preview itself goes back to exactly where it was.
+        #expect(memory.restoration(for: content) == .fraction(x: 0, ofMaxY: 0.5))
+    }
+
+    @Test func afterTheReaderMovesInTheSourceThePreviewOpensAtThatPlaceInTheSource() {
+        let memory = PreviewScrollMemory()
+        let content = Content(documentID: plan, source: "the plan")
+        memory.remember(halfway, in: content)
+        memory.rememberSourceOffset(4200, in: plan, by: .preview)
+
+        memory.rememberSourceOffset(9000, in: plan, by: .source)
+
+        #expect(memory.sourceOffset(for: plan) == 9000)
+        #expect(memory.restoration(for: content) == .sourceOffset(9000))
+    }
+
+    @Test func movingInThePreviewAgainPutsItBackWhereItWasItself() {
+        let memory = PreviewScrollMemory()
+        let content = Content(documentID: plan, source: "the plan")
+        memory.rememberSourceOffset(9000, in: plan, by: .source)
+
+        memory.remember(nearTheTop, in: content)
+        memory.rememberSourceOffset(700, in: plan, by: .preview)
+
+        #expect(memory.restoration(for: content) == .fraction(x: 0, ofMaxY: 0.125))
+        #expect(memory.sourceOffset(for: plan) == 700)
+    }
+
+    @Test func aDocumentReadOnlyInTheSourceOpensInThePreviewAtThatPlace() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSourceOffset(9000, in: plan, by: .source)
+
+        #expect(memory.restoration(for: Content(documentID: plan, source: "the plan")) == .sourceOffset(9000))
+    }
+
+    @Test func theStartOfTheSourceIsTheTopOfThePreview() {
+        let memory = PreviewScrollMemory()
+        let content = Content(documentID: plan, source: "the plan")
+        memory.remember(halfway, in: content)
+
+        memory.rememberSourceOffset(0, in: plan, by: .source)
+
+        #expect(memory.restoration(for: content) == .top)
+    }
+
+    @Test func eachDocumentHasItsOwnPlaceInTheSource() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSourceOffset(9000, in: plan, by: .source)
+        memory.rememberSourceOffset(40, in: notes, by: .preview)
+
+        #expect(memory.sourceOffset(for: plan) == 9000)
+        #expect(memory.sourceOffset(for: notes) == 40)
+        #expect(memory.sourceOffset(for: "/tmp/notes/unread.md") == nil)
+    }
+
+    @Test func aForgottenDocumentHasNoPlaceInTheSource() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSourceOffset(9000, in: plan, by: .source)
+
+        memory.forget(documentID: plan)
+
+        #expect(memory.sourceOffset(for: plan) == nil)
+        #expect(memory.restoration(for: Content(documentID: plan, source: "the plan")) == .top)
+    }
+
+    @Test func aPageThatIsNoDocumentHasNoPlaceInTheSource() {
+        let memory = PreviewScrollMemory()
+        memory.rememberSourceOffset(9000, in: nil, by: .source)
+
+        #expect(memory.sourceOffset(for: nil) == nil)
+    }
+
+    // MARK: - What the page says of the place in the source
+
+    @Test func thePlaceInTheSourceIsReadAsAWholeNumber() {
+        #expect(PreviewSourceOffsetMessage(messageBody: NSNumber(value: 160))?.offset == 160)
+        #expect(PreviewSourceOffsetMessage(messageBody: NSNumber(value: 0))?.offset == 0)
+        #expect(PreviewSourceOffsetMessage(messageBody: NSNumber(value: 160.4))?.offset == 160)
+    }
+
+    @Test func aPlaceInTheSourceThatIsNotOneIsIgnored() {
+        #expect(PreviewSourceOffsetMessage(messageBody: "160") == nil)
+        #expect(PreviewSourceOffsetMessage(messageBody: NSNumber(value: -4)) == nil)
+        #expect(PreviewSourceOffsetMessage(messageBody: NSNumber(value: Double.nan)) == nil)
+        #expect(PreviewSourceOffsetMessage(messageBody: NSNumber(value: Double.infinity)) == nil)
+        #expect(PreviewSourceOffsetMessage(messageBody: [NSNumber(value: 160)]) == nil)
+        #expect(PreviewSourceOffsetMessage(messageBody: NSNull()) == nil)
+    }
+
     @Test func aReaderAlreadyAtTheTopStaysThere() {
         let edited = PreviewScrollRestoration.restoration(
             of: PreviewScrollPosition(x: 0, y: 0, maxY: 2400),
@@ -922,6 +1103,10 @@ struct PreviewScrollRestorationTests {
             PreviewScrollRestoration.Restoration.fraction(x: 40, ofMaxY: 0.5).script
                 == PreviewScriptCall.scrollToFraction(x: 40, ofMaxY: 0.5)
         )
+        #expect(
+            PreviewScrollRestoration.Restoration.sourceOffset(9000).script
+                == PreviewScriptCall.scrollToSourceOffset(9000)
+        )
     }
 }
 
@@ -939,7 +1124,8 @@ struct PreviewScriptCallTests {
             PreviewScriptCall.scrollPosition,
             PreviewScriptCall.applySelection("null, null, null, null, null, null"),
             PreviewScriptCall.scrollToOffset(x: 0, y: 0),
-            PreviewScriptCall.scrollToFraction(x: 0, ofMaxY: 0)
+            PreviewScriptCall.scrollToFraction(x: 0, ofMaxY: 0),
+            PreviewScriptCall.scrollToSourceOffset(0)
         ]
         let scripts = MarkdownWebResources.Script.allCases.map(MarkdownWebResources.script)
 
@@ -967,6 +1153,10 @@ struct PreviewScriptCallTests {
         #expect(
             PreviewScriptCall.scrollToFraction(x: 12.5, ofMaxY: 0.25)
                 == "window.markdownPreview?.scrollToFraction?.(12.5, 0.25);"
+        )
+        #expect(
+            PreviewScriptCall.scrollToSourceOffset(9000)
+                == "window.markdownPreview?.scrollToSourceOffset?.(9000);"
         )
     }
 
