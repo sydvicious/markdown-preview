@@ -39,10 +39,16 @@ struct MarkdownPreviewView: View {
 
     @ObservedObject private var accessStore = DirectoryAccessStore.shared
     @State private var isRequestingFolderAccess = false
-    /// The rendering last made, and what it was made from. The body runs far
-    /// more often than the document changes: for every change of selection,
-    /// and whenever anything in the window is redrawn.
-    @State private var renderings = LastValueCache<RenderingInputs, Rendering>()
+    /// Builds the page off the main actor, and keeps the last few built. The
+    /// body runs far more often than the document changes, for every change
+    /// of selection and whenever anything in the window is redrawn, and asks
+    /// each time; only something new to show is built.
+    ///
+    /// The last eight pages stay built, so going back to a document shows it
+    /// without building it again.
+    @StateObject private var renderer = LatestResult<RenderingRequest, Rendering>(keeping: 8) { request in
+        await MarkdownPreviewView.render(request)
+    }
 
     /// Why the document's images failed, if any did.
     ///
@@ -54,15 +60,16 @@ struct MarkdownPreviewView: View {
         case missing
     }
 
-    /// Everything a rendering is made from. While none of it has changed,
-    /// the rendering is not made again.
+    /// Everything a rendering is made from, and which document it is of. While
+    /// none of it has changed, the rendering is not made again.
     ///
     /// What is on disk is not among them. An image that turns up where one
     /// was missing is found when the document, its text size or the folders
     /// the app may read next change.
-    private struct RenderingInputs: Equatable {
+    private struct RenderingRequest: Equatable {
+        let documentID: String?
         let source: String
-        let textSize: DynamicTypeSize
+        let contentScale: CGFloat
         let baseURL: URL?
         let grantedDirectories: [URL]
     }
@@ -79,52 +86,37 @@ struct MarkdownPreviewView: View {
     private static let accessButtonLabel = String(localized: "Allow…")
     private static let accessExplanation = String(localized: "Images in this document need permission to load.")
 
-    /// The document as the preview shows it, made again only when what it is
-    /// made from has changed.
-    private var rendering: Rendering {
-        renderings.value(
-            for: RenderingInputs(
-                source: source,
-                textSize: textSize,
-                baseURL: baseURL,
-                grantedDirectories: accessStore.grantedDirectories
-            ),
-            make: makeRendering
-        )
-    }
-
     /// Renders the document with local image references pointed at the app's own
     /// URL scheme, and any image the app is not allowed to read replaced by a
     /// button that asks for access.
     ///
+    /// The HTML is built here, off the main actor, which is most of the time
+    /// it takes. What is done about the images needs the folders the app has
+    /// been granted, and those are the main actor's.
+    nonisolated private static func render(_ request: RenderingRequest) async -> Rendering {
+        let built = PerfLog.timed {
+            MarkdownHTMLBuilder.document(for: request.source, contentScale: request.contentScale, softBreak: .lineBreak)
+        }
+        let finished = await MainActor.run {
+            PerfLog.timed { withImages(built.value, for: request) }
+        }
+        let name = request.documentID.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "(no document)"
+        PerfLog.log.info("""
+            [perf] render \(name, privacy: .public): \
+            \(request.source.utf8.count, privacy: .public) bytes to HTML in \
+            \(built.milliseconds, format: .fixed(precision: 1), privacy: .public) ms off the main actor, images \
+            \(finished.milliseconds, format: .fixed(precision: 1), privacy: .public) ms on it
+            """)
+        return finished.value
+    }
+
     /// `WKWebView.loadHTMLString(_:baseURL:)` gives the web content process no
     /// read access to the file system, so a relative image reference never loads
     /// however correct the base URL is. `MarkdownImageSchemeHandler` serves those
     /// URLs from the app process instead.
-    private func makeRendering() -> Rendering {
-        let built = PerfLog.timed {
-            MarkdownHTMLBuilder.document(for: source, contentScale: textSize.scaleFactor, softBreak: .lineBreak)
-        }
-        let document = built.value
-        // One line each time the HTML is built.
-        let imagesStarted = ContinuousClock.now
-        defer {
-            let name = documentID.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "(no document)"
-            // What it was made from, to tell why it was made again: a cache
-            // that is not the one before is a view that was made anew, and
-            // the same cache is something here that changed.
-            let cache = String(UInt(bitPattern: ObjectIdentifier(renderings).hashValue), radix: 16).suffix(5)
-            PerfLog.log.info("""
-                [perf] render \(name, privacy: .public): \
-                \(source.utf8.count, privacy: .public) bytes to HTML in \
-                \(built.milliseconds, format: .fixed(precision: 1), privacy: .public) ms, images \
-                \(PerfLog.milliseconds(since: imagesStarted), format: .fixed(precision: 1), privacy: .public) ms; \
-                cache \(cache, privacy: .public), text size \(String(describing: textSize), privacy: .public), \
-                folder \(baseURL?.lastPathComponent ?? "(none)", privacy: .public), \
-                \(accessStore.grantedDirectories.count, privacy: .public) folders granted
-                """)
-        }
-        guard let baseURL else { return Rendering(html: document, imageProblem: .none) }
+    private static func withImages(_ document: String, for request: RenderingRequest) -> Rendering {
+        guard let baseURL = request.baseURL else { return Rendering(html: document, imageProblem: .none) }
+        let accessStore = DirectoryAccessStore.shared
 
         // Every step here is a privileged read: the rewrite checks each image
         // exists, and telling an unreadable file from an absent one means
@@ -138,8 +130,8 @@ struct MarkdownPreviewView: View {
             let unresolved = MarkdownImageURL.unresolvedLocalImages(in: rewritten, relativeTo: baseURL)
             guard !unresolved.isEmpty else { return Rendering(html: rewritten, imageProblem: .none) }
 
-            // Debug level: this renders on every preview update, so it should
-            // not persist in the system log by default. Paths are the user's, so
+            // Debug level: this runs for every page built, so it should not
+            // persist in the system log by default. Paths are the user's, so
             // they are left to the default redaction.
             Self.log.debug("""
                 Unresolved images: \(unresolved.map { "\($0.source) (\($0.reason))" }.joined(separator: ", ")); \
@@ -167,23 +159,59 @@ struct MarkdownPreviewView: View {
     private static let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "Images")
 
     var body: some View {
-        let rendering = rendering
-
-        MarkdownPreviewWebView(
-            source: source,
-            html: rendering.html,
-            baseURL: baseURL,
+        let request = RenderingRequest(
             documentID: documentID,
-            selectedRange: selections.first,
-            selectionSynchronizer: selectionSynchronizer,
-            onSelectedTextChange: onSelectedTextChange,
-            onSelectedRangesChange: onSelectedRangesChange,
-            onSearchSelection: onSearchSelection,
-            onRequestImageAccess: { isRequestingFolderAccess = true }
+            source: source,
+            contentScale: textSize.scaleFactor,
+            baseURL: baseURL,
+            grantedDirectories: accessStore.grantedDirectories
         )
+        // The page showing is the last one built. For the moment it takes to
+        // build this document's, that is the document before it: its own
+        // source goes with its HTML, and what is selected in this one, and
+        // what the reader selects in that one, are kept apart.
+        let shown = renderer.current
+        let showsThisDocument = shown?.request.documentID == documentID
+
+        ZStack {
+            if let shown {
+                MarkdownPreviewWebView(
+                    source: shown.request.source,
+                    html: shown.result.html,
+                    baseURL: shown.request.baseURL,
+                    documentID: shown.request.documentID,
+                    selectedRange: showsThisDocument ? selections.first : nil,
+                    selectionSynchronizer: selectionSynchronizer,
+                    onSelectedTextChange: showsThisDocument ? onSelectedTextChange : { _ in },
+                    onSelectedRangesChange: showsThisDocument ? onSelectedRangesChange : { _ in },
+                    onSearchSelection: onSearchSelection,
+                    onRequestImageAccess: { isRequestingFolderAccess = true }
+                )
+            }
+            if renderer.isTakingLong {
+                // Over whatever page is there, which is not the one wanted.
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.background)
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .task(id: request) {
+            // What was asked for and of which view's renderer, to tell why a
+            // page is built twice: a renderer that is not the one before is a
+            // view made anew, and the same one is something here that changed.
+            let name = request.documentID.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "(no document)"
+            let asked = String(UInt(bitPattern: ObjectIdentifier(renderer).hashValue), radix: 16).suffix(5)
+            PerfLog.log.info("""
+                [perf] render asked for \(name, privacy: .public) of renderer \(asked, privacy: .public): \
+                scale \(request.contentScale, privacy: .public), \
+                folder \(request.baseURL?.lastPathComponent ?? "(none)", privacy: .public), \
+                \(request.grantedDirectories.count, privacy: .public) folders granted
+                """)
+            await renderer.ask(request)
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
-            switch rendering.imageProblem {
+            switch shown?.result.imageProblem ?? .none {
             case .none:
                 EmptyView()
             case .unreadable:

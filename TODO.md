@@ -15,17 +15,14 @@ This document tracks planned work for MarkdownPreviewApp.
   - When focus is in either Search field, Esc should put focus back in the detail view. It should still clear the search text too, as it does today.
 
 ### Async file loading off `@Main`.
-  - If loading takes longer than 0.5 seconds, show a spinner with "Loading...".
   - Investigate checking file existence and polling in a separate `Task` as well.
-  - Treat this as two separate off-main stages: first read the file's bytes/text in its own actor, then parse and build the HTML in a second actor, handing only the finished result back to the main actor for display.
-  - Moving just the read off `@Main` may turn out to be good enough, but the suspicion is that building the HTML is the slow half — measure both stages before deciding how far to take it.
-  - Symptom driving this: opening a new file visibly freezes the GUI. The whole open path — read, parse, HTML build — currently runs on `@Main`, so the window stops responding until it finishes.
   - Schedule this work after the YMMV-related refactor work.
-  - Steps, in this order. Measured on a 505 KB document, all of it on the main actor: reading and decoding it, 3 ms; the search index, 450 ms; the HTML build with its image checks, about 410 ms, run three times for an open, twice on switching back to the document, and four times while text was being selected; the once-a-second check, 5 to 7 ms.
-    1. Build the HTML once for each change, not each time the body runs. Keep the last result, and use it again while the source, the text size, the folder and the image grants are the same.
-    2. Take the search index off the path of an open: build it off the main actor, or only when a search needs it.
-    3. Build the HTML off the main actor, with the spinner past 0.5 seconds.
-    4. Find out why the engine is slow: about 0.75 ms per KB, for the HTML and for the index alike.
+  - Find out why the engine is slow: about 0.75 ms per KB to build a document's HTML, and about the same again to read its text for searching. A 505 KB document takes about 0.4 seconds to build.
+  - Take the read off the main actor. It is 3 ms as a rule, but `MarkdownFile.load` waits up to 30 seconds, sleeping the thread between tries, for an iCloud file that has not downloaded.
+  - Stop resolving every listed document's bookmark each time a document is opened. `upsertDocument` does it to find a document already listed under the path it was moved from, at about 2 ms for each one listed.
+  - Take the ten-second check of every listed document off the main actor, or make it cheaper. It grows with the list: 18 to 31 ms with 17 documents. This goes with the polling bullet above.
+  - Take the image checks off the main actor: 29 ms for a 505 KB document. They need the folders the app has been granted, which are the main actor's.
+  - Find out why a launch builds the page on screen twice. Each `[perf] render asked for` line names the renderer it was asked of: two renderers is a view made twice, and one is something it is made from that changed.
   - Take the `[perf]` timing lines out once this is closed.
 
 ### A line selected by triple-click in the preview does not stay a line.

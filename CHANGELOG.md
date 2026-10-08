@@ -5,6 +5,7 @@
 
 ## 0.11
 
+- The preview's HTML is built off the main actor, so the window goes on answering while a large document is opened. The page that was showing stays until the next is ready. If that takes more than half a second, a progress spinner covers it. The last eight pages stay built, so going back to a document shows it without building it again.
 - A document's text is no longer read for searching while it is being opened, or while the list is restored at launch. It is read in the background, and by a search that gets there first. That reading took as long as showing the document: 450 ms for a 505 KB one, and 584 ms at launch for a list of six. A search in the document on screen uses what was read, and no longer reads the whole document again each time.
 - The preview's HTML is built once for each change to the document, its text size or the folders the app may read. It was built again each time the view was redrawn: three times to open a document, twice to go back to one, and again for every change of selection. On a 505 KB document each build takes about 0.4 seconds.
 - `Scripts/release-build.sh` runs `Scripts/run-tests-release.sh` before it archives anything, and makes no release if a test fails or the tests cannot be run. `--no-tests` releases without them, for a commit whose tests have just been run by hand; `--no-notarize` runs none. The `Release DMG` target has `/opt/homebrew/bin` on its `PATH`, for the Node the tests need.
