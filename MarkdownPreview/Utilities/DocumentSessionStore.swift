@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 
+import Combine
 import Foundation
 import SwiftUI
 import os
@@ -178,6 +179,37 @@ struct BookmarkResolver {
     }
 }
 
+/// How a document's file is read.
+///
+/// The store goes through this so that a test can stand in for a file iCloud
+/// has not delivered to this device, which no test can make.
+struct DocumentReader {
+    /// Reads the file, once, and waits for nothing. A file iCloud has not
+    /// delivered is refused with `MarkdownFile.NotDelivered`.
+    var read: (URL) throws -> MarkdownFile
+    /// Waits for a file that was refused that way, somewhere other than the
+    /// main actor, reads it there, and hands what came of it back here.
+    var readWhenDelivered: (
+        _ url: URL,
+        _ deliver: @escaping @MainActor @Sendable (Result<MarkdownFile, Error>) -> Void
+    ) -> Void
+
+    static let system = DocumentReader(
+        read: { try MarkdownFile.load(from: $0) },
+        readWhenDelivered: { url, deliver in
+            Task.detached(priority: .userInitiated) {
+                let result: Result<MarkdownFile, Error>
+                do {
+                    result = .success(try await MarkdownFile.loadWhenDelivered(from: url))
+                } catch {
+                    result = .failure(error)
+                }
+                await deliver(result)
+            }
+        }
+    )
+}
+
 @MainActor
 final class DocumentSessionStore: ObservableObject {
     struct DocumentSection: Identifiable, Equatable {
@@ -217,6 +249,50 @@ final class DocumentSessionStore: ObservableObject {
         let documents: [OpenedDocument]
         let modificationDates: [String: Date]
         let idMap: [String: String]
+        let onTheirWay: [AwaitedDocument]
+    }
+
+    /// What became of a request to open a document.
+    enum Opening {
+        /// It is in the list and on screen.
+        case shown
+        /// iCloud has not delivered its file. It will be listed and shown
+        /// when the file comes; `lateArrivals` says when, or that it did not.
+        case onItsWay
+    }
+
+    /// What came of waiting for a document's file.
+    enum LateArrival {
+        /// The document is in the list now, and on screen if `isShown`.
+        case arrived(id: String, isShown: Bool)
+        /// The file never came, and the reader who asked to open it is owed
+        /// the reason.
+        case failedToOpen(URL, Error)
+    }
+
+    /// A document that is not in the list yet, because iCloud had not
+    /// delivered its file when it was opened or when the saved list was
+    /// restored.
+    private struct AwaitedDocument {
+        let id: String
+        let url: URL
+        let bookmarkData: Data
+        let lastOpened: Date
+        /// The reader asked to open it just now. It goes on screen when it
+        /// comes, and they are told if it does not. Otherwise it is one the
+        /// saved list held, and comes and goes quietly.
+        var wasAskedFor: Bool
+        /// One from the saved list that was on screen when the list was saved.
+        var wasOnScreen = false
+        let since = ContinuousClock.now
+    }
+
+    /// What reading a document's file came to.
+    private enum Reading {
+        case read((file: MarkdownFile, modificationDate: Date?))
+        /// iCloud has not delivered the file. It is not missing.
+        case notDelivered
+        case failed
     }
 
     private let persistedDocumentsKey = "openedMarkdownDocuments"
@@ -234,6 +310,13 @@ final class DocumentSessionStore: ObservableObject {
     private let documentSearchIndex: DocumentSearchIndex
     private let securityScope: SecurityScope
     private let bookmarkResolver: BookmarkResolver
+    private let documentReader: DocumentReader
+    /// The documents whose files are being waited for. None of them is in the
+    /// list. They are saved with it, so that a launch which ends before a file
+    /// comes is not the end of its document.
+    private var awaitedDocuments: [AwaitedDocument] = []
+    /// What came of each of them, for whoever shows the reader the result.
+    let lateArrivals = PassthroughSubject<LateArrival, Never>()
     /// Where the reader was in each listed document's preview. Kept here, with
     /// the rest of what is kept for each document, so that it outlasts the
     /// view that shows them. The preview knows a document by its `stableID`.
@@ -270,6 +353,7 @@ final class DocumentSessionStore: ObservableObject {
         userDefaults: UserDefaults = .standard,
         securityScope: SecurityScope = .system,
         bookmarkResolver: BookmarkResolver = .system,
+        documentReader: DocumentReader = .system,
         searchIndexBuild: DocumentSearchIndex.BackgroundBuild? = DocumentSearchIndex.detached
     ) {
         let now = Date()
@@ -294,6 +378,13 @@ final class DocumentSessionStore: ObservableObject {
         )
         self.securityScope = securityScope
         self.bookmarkResolver = bookmarkResolver
+        self.documentReader = documentReader
+    }
+
+    /// Whether there is nothing to show and nothing coming. A list that is
+    /// empty only until iCloud delivers a file is not an empty list.
+    var hasNoDocumentsHereOrOnTheirWay: Bool {
+        openedDocuments.isEmpty && awaitedDocuments.isEmpty
     }
 
     var sortedDocuments: [OpenedDocument] {
@@ -381,7 +472,11 @@ final class DocumentSessionStore: ObservableObject {
     /// main actor there may be nothing left to bookmark. Callers that hold a
     /// durable scope — the file importer, an open request from Finder, a restored
     /// session — pass nothing and let this make its own.
-    func openDocument(at url: URL, bookmarkData suppliedBookmarkData: Data? = nil) throws {
+    ///
+    /// A file iCloud has not delivered is not waited for here. It is asked
+    /// for, and the document is listed and shown when it comes.
+    @discardableResult
+    func openDocument(at url: URL, bookmarkData suppliedBookmarkData: Data? = nil) throws -> Opening {
         let hasAccess = url.startAccessingSecurityScopedResource()
         defer {
             if hasAccess {
@@ -413,13 +508,131 @@ final class DocumentSessionStore: ObservableObject {
         // Whatever stopped the read goes up as it is. A file that is there and
         // is not text the app reads is not a missing file, and saying it is
         // sends the reader looking for one.
-        let loaded = try readDocument(at: resolvedURL, resolvedFrom: bookmarkData)
+        let loaded: (file: MarkdownFile, modificationDate: Date?)
+        do {
+            loaded = try readDocument(at: resolvedURL, resolvedFrom: bookmarkData)
+        } catch is MarkdownFile.NotDelivered {
+            return openWhenDelivered(resolvedURL, bookmarkData: bookmarkData)
+        }
         upsertDocument(loaded.file, bookmarkData: bookmarkData, modificationDate: loaded.modificationDate)
         knownLocations[bookmarkData] = resolvedURL
+        return .shown
+    }
+
+    /// Opens a document whose file iCloud has not delivered: now, as it was,
+    /// if it is in the list already, and otherwise when the file comes.
+    private func openWhenDelivered(_ url: URL, bookmarkData: Data) -> Opening {
+        let id = url.standardizedFileURL.path
+        if let index = openedDocuments.firstIndex(where: { $0.id == id }) {
+            // iCloud took back the contents of a file that is open here. The
+            // reader has its text. Any newer is found by the check for changes
+            // on disk, once it can be read.
+            Self.log.info("[read] open: \(url.lastPathComponent, privacy: .public) is listed; shown as it was")
+            openedDocuments[index].lastOpened = Date()
+            selectedDocumentID = id
+            return .shown
+        }
+        if let index = awaitedDocuments.firstIndex(where: { $0.id == id }) {
+            awaitedDocuments[index].wasAskedFor = true
+            return .onItsWay
+        }
+        wait(for: AwaitedDocument(
+            id: id,
+            url: url,
+            bookmarkData: bookmarkData,
+            lastOpened: Date(),
+            wasAskedFor: true
+        ))
+        return .onItsWay
+    }
+
+    /// Has the file read when iCloud delivers it, somewhere other than the
+    /// main actor, holding the scope its bookmark carries until then.
+    private func wait(for awaited: AwaitedDocument) {
+        awaitedDocuments.append(awaited)
+        let holdsScope = startSecurityScope(of: awaited.url, resolvedFrom: awaited.bookmarkData)
+        Self.log.info("""
+            [read] \(awaited.wasAskedFor ? "open" : "restore", privacy: .public): \
+            \(awaited.url.lastPathComponent, privacy: .public) is not delivered; waiting for it in the \
+            background, holdsScope=\(holdsScope)
+            """)
+        let (id, url) = (awaited.id, awaited.url)
+        documentReader.readWhenDelivered(url) { [weak self] result in
+            self?.stopWaiting(forDocument: id, at: url, holdingScope: holdsScope, with: result)
+        }
+    }
+
+    private func stopWaiting(
+        forDocument id: String,
+        at url: URL,
+        holdingScope holdsScope: Bool,
+        with result: Result<MarkdownFile, Error>
+    ) {
+        defer {
+            if holdsScope {
+                securityScope.stop(url)
+            }
+        }
+        // It may have been opened again in the meantime, and found there.
+        guard let index = awaitedDocuments.firstIndex(where: { $0.id == id }) else {
+            Self.log.info("[read] \(url.lastPathComponent, privacy: .public) is no longer waited for; nothing done")
+            return
+        }
+        let awaited = awaitedDocuments.remove(at: index)
+        let waited = ContinuousClock.now - awaited.since
+        let isListed = openedDocuments.contains(where: { $0.id == id })
+
+        switch result {
+        case .success(let file):
+            let modificationDate = modificationDateWithinAccess(for: url)
+            knownLocations[awaited.bookmarkData] = url
+            var isShown = false
+            if awaited.wasAskedFor {
+                upsertDocument(file, bookmarkData: awaited.bookmarkData, modificationDate: modificationDate)
+                isShown = true
+            } else if !isListed {
+                openedDocuments.append(.init(
+                    id: id,
+                    file: file,
+                    lastOpened: awaited.lastOpened,
+                    bookmarkData: awaited.bookmarkData
+                ))
+                if let modificationDate {
+                    knownModificationDates[id] = modificationDate
+                }
+                documentSearchIndex.upsert(file)
+                // Back on screen if that is where it was, unless the reader
+                // has put something else there since.
+                if awaited.wasOnScreen, selectedDocumentID == nil {
+                    selectedDocumentID = id
+                    isShown = true
+                }
+            }
+            Self.log.info("""
+                [read] \(awaited.wasAskedFor ? "open" : "restore", privacy: .public): \
+                \(url.lastPathComponent, privacy: .public) arrived after \(waited, privacy: .public); \
+                listed, isShown=\(isShown)
+                """)
+            lateArrivals.send(.arrived(id: id, isShown: isShown))
+        case .failure(let error):
+            let nsError = error as NSError
+            Self.log.info("""
+                [read] \(awaited.wasAskedFor ? "open" : "restore", privacy: .public): \
+                \(url.lastPathComponent, privacy: .public) did not arrive after \(waited, privacy: .public): \
+                \(nsError.domain, privacy: .public) \(nsError.code)
+                """)
+            if !isListed {
+                textSizesByDocumentID.removeValue(forKey: id)
+            }
+            if awaited.wasAskedFor {
+                lateArrivals.send(.failedToOpen(url, error))
+            }
+        }
     }
 
     func upsertDocument(_ file: MarkdownFile, bookmarkData: Data, modificationDate: Date?) {
         let id = file.url.standardizedFileURL.path
+        awaitedDocuments.removeAll(where: { $0.id == id })
         if !openedDocuments.contains(where: { $0.id == id }) {
             // Not in the list under this path, but it may be there under the
             // one it was moved from: the entry is only brought up to date when
@@ -530,11 +743,13 @@ final class DocumentSessionStore: ObservableObject {
             from: persisted.sorted(by: { $0.lastOpened > $1.lastOpened })
         )
 
+        var onTheirWay = migration.onTheirWay
         openedDocuments = migration.documents
         knownModificationDates = migration.modificationDates
+        // A document that is still coming keeps its text size until it does.
         textSizesByDocumentID = Self.restoreTextSizes(
             from: userDefaults,
-            validDocumentIDs: Set(migration.documents.map(\.id)),
+            validDocumentIDs: Set(migration.documents.map(\.id)).union(onTheirWay.map(\.id)),
             idMap: migration.idMap
         )
         documentSearchIndex.rebuild(with: migration.documents.map(\.file))
@@ -544,9 +759,15 @@ final class DocumentSessionStore: ObservableObject {
                 selectedDocumentID = resolvedSelection
             } else {
                 selectedDocumentID = nil
+                if let index = onTheirWay.firstIndex(where: { $0.id == resolvedSelection }) {
+                    onTheirWay[index].wasOnScreen = true
+                }
             }
         } else {
             selectedDocumentID = nil
+        }
+        for awaited in onTheirWay {
+            wait(for: awaited)
         }
     }
 
@@ -565,9 +786,13 @@ final class DocumentSessionStore: ObservableObject {
 
     func persistDocuments(to userDefaults: UserDefaults) {
         let encoder = JSONEncoder()
-        let persisted = openedDocuments.map {
+        let listed = openedDocuments.map {
             PersistedDocument(id: $0.id, lastOpened: $0.lastOpened, bookmarkData: $0.bookmarkData)
         }
+        let onTheirWay = awaitedDocuments.map {
+            PersistedDocument(id: $0.id, lastOpened: $0.lastOpened, bookmarkData: $0.bookmarkData)
+        }
+        let persisted = listed + onTheirWay
         guard let data = try? encoder.encode(persisted) else { return }
         userDefaults.set(data, forKey: persistedDocumentsKey)
     }
@@ -577,7 +802,10 @@ final class DocumentSessionStore: ObservableObject {
     }
 
     func persistSelectedDocument(to userDefaults: UserDefaults) {
-        userDefaults.set(selectedDocumentID, forKey: persistedSelectionKey)
+        // With nothing on screen because what was there is still coming, that
+        // is still what was there.
+        let onItsWay = awaitedDocuments.first(where: \.wasOnScreen)?.id
+        userDefaults.set(selectedDocumentID ?? onItsWay, forKey: persistedSelectionKey)
     }
 
     func persistSelectedDocument() {
@@ -663,7 +891,15 @@ final class DocumentSessionStore: ObservableObject {
                 [track] Bookmark for \(document.id, privacy: .public) resolves to \
                 \(url.standardizedFileURL.path, privacy: .public)
                 """)
-            guard let loaded = loadDocument(at: url, resolvedFrom: document.bookmarkData) else {
+            let loaded: (file: MarkdownFile, modificationDate: Date?)
+            switch reading(at: url, resolvedFrom: document.bookmarkData) {
+            case .read(let read):
+                loaded = read
+            case .notDelivered:
+                // Not missing: followed there when it can be read there.
+                Self.log.info("[read] check: \(url.lastPathComponent, privacy: .public) is not delivered where it went; left as it is")
+                return
+            case .failed:
                 Self.log.info("[track] Could not read it at \(url.standardizedFileURL.path, privacy: .public)")
                 handleMissingDocument(
                     document,
@@ -703,17 +939,19 @@ final class DocumentSessionStore: ObservableObject {
             }
         }
 
-        guard let loaded = loadDocument(at: url, resolvedFrom: document.bookmarkData) else {
+        switch reading(at: url, resolvedFrom: document.bookmarkData) {
+        case .read(let loaded):
+            take(loaded, for: document, at: index)
+        case .notDelivered:
+            Self.log.info("[read] check: \(url.lastPathComponent, privacy: .public) is not delivered; left as it is")
+        case .failed:
             Self.log.info("[track] Could not read \(document.id, privacy: .public), where its bookmark still says it is")
             handleMissingDocument(
                 document,
                 alertIfMissing: alertIfMissing,
                 isCompactWidth: isCompactWidth
             )
-            return
         }
-
-        take(loaded, for: document, at: index)
     }
 
     /// Whether a document's file is at the place it was last found. False is
@@ -737,7 +975,8 @@ final class DocumentSessionStore: ObservableObject {
     ///
     /// False is not that the file has gone. It is that looking there did not
     /// say: nothing has been found there yet, nothing is there now, or what is
-    /// there cannot be read. The check then asks where the bookmark's file is,
+    /// there cannot be read. A file there that iCloud has not delivered does
+    /// settle it: the document is where it was, and stays as it is. The check then asks where the bookmark's file is,
     /// which finds one that was moved, put in the Trash or deleted.
     private func lookWhereTheFileWas(for document: OpenedDocument, at index: Int) -> Bool {
         guard let location = knownLocations[document.bookmarkData],
@@ -753,11 +992,18 @@ final class DocumentSessionStore: ObservableObject {
         if let knownDate = knownModificationDates[document.id], modificationDate <= knownDate {
             return true
         }
-        guard let loaded = loadDocument(at: location, resolvedFrom: document.bookmarkData) else {
+        switch reading(at: location, resolvedFrom: document.bookmarkData) {
+        case .read(let loaded):
+            take(loaded, for: document, at: index)
+            return true
+        case .notDelivered:
+            // The file is there and newer, and its text has not come. The
+            // reader keeps the text they have, and the next check asks again.
+            Self.log.info("[read] check: \(location.lastPathComponent, privacy: .public) is not delivered; left as it is")
+            return true
+        case .failed:
             return false
         }
-        take(loaded, for: document, at: index)
-        return true
     }
 
     /// Takes what was just read of a document's file: its date, and its text
@@ -890,17 +1136,6 @@ final class DocumentSessionStore: ObservableObject {
         #endif
     }
 
-    private func loadFromBookmarkData(_ bookmarkData: Data) -> (file: MarkdownFile, modificationDate: Date?)? {
-        guard let url = resolveBookmarkURL(from: bookmarkData) else {
-            return nil
-        }
-        guard let loaded = loadDocument(at: url, resolvedFrom: bookmarkData) else {
-            return nil
-        }
-        knownLocations[bookmarkData] = url
-        return loaded
-    }
-
     private func resolveBookmarkURL(from bookmarkData: Data) -> URL? {
         bookmarkResolver.resolve(bookmarkData)
     }
@@ -919,16 +1154,25 @@ final class DocumentSessionStore: ObservableObject {
         resolvedFrom bookmarkData: Data,
         perform body: () throws -> T
     ) rethrows -> T {
-        guard !bookmarksWithRefusedScope.contains(bookmarkData) else {
-            return try body()
+        let holdsScope = startSecurityScope(of: url, resolvedFrom: bookmarkData)
+        defer {
+            if holdsScope {
+                securityScope.stop(url)
+            }
         }
+        return try body()
+    }
+
+    /// Takes the security scope of `url`, and says whether it was given. If it
+    /// was, it is the caller's to release.
+    private func startSecurityScope(of url: URL, resolvedFrom bookmarkData: Data) -> Bool {
+        guard !bookmarksWithRefusedScope.contains(bookmarkData) else { return false }
         guard securityScope.start(url) else {
             bookmarksWithRefusedScope.insert(bookmarkData)
             logRefusedScope(for: url)
-            return try body()
+            return false
         }
-        defer { securityScope.stop(url) }
-        return try body()
+        return true
     }
 
     /// One line per refused bookmark per launch, saying what would tell a dead
@@ -946,11 +1190,16 @@ final class DocumentSessionStore: ObservableObject {
             """)
     }
 
-    private func loadDocument(
-        at url: URL,
-        resolvedFrom bookmarkData: Data
-    ) -> (file: MarkdownFile, modificationDate: Date?)? {
-        try? readDocument(at: url, resolvedFrom: bookmarkData)
+    /// Reads the document, and tells a file iCloud has not delivered from one
+    /// that cannot be read.
+    private func reading(at url: URL, resolvedFrom bookmarkData: Data) -> Reading {
+        do {
+            return .read(try readDocument(at: url, resolvedFrom: bookmarkData))
+        } catch is MarkdownFile.NotDelivered {
+            return .notDelivered
+        } catch {
+            return .failed
+        }
     }
 
     /// Reads the document, passing up whatever stopped it being read.
@@ -959,7 +1208,7 @@ final class DocumentSessionStore: ObservableObject {
         resolvedFrom bookmarkData: Data
     ) throws -> (file: MarkdownFile, modificationDate: Date?) {
         try withSecurityScope(of: url, resolvedFrom: bookmarkData) {
-            let file = try MarkdownFile.load(from: url)
+            let file = try documentReader.read(url)
             let modificationDate = modificationDateWithinAccess(for: url)
             return (file, modificationDate)
         }
@@ -1017,9 +1266,37 @@ final class DocumentSessionStore: ObservableObject {
         var restored: [OpenedDocument] = []
         var restoredModificationDates: [String: Date] = [:]
         var idMap: [String: String] = [:]
+        var onTheirWay: [AwaitedDocument] = []
 
         for entry in persisted {
-            guard let loaded = loadFromBookmarkData(entry.bookmarkData) else { continue }
+            guard let url = resolveBookmarkURL(from: entry.bookmarkData) else { continue }
+            let loaded: (file: MarkdownFile, modificationDate: Date?)
+            switch reading(at: url, resolvedFrom: entry.bookmarkData) {
+            case .read(let read):
+                loaded = read
+                knownLocations[entry.bookmarkData] = url
+            case .notDelivered:
+                // Not waited for here, where the launch would wait with it.
+                // It joins the list when its file comes.
+                let inTrash = withSecurityScope(of: url, resolvedFrom: entry.bookmarkData) {
+                    isInTrashWithinAccess(url)
+                }
+                guard !inTrash else { continue }
+                let resolvedID = url.standardizedFileURL.path
+                idMap[entry.id] = resolvedID
+                guard !restored.contains(where: { $0.id == resolvedID }),
+                      !onTheirWay.contains(where: { $0.id == resolvedID }) else { continue }
+                onTheirWay.append(AwaitedDocument(
+                    id: resolvedID,
+                    url: url,
+                    bookmarkData: entry.bookmarkData,
+                    lastOpened: entry.lastOpened,
+                    wasAskedFor: false
+                ))
+                continue
+            case .failed:
+                continue
+            }
             let inTrash = withSecurityScope(of: loaded.file.url, resolvedFrom: entry.bookmarkData) {
                 isInTrashWithinAccess(loaded.file.url)
             }
@@ -1034,6 +1311,8 @@ final class DocumentSessionStore: ObservableObject {
             // other's ID still maps to it, for the selection and text size saved
             // under that ID.
             guard !restored.contains(where: { $0.id == resolvedID }) else { continue }
+            // Here after all, under an entry that came later in the list.
+            onTheirWay.removeAll(where: { $0.id == resolvedID })
             restored.append(
                 .init(
                     id: resolvedID,
@@ -1050,7 +1329,8 @@ final class DocumentSessionStore: ObservableObject {
         return RestoreMigration(
             documents: restored,
             modificationDates: restoredModificationDates,
-            idMap: idMap
+            idMap: idMap,
+            onTheirWay: onTheirWay
         )
     }
 

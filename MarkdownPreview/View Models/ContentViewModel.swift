@@ -102,6 +102,28 @@ final class ContentViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        // A document whose file iCloud had not delivered when it was opened,
+        // or when the list was restored, turns up later, or fails to.
+        store.lateArrivals
+            .sink { [weak self] arrival in
+                self?.take(arrival)
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Finishes for the reader what waiting for a file put off: the document
+    /// goes on screen as it would have, or they are told why it did not come.
+    private func take(_ arrival: DocumentSessionStore.LateArrival) {
+        switch arrival {
+        case .arrived(_, let isShown):
+            guard isShown else { return }
+            detailMode = .preview
+            preferredCompactColumn = usesSingleColumnNavigation ? .detail : .sidebar
+            search.refreshDetailSearch()
+        case .failedToOpen(let url, let error):
+            openErrorMessage = detailedOpenErrorMessage(for: error, url: url)
+        }
     }
 
     func handleImport(_ result: Result<[URL], Error>, isCompactWidth: Bool) {
@@ -118,10 +140,12 @@ final class ContentViewModel: ObservableObject {
 
     func load(url: URL, bookmarkData: Data? = nil, isCompactWidth: Bool) {
         do {
-            try store.openDocument(at: url, bookmarkData: bookmarkData)
+            let opening = try store.openDocument(at: url, bookmarkData: bookmarkData)
+            openErrorMessage = nil
+            // One that is still coming goes on screen when it comes.
+            guard opening == .shown else { return }
             detailMode = .preview
             preferredCompactColumn = isCompactWidth ? .detail : .sidebar
-            openErrorMessage = nil
         } catch {
             openErrorMessage = detailedOpenErrorMessage(for: error, url: url)
         }
@@ -360,7 +384,7 @@ final class ContentViewModel: ObservableObject {
         Self.initialOpenPresentation(
             hasPresentedPrompt: hasPresentedInitialOpenPrompt,
             didRestoreDocuments: store.didRestoreDocuments,
-            openedDocumentsEmpty: store.openedDocuments.isEmpty,
+            openedDocumentsEmpty: store.hasNoDocumentsHereOrOnTheirWay,
             allowsFileImporter: allowsFileImporter
         )
     }

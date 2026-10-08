@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import os
 import Testing
 import UniformTypeIdentifiers
 
@@ -137,10 +138,8 @@ struct MarkdownFileTests {
 
     // MARK: - Files that are not there
 
-    // The read retries for half a minute when a file is reported absent, which
-    // is for a file in iCloud that has not arrived yet. A file that is simply
-    // not there must not wait that out: the store asks for every document in
-    // the list on a timer, on the main thread.
+    // The store asks for every document in the list on a timer, on the main
+    // thread, so a file that is not there says so at once.
     @Test func aMissingFileFailsWithoutWaiting() throws {
         let url = try Self.makeFile(holding: Data("gone".utf8))
         Self.remove(url)
@@ -159,6 +158,143 @@ struct MarkdownFileTests {
         #expect(error.domain == NSCocoaErrorDomain)
         #expect(error.code == NSFileReadNoSuchFileError)
         #expect(elapsed < .seconds(5))
+    }
+
+    // MARK: - Files kept in iCloud
+
+    /// Stands in for iCloud. It says of every file what it is told to, one
+    /// answer for each time it is asked and the last of them from then on, and
+    /// counts how often it is asked to deliver one.
+    private final class StandInCloud: Sendable {
+        private struct State {
+            var answers: [MarkdownFile.CloudState]
+            var requests = 0
+        }
+
+        private let state: OSAllocatedUnfairLock<State>
+
+        init(saying answers: MarkdownFile.CloudState...) {
+            state = OSAllocatedUnfairLock(initialState: State(answers: answers))
+        }
+
+        var requests: Int {
+            state.withLock { $0.requests }
+        }
+
+        var delivery: MarkdownFile.CloudDelivery {
+            MarkdownFile.CloudDelivery(
+                state: { [state] _ in
+                    state.withLock { $0.answers.count > 1 ? $0.answers.removeFirst() : $0.answers[0] }
+                },
+                request: { [state] _ in
+                    state.withLock { $0.requests += 1 }
+                }
+            )
+        }
+    }
+
+    // Reading a file iCloud has not delivered waits for it to arrive, on
+    // whatever thread asked. So it is not read: it is asked for, and the
+    // caller is told why it has nothing.
+    @Test func aFileICloudHasNotDeliveredIsAskedForAndNotRead() throws {
+        let url = try Self.makeFile(holding: Data(Self.text.utf8))
+        defer { Self.remove(url) }
+        let cloud = StandInCloud(saying: .notDelivered)
+
+        #expect(throws: MarkdownFile.NotDelivered.self) {
+            try MarkdownFile.load(from: url, cloud: cloud.delivery)
+        }
+        #expect(cloud.requests == 1)
+    }
+
+    // What is here is read, and the newer copy is asked for. It is found, when
+    // it comes, by the check for changes on disk.
+    @Test func aFileICloudHasANewerCopyOfIsReadAndTheNewerCopyAskedFor() throws {
+        let url = try Self.makeFile(holding: Data(Self.text.utf8))
+        defer { Self.remove(url) }
+        let cloud = StandInCloud(saying: .outOfDate)
+
+        let file = try MarkdownFile.load(from: url, cloud: cloud.delivery)
+
+        #expect(file.contents == Self.text)
+        #expect(cloud.requests == 1)
+    }
+
+    @Test(arguments: [MarkdownFile.CloudState.current, .notInCloud])
+    func aFileThatIsAllHereIsReadAndNotAskedFor(state: MarkdownFile.CloudState) throws {
+        let url = try Self.makeFile(holding: Data(Self.text.utf8))
+        defer { Self.remove(url) }
+        let cloud = StandInCloud(saying: state)
+
+        let file = try MarkdownFile.load(from: url, cloud: cloud.delivery)
+
+        #expect(file.contents == Self.text)
+        #expect(cloud.requests == 0)
+    }
+
+    @Test func aFileIsReadOnceICloudDeliversIt() async throws {
+        let url = try Self.makeFile(holding: Data(Self.text.utf8))
+        defer { Self.remove(url) }
+        let cloud = StandInCloud(saying: .notDelivered, .notDelivered, .current)
+
+        let file = try await MarkdownFile.loadWhenDelivered(
+            from: url,
+            cloud: cloud.delivery,
+            patience: .seconds(60),
+            pause: .milliseconds(1)
+        )
+
+        #expect(file.contents == Self.text)
+        #expect(cloud.requests == 2)
+    }
+
+    @Test func waitingForAFileICloudNeverDeliversGivesUp() async throws {
+        let url = try Self.makeFile(holding: Data(Self.text.utf8))
+        defer { Self.remove(url) }
+        let cloud = StandInCloud(saying: .notDelivered)
+
+        var thrown: (any Error)?
+        do {
+            _ = try await MarkdownFile.loadWhenDelivered(
+                from: url,
+                cloud: cloud.delivery,
+                patience: .milliseconds(20),
+                pause: .milliseconds(1)
+            )
+        } catch {
+            thrown = error
+        }
+
+        let error = try #require(thrown) as NSError
+        #expect(error.domain == NSCocoaErrorDomain)
+        #expect(error.code == NSUbiquitousFileUnavailableError)
+        #expect(cloud.requests > 1)
+    }
+
+    // Only a file that is on its way is waited for. One that arrived and
+    // cannot be read is as unreadable in half a minute as it is now.
+    @Test func aFileThatHasArrivedAndCannotBeReadIsNotWaitedFor() async throws {
+        let latin1 = try #require("Un café, s'il vous plaît.".data(using: .isoLatin1))
+        let url = try Self.makeFile(holding: latin1)
+        defer { Self.remove(url) }
+        let cloud = StandInCloud(saying: .current)
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        var thrown: (any Error)?
+        do {
+            _ = try await MarkdownFile.loadWhenDelivered(
+                from: url,
+                cloud: cloud.delivery,
+                patience: .seconds(60),
+                pause: .milliseconds(1)
+            )
+        } catch {
+            thrown = error
+        }
+
+        #expect((thrown as? CocoaError)?.code == .fileReadInapplicableStringEncoding)
+        #expect(clock.now - started < .seconds(5))
     }
 
     // MARK: - The rest of the type
