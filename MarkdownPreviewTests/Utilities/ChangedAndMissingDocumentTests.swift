@@ -409,6 +409,50 @@ struct ChangedAndMissingDocumentTests {
         #expect(fixture.listed == ["after.md"])
     }
 
+    // MARK: - Opening a document, with others already listed
+
+    /// A file being opened may be a listed document under the path it was
+    /// moved to, which the list has not caught up with. To find out, each
+    /// listed document's bookmark was asked where it led: once for every
+    /// document in the list, every time a document was opened. One that is
+    /// still where it was last found has not been moved anywhere, and is not
+    /// asked about.
+    @Test func openingADocumentDoesNotLookUpTheOnesThatAreWhereTheyWere() throws {
+        let lookUps = LookUps()
+        let fixture = try Fixture(resolver: lookUps.resolver)
+        defer { fixture.cleanUp() }
+        try fixture.open("one.md", holding: "One")
+        try fixture.open("two.md", holding: "Two")
+        try fixture.open("three.md", holding: "Three")
+        let before = lookUps.count
+
+        try fixture.open("four.md", holding: "Four")
+
+        // Its own bookmark, to find the file it is about to read.
+        #expect(lookUps.count == before + 1)
+        #expect(fixture.listed == ["four.md", "one.md", "three.md", "two.md"])
+    }
+
+    /// The one that has gone from where it was is asked about, and is found
+    /// to be the file now being opened.
+    @Test func openingAFileThatAListedDocumentWasMovedToFindsThatDocument() throws {
+        let lookUps = LookUps()
+        let fixture = try Fixture(resolver: lookUps.resolver)
+        defer { fixture.cleanUp() }
+        try fixture.open("other.md", holding: "Other")
+        let moved = try fixture.open("before.md", holding: "Moved")
+        let movedTo = fixture.directory.appendingPathComponent("after.md")
+        try FileManager.default.moveItem(at: URL(fileURLWithPath: moved), to: movedTo)
+        let before = lookUps.count
+
+        try fixture.store.openDocument(at: movedTo)
+
+        #expect(fixture.listed == ["after.md", "other.md"])
+        // Its own bookmark, and the bookmark of the one document that has
+        // gone from where it was. Not the one that has stayed.
+        #expect(lookUps.count == before + 2)
+    }
+
     /// A list read back at launch has found each document already.
     @Test func documentsReadBackAtLaunchAreNotLookedUpAgainByTheFirstCheck() throws {
         let suiteName = "ChangedAndMissingDocumentTests.\(#function).\(UUID().uuidString)"

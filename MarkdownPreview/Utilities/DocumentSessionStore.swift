@@ -425,7 +425,13 @@ final class DocumentSessionStore: ObservableObject {
             // one it was moved from: the entry is only brought up to date when
             // it is next looked at, which for a document that is not on screen
             // can be ten seconds away. Adding it now would list it twice.
-            for document in openedDocuments where resolvedID(of: document) == id {
+            //
+            // A document that is still where it was last found has not been
+            // moved here, and its bookmark is not asked where it leads. Asking
+            // every listed document's, for every document opened, was a
+            // couple of milliseconds for each one in the list.
+            for document in openedDocuments
+            where !isStillWhereItWasFound(document) && resolvedID(of: document) == id {
                 documentDidMove(from: document.id, to: file, modificationDate: modificationDate)
             }
         }
@@ -708,6 +714,21 @@ final class DocumentSessionStore: ObservableObject {
         }
 
         take(loaded, for: document, at: index)
+    }
+
+    /// Whether a document's file is at the place it was last found. False is
+    /// also the answer when it has not been found anywhere yet, or cannot be
+    /// seen there, so false is not that it has gone: it is that its bookmark
+    /// has to be asked.
+    private func isStillWhereItWasFound(_ document: OpenedDocument) -> Bool {
+        guard let location = knownLocations[document.bookmarkData],
+              location.standardizedFileURL.path == document.id else {
+            return false
+        }
+        let modificationDate = withSecurityScope(of: location, resolvedFrom: document.bookmarkData) {
+            modificationDateWithinAccess(for: location)
+        }
+        return modificationDate != nil
     }
 
     /// Looks at a document's file where it was last found, and says whether
