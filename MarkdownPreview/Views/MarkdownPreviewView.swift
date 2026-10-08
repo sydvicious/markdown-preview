@@ -108,10 +108,18 @@ struct MarkdownPreviewView: View {
         let isShowing: Bool
     }
 
-    /// The rendered document, and what if anything is wrong with its images.
+    /// The rendered document, what if anything is wrong with its images, and
+    /// the document as it was read to render it.
+    ///
+    /// The reading goes on to the page's web view. Placing a selection in the
+    /// page, and finding where one made there falls in the source, both need
+    /// the document read, and both are done on the main actor, again and
+    /// again. Reading it there took 90 ms for 1.4 MB each time another
+    /// document's selection had been placed in between.
     struct Rendering {
         let html: String
         let imageProblem: ImageProblem
+        let reading: MarkdownReading
     }
 
     /// What the button that stands in for an unreadable image says, and its
@@ -130,20 +138,27 @@ struct MarkdownPreviewView: View {
     /// needs the folders the app has been granted, which are the main actor's
     /// to keep; the request carries them as they were when it was made.
     nonisolated private static func render(_ request: RenderingRequest) async -> Rendering {
+        let reading = MarkdownReading(of: request.source)
         let document = MarkdownHTMLBuilder.document(
-            for: request.source,
+            for: reading,
             contentScale: request.contentScale,
             softBreak: .lineBreak
         )
-        return withImages(document, for: request)
+        return withImages(document, of: reading, for: request)
     }
 
     /// `WKWebView.loadHTMLString(_:baseURL:)` gives the web content process no
     /// read access to the file system, so a relative image reference never loads
     /// however correct the base URL is. `MarkdownImageSchemeHandler` serves those
     /// URLs from the app process instead.
-    nonisolated private static func withImages(_ document: String, for request: RenderingRequest) -> Rendering {
-        guard let baseURL = request.baseURL else { return Rendering(html: document, imageProblem: .none) }
+    nonisolated private static func withImages(
+        _ document: String,
+        of reading: MarkdownReading,
+        for request: RenderingRequest
+    ) -> Rendering {
+        guard let baseURL = request.baseURL else {
+            return Rendering(html: document, imageProblem: .none, reading: reading)
+        }
 
         // Every step here is a privileged read: the rewrite checks each image
         // exists, and telling an unreadable file from an absent one means
@@ -155,7 +170,9 @@ struct MarkdownPreviewView: View {
         return DirectoryAccessStore.withAccess(to: baseURL, grantedBy: request.grantedDirectories) {
             let rewritten = MarkdownImageURL.rewritingLocalImages(in: document, relativeTo: baseURL)
             let unresolved = MarkdownImageURL.unresolvedLocalImages(in: rewritten, relativeTo: baseURL)
-            guard !unresolved.isEmpty else { return Rendering(html: rewritten, imageProblem: .none) }
+            guard !unresolved.isEmpty else {
+                return Rendering(html: rewritten, imageProblem: .none, reading: reading)
+            }
 
             // Debug level: this runs for every page built, so it should not
             // persist in the system log by default. Paths are the user's, so
@@ -167,7 +184,7 @@ struct MarkdownPreviewView: View {
 
             // Access is the actionable problem, so it wins when both are present.
             guard unresolved.contains(where: { $0.reason == .unreadable }) else {
-                return Rendering(html: rewritten, imageProblem: .missing)
+                return Rendering(html: rewritten, imageProblem: .missing, reading: reading)
             }
 
             // The banner above the preview is easy to miss — the document
@@ -179,7 +196,7 @@ struct MarkdownPreviewView: View {
                 label: Self.accessButtonLabel,
                 explanation: Self.accessExplanation
             )
-            return Rendering(html: html, imageProblem: .unreadable)
+            return Rendering(html: html, imageProblem: .unreadable, reading: reading)
         }
     }
 
@@ -203,7 +220,7 @@ struct MarkdownPreviewView: View {
         ZStack {
             if let shown {
                 MarkdownPreviewWebView(
-                    source: shown.request.source,
+                    reading: shown.result.reading,
                     html: shown.result.html,
                     baseURL: shown.request.baseURL,
                     documentID: shown.request.documentID,

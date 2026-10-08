@@ -43,11 +43,27 @@ public enum MarkdownHTMLBuilder {
         softBreak: SoftBreak = .newline,
         definitions outsideDefinitions: MarkdownLinkDefinitions = .none
     ) -> String {
-        let sourceLineTable = MarkdownSourceLineTable(source: source)
-        let parsed = MarkdownBlockParser.parseDocument(source)
-        let definitions = parsed.definitions.merging(outsideDefinitions)
-        let renderedBlocks = parsed.blocks
-            .map { renderBlock($0, sourceLineTable: sourceLineTable, softBreak: softBreak, definitions: definitions) }
+        document(
+            for: MarkdownReading(of: source),
+            contentScale: contentScale,
+            softBreak: softBreak,
+            definitions: outsideDefinitions
+        )
+    }
+
+    /// Renders a document that has already been read, for a caller that has
+    /// another use for the reading. See `MarkdownReading`.
+    public static func document(
+        for reading: MarkdownReading,
+        contentScale: CGFloat = 1.0,
+        softBreak: SoftBreak = .newline,
+        definitions outsideDefinitions: MarkdownLinkDefinitions = .none
+    ) -> String {
+        let definitions = reading.definitions.merging(outsideDefinitions)
+        let renderedBlocks = reading.blocks
+            .map {
+                renderBlock($0, sourceLineTable: reading.lineTable, softBreak: softBreak, definitions: definitions)
+            }
             .joined(separator: "\n")
         let body = renderedBlocks.isEmpty ? "<p class=\"empty\"></p>" : renderedBlocks
 

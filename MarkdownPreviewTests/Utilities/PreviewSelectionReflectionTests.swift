@@ -148,4 +148,105 @@ struct PreviewSelectionReflectionTests {
             ) == nil
         )
     }
+
+    // MARK: - In a document that has already been read
+
+    // The page is built from a reading of the document, off the main actor,
+    // and the reading comes back with the page. A selection is placed from
+    // that, so that the document is not read again to place it: 90 ms for
+    // 1.4 MB, on the main actor, for each document a selection was put in.
+    @Test func aSelectionIsPlacedInAReadingAsItIsInItsSource() throws {
+        let source = """
+        # Notes
+
+        A paragraph with a [link][home] and *emphasis*,
+        on two lines.
+
+        - one
+        - two
+
+        > Quoted, with a [link][home] of its own.
+
+        [home]: https://example.com
+        """
+        let reading = MarkdownReading(of: source)
+        let length = source.utf16.count
+        let selections = [
+            MarkdownSelectionRange(location: 2, length: 5),
+            MarkdownSelectionRange(location: 9, length: 40),
+            MarkdownSelectionRange(location: 30, length: 12),
+            MarkdownSelectionRange(location: 0, length: length),
+            MarkdownSelectionRange(location: length - 30, length: 30)
+        ]
+
+        var placed = 0
+        for selection in selections {
+            let inSource = PreviewSelectionReflection.reflectedSelection(in: source, selectedRange: selection)
+            let inReading = PreviewSelectionReflection.reflectedSelection(in: reading, selectedRange: selection)
+
+            #expect(inReading == inSource, "\(selection)")
+            if inReading != nil {
+                placed += 1
+            }
+        }
+        // Or it would hold of a function that places nothing.
+        #expect(placed >= 4)
+    }
+
+    @Test func noSelectionIsPlacedNowhereInAReading() {
+        let reading = MarkdownReading(of: "Some text.")
+
+        #expect(PreviewSelectionReflection.reflectedSelection(in: reading, selectedRange: nil) == nil)
+    }
+
+    // MARK: - Across many blocks
+
+    private static let fiveParagraphs = "Alpha one.\n\nBeta two.\n\nGamma three.\n\nDelta four.\n\nEpsilon five."
+
+    // A selection is two points, one in the first block it touches and one in
+    // the last. The blocks between are passed over, however many there are.
+    @Test func aSelectionAcrossSeveralBlocksIsPlacedByItsFirstAndItsLast() {
+        // From "two" in the second paragraph to the end of "Delta" in the fourth.
+        let selection = MarkdownSelectionRange(location: 17, length: 25)
+
+        let placed = PreviewSelectionReflection.reflectedSelection(
+            in: MarkdownReading(of: Self.fiveParagraphs),
+            selectedRange: selection
+        )
+
+        #expect(placed == PreviewReflectedSelection(
+            start: PreviewReflectedSelectionPoint(blockStart: 12, blockEnd: 21, displayOffset: 5),
+            end: PreviewReflectedSelectionPoint(blockStart: 37, blockEnd: 48, displayOffset: 5)
+        ))
+    }
+
+    @Test func aDocumentSelectedWholeIsPlacedFromItsFirstBlockToItsLast() {
+        let source = Self.fiveParagraphs
+        let everything = MarkdownSelectionRange(location: 0, length: source.utf16.count)
+
+        let placed = PreviewSelectionReflection.reflectedSelection(
+            in: MarkdownReading(of: source),
+            selectedRange: everything
+        )
+
+        #expect(placed == PreviewReflectedSelection(
+            start: PreviewReflectedSelectionPoint(blockStart: 0, blockEnd: 10, displayOffset: 0),
+            end: PreviewReflectedSelectionPoint(blockStart: 50, blockEnd: 63, displayOffset: 13)
+        ))
+    }
+
+    @Test func aSelectionInOneBlockOfManyIsPlacedInThatBlock() {
+        // "Gamma".
+        let selection = MarkdownSelectionRange(location: 23, length: 5)
+
+        let placed = PreviewSelectionReflection.reflectedSelection(
+            in: MarkdownReading(of: Self.fiveParagraphs),
+            selectedRange: selection
+        )
+
+        #expect(placed == PreviewReflectedSelection(
+            start: PreviewReflectedSelectionPoint(blockStart: 23, blockEnd: 35, displayOffset: 0),
+            end: PreviewReflectedSelectionPoint(blockStart: 23, blockEnd: 35, displayOffset: 5)
+        ))
+    }
 }

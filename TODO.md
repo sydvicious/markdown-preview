@@ -16,7 +16,7 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Proposed performance fixes.
   - Decide whether the engine's scanner is worth making faster. A 505 KB document builds in 83 ms, and its text is read for searching in 91 ms, in a release build; a debug build takes two to three times as long. What is left is the tokenizer comparing a whole `Character` at a time as it scans, and the parsing of table rows. Having the scanner work on bytes would be a large change to the tokenizer.
-  - Take the first placing of a selection in a document off the main actor, or have it use what building the page already read. The whole document is read to find the blocks the selection touches: about 220 ms for 1.4 MB, in the same build. It is kept after that, so only the first one costs.
+  - Find out why dragging a selection in Preview is slow in a long document: the selection lags behind the pointer. The app's part of following it is under a millisecond; what is left is the page's script on each change of selection, or the window being redrawn after it.
   - Find out why a page in a web view taken from the spare says it has loaded some 300 to 400 ms after it has painted: a short page painted at 43 to 122 ms and loaded at 308 to 422 ms, where in a web view made for it the same page loaded at 23 ms. The app waits for that before it puts back a selection or the reader's place.
 
 ### The source pane lands near a place far down a long document, and not on it.

@@ -364,11 +364,16 @@ enum PreviewSelectionBridge {
     /// that both views know how to render. The preview reports its DOM selection
     /// as one range per visible run of text, which is a rendering detail, so it
     /// is collapsed here rather than leaking into the selection model.
+    ///
+    /// `definitions` are the document's link reference definitions, which
+    /// the preview has from what was read to build its page. Left out, the
+    /// document is read for them.
     static func contiguousSelectionRanges(
         fromDisplayRangeResult result: Any?,
-        source: String
+        source: String,
+        definitions: MarkdownLinkDefinitions? = nil
     ) -> [MarkdownSelectionRange] {
-        let mapped = mappedRanges(fromDisplayRangeResult: result, source: source)
+        let mapped = mappedRanges(fromDisplayRangeResult: result, source: source, definitions: definitions)
         guard let enclosing = enclosingRange(of: mapped.map(\.range)) else { return [] }
         return [startingWithItsLine(enclosing, spanning: mapped, in: source as NSString)]
     }
@@ -438,7 +443,7 @@ enum PreviewSelectionBridge {
     }
 
     static func sourceRanges(fromDisplayRangeResult result: Any?, source: String) -> [MarkdownSelectionRange] {
-        mappedRanges(fromDisplayRangeResult: result, source: source).map(\.range)
+        mappedRanges(fromDisplayRangeResult: result, source: source, definitions: nil).map(\.range)
     }
 
     /// A range of a block's rendered text, as the stretch of source it shows.
@@ -451,7 +456,15 @@ enum PreviewSelectionBridge {
         var takesTheEndOfItsLine: Bool
     }
 
-    private static func mappedRanges(fromDisplayRangeResult result: Any?, source: String) -> [MappedRange] {
+    /// - Parameter definitions: the document's link reference definitions, if
+    ///   the caller has them. The preview does, from what was read to build
+    ///   its page. Without them the whole document is read for them here, and
+    ///   this is called each time the selection in the preview changes.
+    private static func mappedRanges(
+        fromDisplayRangeResult result: Any?,
+        source: String,
+        definitions givenDefinitions: MarkdownLinkDefinitions?
+    ) -> [MappedRange] {
         let displayRanges = displayRanges(from: result)
         guard !displayRanges.isEmpty else { return [] }
 
@@ -459,7 +472,7 @@ enum PreviewSelectionBridge {
         let sourceLength = nsSource.length
         // Each block is read on its own, but a reference in it is a link only
         // by a definition elsewhere in the document.
-        let definitions = MarkdownLinkDefinitions(source: source)
+        let definitions = givenDefinitions ?? MarkdownLinkDefinitions(source: source)
         return displayRanges.compactMap { displayRange -> MappedRange? in
             guard displayRange.blockStart >= 0,
                   displayRange.blockEnd <= sourceLength,

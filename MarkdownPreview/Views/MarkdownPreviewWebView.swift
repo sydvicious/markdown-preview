@@ -23,7 +23,9 @@ let requestImageAccessMessageHandlerName = "requestImageAccess"
 
 #if os(iOS)
 struct MarkdownPreviewWebView: UIViewRepresentable {
-    let source: String
+    /// The document as it was read to build `html`: its source, and what is
+    /// needed to place a selection in it without reading it again.
+    let reading: MarkdownReading
     let html: String
     let baseURL: URL?
     /// Which document this is, so a reload of the same one can keep the reader's
@@ -119,7 +121,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         userContent.add(context.coordinator, name: previewScrollChangedMessageHandlerName)
         userContent.add(context.coordinator, name: previewSourceOffsetChangedMessageHandlerName)
         webView.navigationDelegate = context.coordinator
-        webView.markdownSource = source
+        webView.markdownReading = reading
         context.coordinator.webView = webView
         context.coordinator.isShowing = isShowing
         if let scrollMemory {
@@ -142,14 +144,14 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         context.coordinator.load(
             html,
             baseURL: baseURL,
-            showing: .init(documentID: documentID, source: source),
+            showing: .init(documentID: documentID, source: reading.source),
             in: webView
         )
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        (webView as? MarkdownCopyWebView)?.markdownSource = source
+        (webView as? MarkdownCopyWebView)?.markdownReading = reading
         context.coordinator.webView = webView as? MarkdownCopyWebView
         if let scrollMemory {
             context.coordinator.scrollMemory = scrollMemory
@@ -173,7 +175,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
                 context.coordinator.load(
                     html,
                     baseURL: baseURL,
-                    showing: .init(documentID: documentID, source: source),
+                    showing: .init(documentID: documentID, source: reading.source),
                     in: webView
                 )
             }
@@ -193,7 +195,7 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
             context.coordinator.load(
                 html,
                 baseURL: baseURL,
-                showing: .init(documentID: documentID, source: source),
+                showing: .init(documentID: documentID, source: reading.source),
                 in: webView
             )
         } else if !wasShowing {
@@ -224,7 +226,9 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
 }
 #elseif os(macOS)
 struct MarkdownPreviewWebView: NSViewRepresentable {
-    let source: String
+    /// The document as it was read to build `html`: its source, and what is
+    /// needed to place a selection in it without reading it again.
+    let reading: MarkdownReading
     let html: String
     let baseURL: URL?
     /// Which document this is, so a reload of the same one can keep the reader's
@@ -323,7 +327,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         userContent.add(context.coordinator, name: previewScrollChangedMessageHandlerName)
         userContent.add(context.coordinator, name: previewSourceOffsetChangedMessageHandlerName)
         webView.navigationDelegate = context.coordinator
-        webView.markdownSource = source
+        webView.markdownReading = reading
         context.coordinator.webView = webView
         context.coordinator.isShowing = isShowing
         if let scrollMemory {
@@ -343,14 +347,14 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         context.coordinator.load(
             html,
             baseURL: baseURL,
-            showing: .init(documentID: documentID, source: source),
+            showing: .init(documentID: documentID, source: reading.source),
             in: webView
         )
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        (webView as? MarkdownCopyWebView)?.markdownSource = source
+        (webView as? MarkdownCopyWebView)?.markdownReading = reading
         context.coordinator.webView = webView as? MarkdownCopyWebView
         if let scrollMemory {
             context.coordinator.scrollMemory = scrollMemory
@@ -374,7 +378,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
                 context.coordinator.load(
                     html,
                     baseURL: baseURL,
-                    showing: .init(documentID: documentID, source: source),
+                    showing: .init(documentID: documentID, source: reading.source),
                     in: webView
                 )
             }
@@ -394,7 +398,7 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
             context.coordinator.load(
                 html,
                 baseURL: baseURL,
-                showing: .init(documentID: documentID, source: source),
+                showing: .init(documentID: documentID, source: reading.source),
                 in: webView
             )
         } else if !wasShowing {
@@ -423,7 +427,9 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
 
 #if os(iOS)
 private final class MarkdownCopyWebView: WKWebView {
-    var markdownSource = ""
+    /// The document on the page, as it was read to build the page.
+    var markdownReading = MarkdownReading(of: "")
+    var markdownSource: String { markdownReading.source }
     /// Latest non-empty selected text, tracked from selection-change messages so
     /// the edit menu can offer "Search" without a synchronous JS round-trip.
     var currentSelectionText: String?
@@ -457,7 +463,9 @@ private final class MarkdownCopyWebView: WKWebView {
 }
 #elseif os(macOS)
 private final class MarkdownCopyWebView: WKWebView {
-    var markdownSource = ""
+    /// The document on the page, as it was read to build the page.
+    var markdownReading = MarkdownReading(of: "")
+    var markdownSource: String { markdownReading.source }
     /// Latest non-empty selected text, tracked from selection-change messages so
     /// the context menu can offer "Search" without a synchronous JS round-trip.
     var currentSelectionText: String?
@@ -580,7 +588,7 @@ enum SparePreviewWebView {
 
 private extension MarkdownCopyWebView {
     func applySelection(_ selectedRange: MarkdownSelectionRange?) {
-        let payload = MarkdownPreviewWebView.selectionInvocation(source: markdownSource, selectedRange: selectedRange)
+        let payload = MarkdownPreviewWebView.selectionInvocation(in: markdownReading, selectedRange: selectedRange)
         evaluateJavaScript(payload)
     }
 
@@ -609,6 +617,7 @@ private extension MarkdownCopyWebView {
 
     func copySelectionToPasteboard(fallback: @escaping () -> Void) {
         let source = markdownSource
+        let definitions = markdownReading.definitions
         let log = Logger(subsystem: "com.sydpolk.MarkdownPreview", category: "PrevCopy")
         evaluateJavaScript(PreviewScriptCall.selectedDisplayRanges) { [weak self] result, _ in
             guard let self else {
@@ -617,7 +626,8 @@ private extension MarkdownCopyWebView {
             }
             let selectionRanges = PreviewSelectionBridge.contiguousSelectionRanges(
                 fromDisplayRangeResult: result,
-                source: source
+                source: source,
+                definitions: definitions
             )
             log.info("PREVCOPY ranges=\(selectionRanges.count, privacy: .public)")
             guard !selectionRanges.isEmpty else {
@@ -647,11 +657,13 @@ private extension MarkdownCopyWebView {
 
     func readSelectionSnapshot(completion: @escaping (_ selectedText: String?, _ ranges: [MarkdownSelectionRange]) -> Void) {
         let source = markdownSource
+        let definitions = markdownReading.definitions
         evaluateJavaScript(PreviewScriptCall.selectionSnapshot) { result, _ in
             let payload = PreviewSelectionChangedMessage(messageBody: result as Any)
             let selectionRanges = PreviewSelectionBridge.contiguousSelectionRanges(
                 fromDisplayRangeResult: payload.displayRangeResult,
-                source: source
+                source: source,
+                definitions: definitions
             )
             completion(payload.selectedText, selectionRanges)
         }
@@ -665,9 +677,12 @@ extension MarkdownPreviewWebView {
     /// Logs at `.info`, which never reaches the unified log but does show in
     /// Xcode's console — cheap to leave in, and the next person debugging a
     /// selection that does not appear gets the reflection's decision for free.
-    static func selectionInvocation(source: String, selectedRange: MarkdownSelectionRange?) -> String {
+    ///
+    /// Takes the document as it was read to build the page. Placing a
+    /// selection needs the whole of it read, and this is the main actor.
+    static func selectionInvocation(in reading: MarkdownReading, selectedRange: MarkdownSelectionRange?) -> String {
         guard let reflectedSelection = PreviewSelectionReflection.reflectedSelection(
-            in: source,
+            in: reading,
             selectedRange: selectedRange
         ) else {
             // No selection is not a failure, and it is the case on every load.
@@ -802,7 +817,8 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
             let selectionRanges = webView.map {
                 PreviewSelectionBridge.contiguousSelectionRanges(
                     fromDisplayRangeResult: payload.displayRangeResult,
-                    source: $0.markdownSource
+                    source: $0.markdownSource,
+                    definitions: $0.markdownReading.definitions
                 )
             } ?? []
             if !selectionRanges.isEmpty {
@@ -850,9 +866,10 @@ extension MarkdownPreviewWebView.Coordinator: WKScriptMessageHandler {
 
 #if DEBUG
 #Preview("Markdown Preview WebView") {
+    let reading = MarkdownReading(of: MarkdownPreviewFixtures.fullFile.contents)
     MarkdownPreviewWebView(
-        source: MarkdownPreviewFixtures.fullFile.contents,
-        html: MarkdownHTMLBuilder.document(for: MarkdownPreviewFixtures.fullFile.contents, softBreak: .lineBreak),
+        reading: reading,
+        html: MarkdownHTMLBuilder.document(for: reading, softBreak: .lineBreak),
         baseURL: nil,
         selectedRange: nil
     )

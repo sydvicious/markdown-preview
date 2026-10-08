@@ -4,7 +4,6 @@
 //
 
 import Foundation
-import os
 import MarkdownCore
 
 /// One end of a selection, as the rendered preview sees it: which block, and how
@@ -38,36 +37,62 @@ enum PreviewSelectionReflection {
         case end
     }
 
+    /// Where a selection in the source falls in the preview, for a caller
+    /// that has only the source. The whole document is read to find out,
+    /// here and now, which for a long one is most of the work; the preview
+    /// has it read already and uses the other.
     static func reflectedSelection(
         in source: String,
         selectedRange: MarkdownSelectionRange?
     ) -> PreviewReflectedSelection? {
+        // No selection is the common case, and needs nothing read.
+        guard let selectedRange, selectedRange.length > 0 else { return nil }
+        return reflectedSelection(in: MarkdownReading(of: source), selectedRange: selectedRange)
+    }
+
+    /// Where a selection in the source falls in the preview, given the
+    /// document as it was read to build the page the selection is going into.
+    static func reflectedSelection(
+        in document: MarkdownReading,
+        selectedRange: MarkdownSelectionRange?
+    ) -> PreviewReflectedSelection? {
+        let source = document.source
         guard let clampedRange = selectedRange?.clamped(toUTF16Length: source.utf16.count),
               clampedRange.length > 0 else {
             return nil
         }
 
         let selectionEnd = clampedRange.location + clampedRange.length
-        let document = reading(of: source)
         let sourceLineTable = document.lineTable
         let sourceNSString = source as NSString
 
         // Every block the selection touches, in document order. A selection
         // typically also covers the blank lines between blocks, which belong to
         // no block, so overlap is the test rather than containment.
-        var overlapping: [Block] = []
+        var touched: [MarkdownSelectionRange] = []
         for block in document.blocks {
             guard let blockRange = sourceLineTable.range(for: block.lineRange) else { continue }
             let blockEnd = blockRange.location + blockRange.length
             guard blockRange.location < selectionEnd, clampedRange.location < blockEnd else { continue }
-            let blockSource = sourceNSString.substring(with: blockRange.nsRange)
-            overlapping.append(
-                (blockRange, MarkdownPreviewTextOffsetMapping(sourceText: blockSource, definitions: document.definitions))
-            )
+            touched.append(blockRange)
         }
 
-        guard let firstBlock = overlapping.first, let lastBlock = overlapping.last else { return nil }
-        let spansBlocks = overlapping.count > 1
+        guard let firstRange = touched.first, let lastRange = touched.last else { return nil }
+        let spansBlocks = touched.count > 1
+
+        // A selection is placed by its two ends, so only the blocks they are
+        // in are read for where their text falls. Every block touched used to
+        // be, which for a 1.4 MB document selected whole was 2,987 of them and
+        // over a second, to use the first and the last.
+        func read(_ blockRange: MarkdownSelectionRange) -> Block {
+            let blockSource = sourceNSString.substring(with: blockRange.nsRange)
+            return (
+                blockRange,
+                MarkdownPreviewTextOffsetMapping(sourceText: blockSource, definitions: document.definitions)
+            )
+        }
+        let firstBlock = read(firstRange)
+        let lastBlock = spansBlocks ? read(lastRange) : firstBlock
 
         guard let startOffset = displayOffset(
             in: firstBlock,
@@ -93,31 +118,6 @@ enum PreviewSelectionReflection {
             start: point(for: firstBlock, displayOffset: startOffset),
             end: point(for: lastBlock, displayOffset: endOffset)
         )
-    }
-
-    /// A document as it has to be read to place a selection in it: its blocks,
-    /// its link definitions, and where its lines are.
-    private typealias Reading = (
-        source: String,
-        lineTable: MarkdownSourceLineTable,
-        blocks: [MarkdownBlock],
-        definitions: MarkdownLinkDefinitions
-    )
-
-    /// The last document read. A selection is placed again and again in the
-    /// same document, each time a match is moved to or a pane is come back
-    /// to, and reading the whole of it each time took as long as building its
-    /// page. Behind a lock because nothing says which thread asks.
-    private static let lastReading = OSAllocatedUnfairLock<Reading?>(uncheckedState: nil)
-
-    private static func reading(of source: String) -> Reading {
-        if let kept = lastReading.withLockUnchecked({ $0 }), kept.source == source {
-            return kept
-        }
-        let document = MarkdownBlockParser.parseDocument(source)
-        let read: Reading = (source, MarkdownSourceLineTable(source: source), document.blocks, document.definitions)
-        lastReading.withLockUnchecked { $0 = read }
-        return read
     }
 
     private static func point(for block: Block, displayOffset: Int) -> PreviewReflectedSelectionPoint {

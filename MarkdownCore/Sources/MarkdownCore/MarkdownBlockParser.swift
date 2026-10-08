@@ -5,7 +5,7 @@
 
 import Foundation
 
-public struct MarkdownTable: Equatable {
+public struct MarkdownTable: Equatable, Sendable {
     public let headers: [String]
     public let alignments: [MarkdownTableAlignment]
     public let rows: [[String]]
@@ -17,14 +17,14 @@ public struct MarkdownTable: Equatable {
     }
 }
 
-public enum MarkdownTableAlignment: Equatable {
+public enum MarkdownTableAlignment: Equatable, Sendable {
     case leading
     case center
     case trailing
 }
 
-public struct MarkdownBlock: Identifiable {
-    public enum Kind {
+public struct MarkdownBlock: Identifiable, Sendable {
+    public enum Kind: Sendable {
         case heading(level: Int, text: String)
         case paragraph(String)
         case list([MarkdownListItem], isLoose: Bool)
@@ -40,7 +40,7 @@ public struct MarkdownBlock: Identifiable {
     public let lineRange: Range<Int>
 }
 
-public struct MarkdownListItem: Identifiable {
+public struct MarkdownListItem: Identifiable, Sendable {
     public let id = UUID()
     /// What the item holds: usually one paragraph, but an item is a container,
     /// like a block quote, and may hold several, or a nested list, a quote, or

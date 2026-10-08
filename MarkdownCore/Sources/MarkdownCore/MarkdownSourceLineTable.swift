@@ -12,7 +12,7 @@ import Foundation
 /// mixture of them in one file. `String.markdownLines` splits at the same
 /// places; the parser numbers its lines with that and this table turns those
 /// numbers back into offsets, so the two must never disagree.
-public struct MarkdownSourceLineTable {
+public struct MarkdownSourceLineTable: Sendable {
     public let lineStartOffsets: [Int]
     /// Where each line's text ends, which is before its line ending.
     public let lineEndOffsets: [Int]

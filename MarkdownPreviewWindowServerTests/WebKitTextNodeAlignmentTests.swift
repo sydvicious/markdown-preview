@@ -507,7 +507,7 @@ struct WebKitTextNodeAlignmentTests {
             }
 
             let invocation = MarkdownPreviewWebView.selectionInvocation(
-                source: feature.source,
+                in: MarkdownReading(of: feature.source),
                 selectedRange: inSource
             )
             let result = try await webView.evaluateJavaScript("""
@@ -547,14 +547,14 @@ struct WebKitTextNodeAlignmentTests {
         let selected = MarkdownSelectionRange(location: 2, length: 20)
 
         #expect(
-            MarkdownPreviewWebView.selectionInvocation(source: source, selectedRange: selected)
+            MarkdownPreviewWebView.selectionInvocation(in: MarkdownReading(of: source), selectedRange: selected)
                 == PreviewScriptCall.applySelection("0, 9, 0, 11, 33, 11")
         )
     }
 
     @Test func noSelectionIsSentAsACallThatClearsThePagesSelection() {
         #expect(
-            MarkdownPreviewWebView.selectionInvocation(source: "Alpha beta", selectedRange: nil)
+            MarkdownPreviewWebView.selectionInvocation(in: MarkdownReading(of: "Alpha beta"), selectedRange: nil)
                 == PreviewScriptCall.applySelection("null, null, null, null, null, null")
         )
     }
@@ -567,13 +567,13 @@ struct WebKitTextNodeAlignmentTests {
 
         #expect(
             MarkdownPreviewWebView.selectionInvocation(
-                source: source,
+                in: MarkdownReading(of: source),
                 selectedRange: MarkdownSelectionRange(location: 50, length: 5)
             ) == clear
         )
         #expect(
             MarkdownPreviewWebView.selectionInvocation(
-                source: source,
+                in: MarkdownReading(of: source),
                 selectedRange: MarkdownSelectionRange(location: 4, length: 0)
             ) == clear
         )

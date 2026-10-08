@@ -91,6 +91,45 @@ struct MarkdownPreviewWebViewTests {
         #expect(source[selected] == "Heading\n\nA paragraph")
     }
 
+    // A reference is a link only by a definition somewhere else in the
+    // document, so where a selection in the preview falls in the source
+    // depends on the document's definitions. They are handed over with the
+    // selection, from what was read to build the page. Without them the whole
+    // document was read for them each time the selection changed.
+    @Test func aPreviewSelectionIsMappedWithTheDefinitionsItIsGiven() {
+        let source = "See [home] now.\n\n[home]: https://example.com"
+        // "home", as the reader sees the line when `[home]` is a link: "See home now."
+        let payload: [[String: Any]] = [
+            [
+                "blockStart": NSNumber(value: 0),
+                "blockEnd": NSNumber(value: 15),
+                "displayLocation": NSNumber(value: 4),
+                "displayLength": NSNumber(value: 4)
+            ]
+        ]
+
+        let withTheDocuments = PreviewSelectionBridge.contiguousSelectionRanges(
+            fromDisplayRangeResult: payload,
+            source: source,
+            definitions: MarkdownReading(of: source).definitions
+        )
+        // With none, `[home]` is so many characters and the same four fall
+        // one earlier: "[hom".
+        let withNone = PreviewSelectionBridge.contiguousSelectionRanges(
+            fromDisplayRangeResult: payload,
+            source: source,
+            definitions: MarkdownLinkDefinitions.none
+        )
+        let leftToFindThem = PreviewSelectionBridge.contiguousSelectionRanges(
+            fromDisplayRangeResult: payload,
+            source: source
+        )
+
+        #expect(withTheDocuments == [MarkdownSelectionRange(location: 5, length: 4)])
+        #expect(withNone == [MarkdownSelectionRange(location: 4, length: 4)])
+        #expect(leftToFindThem == withTheDocuments)
+    }
+
     @Test func enclosingRangeOfNothingIsNil() {
         #expect(PreviewSelectionBridge.enclosingRange(of: []) == nil)
         #expect(
