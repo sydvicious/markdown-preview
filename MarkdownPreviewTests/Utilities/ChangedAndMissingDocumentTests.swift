@@ -24,11 +24,12 @@ struct ChangedAndMissingDocumentTests {
     /// A store, and a folder of files to open in it.
     @MainActor
     private final class Fixture {
-        let store = DocumentSessionStore(disablePersistenceRestore: true)
+        let store: DocumentSessionStore
         let directory: URL
         private var saves = 0
 
-        init() throws {
+        init(resolver: BookmarkResolver = .system) throws {
+            store = DocumentSessionStore(disablePersistenceRestore: true, bookmarkResolver: resolver)
             directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("ChangedAndMissingDocumentTests-\(UUID().uuidString)", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -301,5 +302,134 @@ struct ChangedAndMissingDocumentTests {
 
         #expect(!showsTheList)
         #expect(fixture.listed == ["alpha.md"])
+    }
+
+    // MARK: - A document that is still where it was
+
+    /// Counts how often the store asks where a bookmark's file is now.
+    private final class LookUps {
+        private(set) var count = 0
+
+        var resolver: BookmarkResolver {
+            BookmarkResolver { [self] bookmarkData in
+                count += 1
+                return BookmarkResolver.system.resolve(bookmarkData)
+            }
+        }
+    }
+
+    /// Where a bookmark's file is now, and whether that is the Trash, are
+    /// nearly all a check costs, and they are asked to find a file that has
+    /// gone somewhere. One that is still where it was found has gone nowhere.
+    /// The document on screen is checked every second.
+    @Test func theDocumentOnScreenIsNotLookedUpAgainWhileItIsWhereItWas() throws {
+        let lookUps = LookUps()
+        let fixture = try Fixture(resolver: lookUps.resolver)
+        defer { fixture.cleanUp() }
+        try fixture.open("on-screen.md", holding: "Text")
+        let afterOpening = lookUps.count
+
+        for _ in 0..<5 {
+            fixture.store.checkActiveDocumentForChanges(isCompactWidth: false)
+        }
+
+        #expect(lookUps.count == afterOpening)
+        #expect(fixture.store.missingActiveDocumentAlert == nil)
+    }
+
+    @Test func documentsNotOnScreenAreNotLookedUpAgainWhileTheyAreWhereTheyWere() throws {
+        let lookUps = LookUps()
+        let fixture = try Fixture(resolver: lookUps.resolver)
+        defer { fixture.cleanUp() }
+        try fixture.open("one.md", holding: "One")
+        try fixture.open("two.md", holding: "Two")
+        try fixture.open("on-screen.md", holding: "Three")
+        let afterOpening = lookUps.count
+
+        for _ in 0..<3 {
+            fixture.store.checkAllDocumentsForChanges(isCompactWidth: false)
+        }
+
+        #expect(lookUps.count == afterOpening)
+        #expect(fixture.listed == ["on-screen.md", "one.md", "two.md"])
+    }
+
+    /// Saved over, as an editor saves: another file under the same name. It
+    /// is where it was, and it has changed.
+    @Test func aDocumentSavedOverWhereItWasIsReloadedWithoutBeingLookedUp() throws {
+        let lookUps = LookUps()
+        let fixture = try Fixture(resolver: lookUps.resolver)
+        defer { fixture.cleanUp() }
+        let onScreen = try fixture.open("on-screen.md", holding: "Before")
+        let afterOpening = lookUps.count
+
+        try fixture.save("After", over: onScreen)
+        fixture.store.checkActiveDocumentForChanges(isCompactWidth: false)
+
+        #expect(fixture.store.currentDocument?.file.contents == "After")
+        #expect(lookUps.count == afterOpening)
+    }
+
+    @Test func aDocumentWhoseFileHasGoneIsLookedUp() throws {
+        let lookUps = LookUps()
+        let fixture = try Fixture(resolver: lookUps.resolver)
+        defer { fixture.cleanUp() }
+        let onScreen = try fixture.open("on-screen.md", holding: "Text")
+        let afterOpening = lookUps.count
+
+        try fixture.delete(onScreen)
+        fixture.store.checkActiveDocumentForChanges(isCompactWidth: false)
+
+        #expect(lookUps.count > afterOpening)
+        #expect(fixture.store.missingActiveDocumentAlert != nil)
+    }
+
+    /// Looked up when it is found to have gone, followed to where it is, and
+    /// from then on it is where it was again.
+    @Test func aMovedDocumentIsLookedUpWhenItMovesAndNotAfter() throws {
+        let lookUps = LookUps()
+        let fixture = try Fixture(resolver: lookUps.resolver)
+        defer { fixture.cleanUp() }
+        let onScreen = try fixture.open("before.md", holding: "Text")
+        let afterOpening = lookUps.count
+
+        try FileManager.default.moveItem(
+            at: URL(fileURLWithPath: onScreen),
+            to: fixture.directory.appendingPathComponent("after.md")
+        )
+        fixture.store.checkActiveDocumentForChanges(isCompactWidth: false)
+        #expect(fixture.listed == ["after.md"])
+        let afterMoving = lookUps.count
+        #expect(afterMoving > afterOpening)
+
+        for _ in 0..<5 {
+            fixture.store.checkActiveDocumentForChanges(isCompactWidth: false)
+        }
+        #expect(lookUps.count == afterMoving)
+        #expect(fixture.listed == ["after.md"])
+    }
+
+    /// A list read back at launch has found each document already.
+    @Test func documentsReadBackAtLaunchAreNotLookedUpAgainByTheFirstCheck() throws {
+        let suiteName = "ChangedAndMissingDocumentTests.\(#function).\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        try fixture.open("one.md", holding: "One")
+        try fixture.open("two.md", holding: "Two")
+        fixture.store.persistDocuments(to: defaults)
+        fixture.store.persistSelectedDocument(to: defaults)
+
+        let lookUps = LookUps()
+        let relaunched = DocumentSessionStore(userDefaults: defaults, bookmarkResolver: lookUps.resolver)
+        relaunched.restorePersistedDocumentsIfNeeded(isCompactWidth: false, userDefaults: defaults)
+        #expect(relaunched.sortedDocuments.map(\.file.fileName) == ["one.md", "two.md"])
+        let afterReadingBack = lookUps.count
+
+        relaunched.checkActiveDocumentForChanges(isCompactWidth: false)
+        relaunched.checkAllDocumentsForChanges(isCompactWidth: false)
+
+        #expect(lookUps.count == afterReadingBack)
     }
 }

@@ -15,11 +15,9 @@ This document tracks planned work for MarkdownPreviewApp.
   - When focus is in either Search field, Esc should put focus back in the detail view. It should still clear the search text too, as it does today.
 
 ### Proposed performance fixes.
-  - Investigate checking file existence and polling in a separate `Task` as well.
   - Decide whether the engine's scanner is worth making faster. A 505 KB document builds in 83 ms, and its text is read for searching in 91 ms, in a release build; a debug build takes two to three times as long. What is left is the tokenizer comparing a whole `Character` at a time as it scans, and the parsing of table rows. Having the scanner work on bytes would be a large change to the tokenizer.
   - Take the read off the main actor. It is 3 ms as a rule, but `MarkdownFile.load` waits up to 30 seconds, sleeping the thread between tries, for an iCloud file that has not downloaded.
   - Stop resolving every listed document's bookmark each time a document is opened. `upsertDocument` does it to find a document already listed under the path it was moved from, at about 2 ms for each one listed.
-  - Take the ten-second check of every listed document off the main actor, or make it cheaper. It grows with the list: 18 to 31 ms with 17 documents. This goes with the polling bullet above.
   - Take the image checks off the main actor: 29 ms for a 505 KB document. They need the folders the app has been granted, which are the main actor's.
   - Shorten setting a long document's text into the source pane, or show the pane before it is done. It is on the main actor, the first time the document is shown in Source: 148 ms for 1.4 MB, in a debug build on an iPad simulator.
   - Take the first placing of a selection in a document off the main actor, or have it use what building the page already read. The whole document is read to find the blocks the selection touches: about 220 ms for 1.4 MB, in the same build. It is kept after that, so only the first one costs.

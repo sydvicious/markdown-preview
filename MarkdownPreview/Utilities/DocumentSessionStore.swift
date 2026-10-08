@@ -148,6 +148,36 @@ struct SecurityScope {
     )
 }
 
+/// How a bookmark is turned back into the URL of its file.
+///
+/// The store goes through this so that a test can count how often it asks.
+/// Asking is most of what a check for changes on disk costs, and a document
+/// that is still where it was found is not asked about.
+struct BookmarkResolver {
+    var resolve: (Data) -> URL?
+
+    static let system = BookmarkResolver { bookmarkData in
+        var isStale = false
+        #if os(macOS)
+        let options: URL.BookmarkResolutionOptions = [.withSecurityScope, .withoutUI]
+        #else
+        // `.withoutImplicitStartAccessing` for the same reason
+        // `DirectoryAccessStore` passes it: on iOS resolving a bookmark
+        // *starts* the implicit scope it carries, and the system permits only
+        // a limited number of open scoped URLs. Without it each resolution
+        // leaks a scope until access is refused. Access is taken explicitly in
+        // `withSecurityScope`.
+        let options: URL.BookmarkResolutionOptions = [.withoutUI, .withoutImplicitStartAccessing]
+        #endif
+        return try? URL(
+            resolvingBookmarkData: bookmarkData,
+            options: options,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
+    }
+}
+
 @MainActor
 final class DocumentSessionStore: ObservableObject {
     struct DocumentSection: Identifiable, Equatable {
@@ -203,6 +233,7 @@ final class DocumentSessionStore: ObservableObject {
     @Published var missingActiveDocumentAlert: MissingActiveDocumentAlert?
     private let documentSearchIndex: DocumentSearchIndex
     private let securityScope: SecurityScope
+    private let bookmarkResolver: BookmarkResolver
     /// Where the reader was in each listed document's preview. Kept here, with
     /// the rest of what is kept for each document, so that it outlasts the
     /// view that shows them. The preview knows a document by its `stableID`.
@@ -219,6 +250,17 @@ final class DocumentSessionStore: ObservableObject {
     /// scope either way, which is all that asking again could have achieved.
     private var bookmarksWithRefusedScope: Set<Data> = []
 
+    /// Where each bookmark's file was last found, as the URL the bookmark
+    /// resolved to, which is the one its security scope can be taken on.
+    ///
+    /// A check for changes on disk used to ask every time where the bookmark's
+    /// file was now and whether that was the Trash, which between them were
+    /// nearly all it cost: a millisecond or more for each document, and four or
+    /// five for the one on screen, every second. Both are questions about a
+    /// file that has gone somewhere. A file still at the place kept here has
+    /// not, so the check looks there first, and asks only if nothing is there.
+    private var knownLocations: [Data: URL] = [:]
+
     private(set) var didRestoreDocuments = false
 
     init(
@@ -227,6 +269,7 @@ final class DocumentSessionStore: ObservableObject {
         disablePersistenceRestore: Bool = false,
         userDefaults: UserDefaults = .standard,
         securityScope: SecurityScope = .system,
+        bookmarkResolver: BookmarkResolver = .system,
         searchIndexBuild: DocumentSearchIndex.BackgroundBuild? = DocumentSearchIndex.detached
     ) {
         let now = Date()
@@ -250,6 +293,7 @@ final class DocumentSessionStore: ObservableObject {
             backgroundBuild: searchIndexBuild
         )
         self.securityScope = securityScope
+        self.bookmarkResolver = bookmarkResolver
     }
 
     var sortedDocuments: [OpenedDocument] {
@@ -371,6 +415,7 @@ final class DocumentSessionStore: ObservableObject {
         // sends the reader looking for one.
         let loaded = try readDocument(at: resolvedURL, resolvedFrom: bookmarkData)
         upsertDocument(loaded.file, bookmarkData: bookmarkData, modificationDate: loaded.modificationDate)
+        knownLocations[bookmarkData] = resolvedURL
     }
 
     func upsertDocument(_ file: MarkdownFile, bookmarkData: Data, modificationDate: Date?) {
@@ -387,6 +432,7 @@ final class DocumentSessionStore: ObservableObject {
         if let index = openedDocuments.firstIndex(where: { $0.id == id }) {
             if openedDocuments[index].bookmarkData != bookmarkData {
                 bookmarksWithRefusedScope.remove(openedDocuments[index].bookmarkData)
+                knownLocations.removeValue(forKey: openedDocuments[index].bookmarkData)
             }
             openedDocuments[index].file = file
             openedDocuments[index].lastOpened = Date()
@@ -405,6 +451,7 @@ final class DocumentSessionStore: ObservableObject {
         let idsToDelete = offsets.map { sortedDocuments[$0].id }
         for document in openedDocuments where idsToDelete.contains(document.id) {
             bookmarksWithRefusedScope.remove(document.bookmarkData)
+            knownLocations.removeValue(forKey: document.bookmarkData)
             previewScrollMemory.forget(documentID: document.stableID.uuidString)
         }
         openedDocuments.removeAll(where: { idsToDelete.contains($0.id) })
@@ -428,6 +475,7 @@ final class DocumentSessionStore: ObservableObject {
         let wasSelected = selectedDocumentID == id
         for document in openedDocuments where document.id == id {
             bookmarksWithRefusedScope.remove(document.bookmarkData)
+            knownLocations.removeValue(forKey: document.bookmarkData)
             previewScrollMemory.forget(documentID: document.stableID.uuidString)
         }
         openedDocuments.removeAll(where: { $0.id == id })
@@ -571,6 +619,10 @@ final class DocumentSessionStore: ObservableObject {
         guard let index = openedDocuments.firstIndex(where: { $0.id == documentID }) else { return }
         let document = openedDocuments[index]
 
+        if lookWhereTheFileWas(for: document, at: index) {
+            return
+        }
+
         guard let url = resolveBookmarkURL(from: document.bookmarkData) else {
             Self.log.info("[track] Bookmark for \(document.id, privacy: .public) did not resolve")
             handleMissingDocument(
@@ -624,6 +676,8 @@ final class DocumentSessionStore: ObservableObject {
                 try? makeBookmarkData(for: url)
             }
             Self.log.info("[track] Following it there; newBookmark=\(bookmarkData != nil)")
+            knownLocations.removeValue(forKey: document.bookmarkData)
+            knownLocations[bookmarkData ?? document.bookmarkData] = url
             documentDidMove(
                 from: document.id,
                 to: loaded.file,
@@ -632,6 +686,9 @@ final class DocumentSessionStore: ObservableObject {
             )
             return
         }
+
+        // Found where it is listed. That is where it is looked for from now on.
+        knownLocations[document.bookmarkData] = url
 
         if let modificationDate = currentModificationDate {
             let knownDate = knownModificationDates[document.id]
@@ -650,6 +707,45 @@ final class DocumentSessionStore: ObservableObject {
             return
         }
 
+        take(loaded, for: document, at: index)
+    }
+
+    /// Looks at a document's file where it was last found, and says whether
+    /// that settled the check: the file is there, and either has not changed
+    /// or has been read again.
+    ///
+    /// False is not that the file has gone. It is that looking there did not
+    /// say: nothing has been found there yet, nothing is there now, or what is
+    /// there cannot be read. The check then asks where the bookmark's file is,
+    /// which finds one that was moved, put in the Trash or deleted.
+    private func lookWhereTheFileWas(for document: OpenedDocument, at index: Int) -> Bool {
+        guard let location = knownLocations[document.bookmarkData],
+              location.standardizedFileURL.path == document.id else {
+            return false
+        }
+
+        let modificationDate = withSecurityScope(of: location, resolvedFrom: document.bookmarkData) {
+            modificationDateWithinAccess(for: location)
+        }
+        guard let modificationDate else { return false }
+
+        if let knownDate = knownModificationDates[document.id], modificationDate <= knownDate {
+            return true
+        }
+        guard let loaded = loadDocument(at: location, resolvedFrom: document.bookmarkData) else {
+            return false
+        }
+        take(loaded, for: document, at: index)
+        return true
+    }
+
+    /// Takes what was just read of a document's file: its date, and its text
+    /// if that has changed.
+    private func take(
+        _ loaded: (file: MarkdownFile, modificationDate: Date?),
+        for document: OpenedDocument,
+        at index: Int
+    ) {
         if let modificationDate = loaded.modificationDate {
             knownModificationDates[document.id] = modificationDate
         }
@@ -777,34 +873,15 @@ final class DocumentSessionStore: ObservableObject {
         guard let url = resolveBookmarkURL(from: bookmarkData) else {
             return nil
         }
-        return loadDocument(at: url, resolvedFrom: bookmarkData)
+        guard let loaded = loadDocument(at: url, resolvedFrom: bookmarkData) else {
+            return nil
+        }
+        knownLocations[bookmarkData] = url
+        return loaded
     }
 
     private func resolveBookmarkURL(from bookmarkData: Data) -> URL? {
-        var isStale = false
-        do {
-            #if os(macOS)
-            let options: URL.BookmarkResolutionOptions = [.withSecurityScope, .withoutUI]
-            #else
-            // `.withoutImplicitStartAccessing` for the same reason
-            // `DirectoryAccessStore` passes it: on iOS resolving a bookmark
-            // *starts* the implicit scope it carries, and the system permits only
-            // a limited number of open scoped URLs. This resolves once per
-            // document at launch and again on every polling tick, so without it
-            // each one leaks a scope until access is refused. Access is taken
-            // explicitly in `withSecurityScope`.
-            let options: URL.BookmarkResolutionOptions = [.withoutUI, .withoutImplicitStartAccessing]
-            #endif
-            let url = try URL(
-                resolvingBookmarkData: bookmarkData,
-                options: options,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-            return url
-        } catch {
-            return nil
-        }
+        bookmarkResolver.resolve(bookmarkData)
     }
 
     /// Runs `body` holding the security scope of `url`, which was resolved from
@@ -874,8 +951,14 @@ final class DocumentSessionStore: ObservableObject {
     /// the scope, the read returns nil — which does not fail loudly: in
     /// `reloadDocumentIfNeeded` it defeats the "unchanged, so skip" check and
     /// silently re-reads every open document on every tick.
+    ///
+    /// The URL may be one that has been kept and asked before, and a URL holds
+    /// on to what it was last told. What it holds is thrown away first, so that
+    /// the date is the file's as it is now.
     private func modificationDateWithinAccess(for url: URL) -> Date? {
-        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+        var asked = url
+        asked.removeAllCachedResourceValues()
+        let values = try? asked.resourceValues(forKeys: [.contentModificationDateKey])
         return values?.contentModificationDate
     }
 
