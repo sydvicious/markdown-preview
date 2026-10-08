@@ -73,11 +73,37 @@ extension String {
     /// In Swift a carriage return followed by a newline is a single
     /// `Character`, and it is not equal to `"\n"`. Splitting on `"\n"` alone
     /// therefore never splits a Windows file at all.
+    ///
+    /// The line endings are looked for a byte at a time. Both are ASCII, no
+    /// byte of a longer character is, and a line ending is never part of a
+    /// longer `Character` except the pair above. Comparing each `Character`
+    /// of a document with three line endings was a seventh of the time it
+    /// took to build a page.
     var markdownLineSlices: [Substring] {
-        split(
-            omittingEmptySubsequences: false,
-            whereSeparator: { $0 == "\n" || $0 == "\r\n" || $0 == "\r" }
-        )
+        let carriageReturn = UInt8(ascii: "\r")
+        let newline = UInt8(ascii: "\n")
+        let bytes = utf8
+
+        var slices: [Substring] = []
+        var lineStart = bytes.startIndex
+        var index = bytes.startIndex
+        while index < bytes.endIndex {
+            let byte = bytes[index]
+            guard byte == newline || byte == carriageReturn else {
+                index = bytes.index(after: index)
+                continue
+            }
+
+            slices.append(self[lineStart..<index])
+            index = bytes.index(after: index)
+            // A carriage return and the newline after it are one ending.
+            if byte == carriageReturn, index < bytes.endIndex, bytes[index] == newline {
+                index = bytes.index(after: index)
+            }
+            lineStart = index
+        }
+        slices.append(self[lineStart..<bytes.endIndex])
+        return slices
     }
 
     var markdownLines: [String] {

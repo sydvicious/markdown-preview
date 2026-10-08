@@ -1110,13 +1110,36 @@ public enum MarkdownHTMLBuilder {
         return (html, runs, target.endIndex)
     }
 
+    /// `text` with the five characters HTML would read as markup written as
+    /// entities.
+    ///
+    /// This is called for every word of a document, so it is one pass over
+    /// the text and none at all over the many words with nothing in them to
+    /// escape. As five replacements, one after another, it was more than half
+    /// the time it took to build a page.
     private static func escapeHTML(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "'", with: "&#39;")
+        guard text.utf8.contains(where: needsEscaping) else { return text }
+
+        var escaped = ""
+        escaped.reserveCapacity(text.utf8.count + 16)
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "&": escaped += "&amp;"
+            case "<": escaped += "&lt;"
+            case ">": escaped += "&gt;"
+            case "\"": escaped += "&quot;"
+            case "'": escaped += "&#39;"
+            default: escaped.unicodeScalars.append(scalar)
+            }
+        }
+        return escaped
+    }
+
+    /// Whether a byte of UTF-8 is one of `&`, `<`, `>`, `"` and `'`. All five
+    /// are ASCII, and no byte of a longer character is ever ASCII.
+    private static func needsEscaping(_ byte: UInt8) -> Bool {
+        byte == UInt8(ascii: "&") || byte == UInt8(ascii: "<") || byte == UInt8(ascii: ">")
+            || byte == UInt8(ascii: "\"") || byte == UInt8(ascii: "'")
     }
 
     static func escapeHTMLAttribute(_ text: String) -> String {

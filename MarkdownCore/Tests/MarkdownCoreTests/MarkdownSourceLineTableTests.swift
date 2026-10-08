@@ -86,6 +86,11 @@ struct MarkdownSourceLineTableTests {
         "one\rtwo\r\rthree",
         "one\r\ntwo\nthree\rfour\n\r\n\r",
         "😀\r\nwörld 👍🏽\nlast",
+        "\r\n",
+        "\n\r",
+        // A combining mark after a line ending starts the next line. It does
+        // not join the line ending to make something that is not one.
+        "a\n\u{0301}b\r\n\u{0301}c\r\u{0301}d",
     ])
     func theParsersLinesAreTheTablesLines(source: String) {
         #expect(source.markdownLines == lines(of: source))

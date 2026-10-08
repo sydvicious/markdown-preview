@@ -41,6 +41,86 @@ struct MarkdownHTMLBuilderTests {
         #expect(html.contains("<pre><code>let value = 42</code></pre>"))
     }
 
+    // MARK: - Escaping
+
+    /// Text goes into the page with the five characters HTML would read as
+    /// markup written as entities.
+    @Test func theFiveCharactersHTMLReadsAsMarkupAreEscaped() {
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("a & b") == "a &amp; b")
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("<tag>") == "&lt;tag&gt;")
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("say \"hi\"") == "say &quot;hi&quot;")
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("it's") == "it&#39;s")
+    }
+
+    @Test func textWithNothingToEscapeIsLeftAsItIs() {
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("") == "")
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("plain text") == "plain text")
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("naïve — 日本語 🙂; #1 (a/b)") == "naïve — 日本語 🙂; #1 (a/b)")
+    }
+
+    /// The ampersand of an entity the escaping wrote is not escaped in its turn.
+    @Test func whatAnEscapeWritesIsNotEscapedAgain() {
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("'") == "&#39;")
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("<&>") == "&lt;&amp;&gt;")
+        // An entity already in the text is text, and its ampersand is escaped.
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("&amp;") == "&amp;amp;")
+    }
+
+    @Test func everyOccurrenceIsEscapedAndWhatIsBetweenThemIsKept() {
+        #expect(
+            MarkdownHTMLBuilder.escapeHTMLAttribute("<<a>>&&\"\"''")
+                == "&lt;&lt;a&gt;&gt;&amp;&amp;&quot;&quot;&#39;&#39;"
+        )
+        #expect(MarkdownHTMLBuilder.escapeHTMLAttribute("é<ü>&日本'🙂\"") == "é&lt;ü&gt;&amp;日本&#39;🙂&quot;")
+    }
+
+    /// A combining mark after one of the five does not hide it. A `<` with a
+    /// stroke through it is one character to a reader and still a `<` to
+    /// whatever reads the page, so it is escaped, and the mark is kept.
+    ///
+    /// Compared scalar by scalar: two strings that differ only in how an
+    /// accented character is spelled are equal to `==`.
+    @Test(arguments: [
+        ("<\u{0338}", "&lt;\u{0338}"),
+        (">\u{0338}", "&gt;\u{0338}"),
+        ("&\u{0301}", "&amp;\u{0301}"),
+        ("\"\u{0308}", "&quot;\u{0308}"),
+        ("'\u{0301}", "&#39;\u{0301}"),
+        ("a <\u{0338} b & c", "a &lt;\u{0338} b &amp; c"),
+    ])
+    func oneOfTheFiveWithACombiningMarkAfterItIsStillEscaped(text: String, expected: String) {
+        let escaped = MarkdownHTMLBuilder.escapeHTMLAttribute(text)
+
+        #expect(Array(escaped.unicodeScalars) == Array(expected.unicodeScalars))
+    }
+
+    @Test func aCombiningMarkAfterOneOfTheFiveIsEscapedInAParagraphToo() {
+        let html = MarkdownHTMLBuilder.document(for: "less <\u{0338} than, and &\u{0301} too")
+        let expected = "<p>less &lt;\u{0338} than, and &amp;\u{0301} too</p>"
+
+        #expect(html.unicodeScalars.split(separator: "\n").contains { line in
+            Array(line).contains(Array(expected.unicodeScalars))
+        })
+    }
+
+    @Test func escapingReachesAParagraphACodeSpanAndACodeBlock() {
+        let source = """
+        A < B & C, "quoted" and 'single'.
+
+        `x < y && z`
+
+        ```
+        if a < b && c > d { "q" }
+        ```
+        """
+
+        let html = MarkdownHTMLBuilder.document(for: source)
+
+        #expect(html.contains("<p>A &lt; B &amp; C, &quot;quoted&quot; and &#39;single&#39;.</p>"))
+        #expect(html.contains("<code>x &lt; y &amp;&amp; z</code>"))
+        #expect(html.contains("<pre><code>if a &lt; b &amp;&amp; c &gt; d { &quot;q&quot; }</code></pre>"))
+    }
+
     @Test func htmlBuilderEmbedsSourceRangeMetadata() async throws {
         let source = """
         # Title
