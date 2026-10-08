@@ -14,14 +14,16 @@ This document tracks planned work for MarkdownPreviewApp.
   - When focus is in the file list's Search field, `Command-G` should search in the current file. When it reaches the bottom of that file, it should open the next file in the list and highlight the search text there.
   - When focus is in either Search field, Esc should put focus back in the detail view. It should still clear the search text too, as it does today.
 
-### Async file loading off `@Main`.
+### Proposed performance fixes.
   - Investigate checking file existence and polling in a separate `Task` as well.
-  - Schedule this work after the YMMV-related refactor work.
   - Decide whether the engine's scanner is worth making faster. A 505 KB document builds in 83 ms, and its text is read for searching in 91 ms, in a release build; a debug build takes two to three times as long. What is left is the tokenizer comparing a whole `Character` at a time as it scans, and the parsing of table rows. Having the scanner work on bytes would be a large change to the tokenizer.
   - Take the read off the main actor. It is 3 ms as a rule, but `MarkdownFile.load` waits up to 30 seconds, sleeping the thread between tries, for an iCloud file that has not downloaded.
   - Stop resolving every listed document's bookmark each time a document is opened. `upsertDocument` does it to find a document already listed under the path it was moved from, at about 2 ms for each one listed.
   - Take the ten-second check of every listed document off the main actor, or make it cheaper. It grows with the list: 18 to 31 ms with 17 documents. This goes with the polling bullet above.
   - Take the image checks off the main actor: 29 ms for a 505 KB document. They need the folders the app has been granted, which are the main actor's.
+  - Shorten setting a long document's text into the source pane, or show the pane before it is done. It is on the main actor, the first time the document is shown in Source: 148 ms for 1.4 MB, in a debug build on an iPad simulator.
+  - Take the first placing of a selection in a document off the main actor, or have it use what building the page already read. The whole document is read to find the blocks the selection touches: about 220 ms for 1.4 MB, in the same build. It is kept after that, so only the first one costs.
+  - Find out how much of a long page's first load is the web view's. From handing 1.86 MB of HTML to the web view to its saying the page had loaded was 2.3 seconds in the same build, and that includes any wait for the main actor.
   - Find out why a launch builds the page on screen twice. A line in the console for each request to build, naming the renderer it was asked of, would say which it is: two renderers is a view made twice, and one is something the page is made from that changed.
 
 ### The source pane lands near a place far down a long document, and not on it.
