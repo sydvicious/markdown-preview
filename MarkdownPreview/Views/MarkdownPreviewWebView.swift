@@ -68,6 +68,10 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         var isShowing = true
         /// What the page now loading, or last loaded, was loaded against.
         var loadedBaseURL: URL?
+        /// The load of the page this view was asked to show. A web view taken
+        /// from the spare may still be finishing the empty page it was started
+        /// with, and that finishing is not this page having loaded.
+        var pageNavigation: WKNavigation?
 
         func webView(
             _ webView: WKWebView,
@@ -91,6 +95,8 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard navigation === pageNavigation else { return }
+            SparePreviewWebView.warmAfterAPageHasLoaded()
             self.webView?.applySelection(lastSelectedRange)
             // After the selection, which centres itself: on a reload the
             // reader's place wins.
@@ -103,33 +109,15 @@ struct MarkdownPreviewWebView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        // Local images are served from the app process; the web content process
-        // cannot read files itself. Must be set before the web view is created.
-        configuration.setURLSchemeHandler(
-            MarkdownImageSchemeHandler(accessStore: .shared),
-            forURLScheme: MarkdownImageURL.scheme
-        )
-        for script in MarkdownWebResources.Script.allCases {
-            configuration.userContentController.addUserScript(
-                WKUserScript(
-                    source: MarkdownWebResources.script(script),
-                    injectionTime: .atDocumentEnd,
-                    forMainFrameOnly: true
-                )
-            )
-        }
-        configuration.userContentController.add(context.coordinator, name: copyBlockMessageHandlerName)
-        configuration.userContentController.add(context.coordinator, name: previewSelectionChangedMessageHandlerName)
-        configuration.userContentController.add(context.coordinator, name: requestImageAccessMessageHandlerName)
-        configuration.userContentController.add(context.coordinator, name: previewScrollChangedMessageHandlerName)
-        configuration.userContentController.add(
-            context.coordinator,
-            name: previewSourceOffsetChangedMessageHandlerName
-        )
-
-        let webView = MarkdownCopyWebView(frame: .zero, configuration: configuration)
+        // A web view takes most of a second to start, which is far longer
+        // than a page takes to load, so one is kept ready and taken here.
+        let webView = SparePreviewWebView.take()
+        let userContent = webView.configuration.userContentController
+        userContent.add(context.coordinator, name: copyBlockMessageHandlerName)
+        userContent.add(context.coordinator, name: previewSelectionChangedMessageHandlerName)
+        userContent.add(context.coordinator, name: requestImageAccessMessageHandlerName)
+        userContent.add(context.coordinator, name: previewScrollChangedMessageHandlerName)
+        userContent.add(context.coordinator, name: previewSourceOffsetChangedMessageHandlerName)
         webView.navigationDelegate = context.coordinator
         webView.markdownSource = source
         context.coordinator.webView = webView
@@ -281,6 +269,10 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         var isShowing = true
         /// What the page now loading, or last loaded, was loaded against.
         var loadedBaseURL: URL?
+        /// The load of the page this view was asked to show. A web view taken
+        /// from the spare may still be finishing the empty page it was started
+        /// with, and that finishing is not this page having loaded.
+        var pageNavigation: WKNavigation?
 
         func webView(
             _ webView: WKWebView,
@@ -304,6 +296,8 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard navigation === pageNavigation else { return }
+            SparePreviewWebView.warmAfterAPageHasLoaded()
             self.webView?.applySelection(lastSelectedRange)
             // After the selection, which centres itself: on a reload the
             // reader's place wins.
@@ -319,33 +313,15 @@ struct MarkdownPreviewWebView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        // Local images are served from the app process; the web content process
-        // cannot read files itself. Must be set before the web view is created.
-        configuration.setURLSchemeHandler(
-            MarkdownImageSchemeHandler(accessStore: .shared),
-            forURLScheme: MarkdownImageURL.scheme
-        )
-        for script in MarkdownWebResources.Script.allCases {
-            configuration.userContentController.addUserScript(
-                WKUserScript(
-                    source: MarkdownWebResources.script(script),
-                    injectionTime: .atDocumentEnd,
-                    forMainFrameOnly: true
-                )
-            )
-        }
-        configuration.userContentController.add(context.coordinator, name: copyBlockMessageHandlerName)
-        configuration.userContentController.add(context.coordinator, name: previewSelectionChangedMessageHandlerName)
-        configuration.userContentController.add(context.coordinator, name: requestImageAccessMessageHandlerName)
-        configuration.userContentController.add(context.coordinator, name: previewScrollChangedMessageHandlerName)
-        configuration.userContentController.add(
-            context.coordinator,
-            name: previewSourceOffsetChangedMessageHandlerName
-        )
-
-        let webView = MarkdownCopyWebView(frame: .zero, configuration: configuration)
+        // A web view takes most of a second to start, which is far longer
+        // than a page takes to load, so one is kept ready and taken here.
+        let webView = SparePreviewWebView.take()
+        let userContent = webView.configuration.userContentController
+        userContent.add(context.coordinator, name: copyBlockMessageHandlerName)
+        userContent.add(context.coordinator, name: previewSelectionChangedMessageHandlerName)
+        userContent.add(context.coordinator, name: requestImageAccessMessageHandlerName)
+        userContent.add(context.coordinator, name: previewScrollChangedMessageHandlerName)
+        userContent.add(context.coordinator, name: previewSourceOffsetChangedMessageHandlerName)
         webView.navigationDelegate = context.coordinator
         webView.markdownSource = source
         context.coordinator.webView = webView
@@ -532,6 +508,76 @@ private final class MarkdownCopyWebView: WKWebView {
 }
 #endif
 
+/// A web view kept ready for the next preview that needs one.
+///
+/// Starting a web view takes most of a second before it shows anything, on
+/// top of whatever the page takes, and a page takes very little: 23 ms for a
+/// short document and under half a second for a 1.86 MB one. Each document
+/// has a preview of its own, so every first look at a document would pay that
+/// start. So one web view is started ahead of need, with an empty page to
+/// make it start its process. A preview takes it, and another is started for
+/// the next.
+///
+/// None is started at launch. The first page's web view is made when its page
+/// is ready, as it always was: a spare started first thing, to be ready by
+/// then, was measured and made a launch slower. Making it held the main actor
+/// for up to a second just when the list was being read, and the page then
+/// took longer to begin arriving in it than in a web view made for it.
+@MainActor
+enum SparePreviewWebView {
+    private static var spare: MarkdownCopyWebView?
+
+    /// Starts a spare, if there is not one already.
+    ///
+    /// Making a web view is work for the main actor, not only for the process
+    /// it starts, so this is done when the main actor has least else to do:
+    /// after a page has finished loading.
+    static func warm() {
+        guard spare == nil else { return }
+        let webView = make()
+        webView.loadHTMLString("<!doctype html><html><body></body></html>", baseURL: nil)
+        spare = webView
+    }
+
+    /// Starts the next spare once the page that took the last one has had
+    /// its turn. Started sooner, it would be made, and its process started,
+    /// just as that page was loading.
+    static func warmAfterAPageHasLoaded() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            warm()
+        }
+    }
+
+    /// A web view for a preview: the spare if there is one, and a new one if
+    /// not.
+    fileprivate static func take() -> MarkdownCopyWebView {
+        let webView = spare ?? make()
+        spare = nil
+        return webView
+    }
+
+    private static func make() -> MarkdownCopyWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        // Local images are served from the app process; the web content process
+        // cannot read files itself. Must be set before the web view is created.
+        configuration.setURLSchemeHandler(
+            MarkdownImageSchemeHandler(accessStore: .shared),
+            forURLScheme: MarkdownImageURL.scheme
+        )
+        for script in MarkdownWebResources.Script.allCases {
+            configuration.userContentController.addUserScript(
+                WKUserScript(
+                    source: MarkdownWebResources.script(script),
+                    injectionTime: .atDocumentEnd,
+                    forMainFrameOnly: true
+                )
+            )
+        }
+        return MarkdownCopyWebView(frame: .zero, configuration: configuration)
+    }
+}
+
 private extension MarkdownCopyWebView {
     func applySelection(_ selectedRange: MarkdownSelectionRange?) {
         let payload = MarkdownPreviewWebView.selectionInvocation(source: markdownSource, selectedRange: selectedRange)
@@ -660,7 +706,7 @@ extension MarkdownPreviewWebView.Coordinator {
         lastHTML = html
         loadedBaseURL = baseURL
         isLoadingPage = true
-        webView.loadHTMLString(html, baseURL: baseURL)
+        pageNavigation = webView.loadHTMLString(html, baseURL: baseURL)
     }
 
     /// Loads the page again after its process has gone. Where the reader was

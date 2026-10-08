@@ -23,8 +23,7 @@ This document tracks planned work for MarkdownPreviewApp.
   - Take the image checks off the main actor: 29 ms for a 505 KB document. They need the folders the app has been granted, which are the main actor's.
   - Shorten setting a long document's text into the source pane, or show the pane before it is done. It is on the main actor, the first time the document is shown in Source: 148 ms for 1.4 MB, in a debug build on an iPad simulator.
   - Take the first placing of a selection in a document off the main actor, or have it use what building the page already read. The whole document is read to find the blocks the selection touches: about 220 ms for 1.4 MB, in the same build. It is kept after that, so only the first one costs.
-  - Find out how much of a long page's first load is the web view's. From handing 1.86 MB of HTML to the web view to its saying the page had loaded was 2.3 seconds in the same build, and that includes any wait for the main actor.
-  - Find out why a launch builds the page on screen twice. A line in the console for each request to build, naming the renderer it was asked of, would say which it is: two renderers is a view made twice, and one is something the page is made from that changed.
+  - Find out why a page in a web view taken from the spare says it has loaded some 300 to 400 ms after it has painted: a short page painted at 43 to 122 ms and loaded at 308 to 422 ms, where in a web view made for it the same page loaded at 23 ms. The app waits for that before it puts back a selection or the reader's place.
 
 ### The source pane lands near a place far down a long document, and not on it.
   - When the source pane has to follow the preview to a place far down a long document, it lands close to the place and not on it. That is after the reader scrolls Preview by hand and switches to Source, and on iPhone on coming back from the list, where both panes are made again.

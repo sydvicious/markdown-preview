@@ -5,6 +5,7 @@
 
 ## 0.11
 
+- A document shown in Preview for the first time appears sooner. Each document has a web view of its own, and a web view takes most of a second to start before it shows anything; one is now started ahead of need, half a second after a page has loaded, for the next document to take. None is started at launch: that was tried, and made a launch slower.
 - Each document keeps a preview pane and a source pane of its own, from the first time it is shown in each. Going to another document and back finds both exactly where they were left, with nothing loaded or laid out again. One pane of each kind, given each document in turn, had to load the page again and scroll the text back to a place it could only estimate.
 - Three things a long document made slow on every click are no longer done. The source pane does not fetch its whole text and compare it with the document on each update. Putting a selection into the preview reads the document once and not each time. A search with nothing to look for no longer asks for the document's text, which read it on the main actor as each document was shown.
 - (macOS) The source pane no longer moves when something is selected far down a long document. Its text was laid out again on every update, which every change of selection is, because the width of its text was checked against the wrong number and set each time. Laid out again, a long document comes out a different height, and the text moved out from under the reader.
