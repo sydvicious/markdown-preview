@@ -16,7 +16,6 @@ This document tracks planned work for MarkdownPreviewApp.
 
 ### Proposed performance fixes.
   - Decide whether the engine's scanner is worth making faster. A 505 KB document builds in 83 ms, and its text is read for searching in 91 ms, in a release build; a debug build takes two to three times as long. What is left is the tokenizer comparing a whole `Character` at a time as it scans, and the parsing of table rows. Having the scanner work on bytes would be a large change to the tokenizer.
-  - Find out why dragging a selection in Preview is slow in a long document: the selection lags behind the pointer. The app's part of following it is under a millisecond; what is left is the page's script on each change of selection, or the window being redrawn after it.
 
 ### The source pane lands near a place far down a long document, and not on it.
   - When the source pane has to follow the preview to a place far down a long document, it lands close to the place and not on it. That is after the reader scrolls Preview by hand and switches to Source, and on iPhone on coming back from the list, where both panes are made again.

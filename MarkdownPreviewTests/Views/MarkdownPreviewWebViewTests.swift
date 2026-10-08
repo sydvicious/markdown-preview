@@ -130,6 +130,119 @@ struct MarkdownPreviewWebViewTests {
         #expect(leftToFindThem == withTheDocuments)
     }
 
+    // MARK: - A selection across many blocks
+
+    /// Six paragraphs, each on a line of its own with a blank line after:
+    /// "Paragraph 0 is here." at 0, "Paragraph 1 is here." at 22, and so on.
+    private static let sixParagraphs = (0..<6).map { "Paragraph \($0) is here." }.joined(separator: "\n\n")
+
+    /// What the page reports for a block selected from `from` for `length`
+    /// characters of its text.
+    private static func reported(
+        paragraph index: Int,
+        from location: Int = 0,
+        length: Int = 20,
+        continuesPastText: Bool = false
+    ) -> [String: Any] {
+        var range: [String: Any] = [
+            "blockStart": NSNumber(value: index * 22),
+            "blockEnd": NSNumber(value: index * 22 + 20),
+            "displayLocation": NSNumber(value: location),
+            "displayLength": NSNumber(value: length)
+        ]
+        if continuesPastText {
+            range["continuesPastText"] = true
+        }
+        return range
+    }
+
+    // A selection is one stretch of the source, from where its first block's
+    // share begins to where its last block's ends. The blocks between decide
+    // nothing, however many there are, and are not read to find out: a
+    // selection across a thousand blocks took a third of a second to follow,
+    // each time it changed.
+    @Test func aSelectionAcrossManyBlocksRunsFromItsFirstToItsLast() {
+        // From "1 is here." in the second paragraph to "Paragraph" in the fifth.
+        let payload: [[String: Any]] = [
+            Self.reported(paragraph: 1, from: 10, length: 10, continuesPastText: true),
+            Self.reported(paragraph: 2, continuesPastText: true),
+            Self.reported(paragraph: 3, continuesPastText: true),
+            Self.reported(paragraph: 4, length: 9)
+        ]
+
+        let ranges = PreviewSelectionBridge.contiguousSelectionRanges(
+            fromDisplayRangeResult: payload,
+            source: Self.sixParagraphs
+        )
+
+        #expect(ranges == [MarkdownSelectionRange(location: 32, length: 65)])
+    }
+
+    @Test func wholeBlocksSelectedAreWholeLinesOfTheSource() {
+        let payload = (1...4).map { Self.reported(paragraph: $0, continuesPastText: true) }
+
+        let ranges = PreviewSelectionBridge.contiguousSelectionRanges(
+            fromDisplayRangeResult: payload,
+            source: Self.sixParagraphs
+        )
+
+        // From the start of the second paragraph's line to the start of the
+        // line after the fifth's.
+        #expect(ranges == [MarkdownSelectionRange(location: 22, length: 87)])
+    }
+
+    // What the page says of a block that is not in the source, or of none of
+    // a block's text, is passed over, at either end.
+    @Test func aBlockThatMapsToNothingAtEitherEndIsPassedOver() {
+        let outside: [String: Any] = [
+            "blockStart": NSNumber(value: 5_000),
+            "blockEnd": NSNumber(value: 5_020),
+            "displayLocation": NSNumber(value: 0),
+            "displayLength": NSNumber(value: 20)
+        ]
+        let payload: [[String: Any]] = [
+            Self.reported(paragraph: 0, length: 0),
+            Self.reported(paragraph: 1, from: 10, length: 10),
+            Self.reported(paragraph: 2),
+            Self.reported(paragraph: 3, length: 9),
+            outside
+        ]
+
+        let ranges = PreviewSelectionBridge.contiguousSelectionRanges(
+            fromDisplayRangeResult: payload,
+            source: Self.sixParagraphs
+        )
+
+        #expect(ranges == [MarkdownSelectionRange(location: 32, length: 43)])
+    }
+
+    @Test func blocksReportedOutOfOrderStillRunFromTheEarliestToTheLatest() {
+        let payload: [[String: Any]] = [
+            Self.reported(paragraph: 3, length: 9),
+            Self.reported(paragraph: 1, from: 10, length: 10),
+            Self.reported(paragraph: 4, length: 9),
+            Self.reported(paragraph: 2)
+        ]
+
+        let ranges = PreviewSelectionBridge.contiguousSelectionRanges(
+            fromDisplayRangeResult: payload,
+            source: Self.sixParagraphs
+        )
+
+        #expect(ranges == [MarkdownSelectionRange(location: 32, length: 65)])
+    }
+
+    @Test func aSelectionAcrossBlocksThatAllMapToNothingIsNoSelection() {
+        let payload = (0..<4).map { Self.reported(paragraph: $0, length: 0) }
+
+        let ranges = PreviewSelectionBridge.contiguousSelectionRanges(
+            fromDisplayRangeResult: payload,
+            source: Self.sixParagraphs
+        )
+
+        #expect(ranges.isEmpty)
+    }
+
     @Test func enclosingRangeOfNothingIsNil() {
         #expect(PreviewSelectionBridge.enclosingRange(of: []) == nil)
         #expect(

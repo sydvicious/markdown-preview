@@ -389,3 +389,112 @@ test('Select All is reported to the app as every block', async () => {
     { blockStart: 14, blockEnd: 30, displayLocation: 0, displayLength: 16, continuesPastText: true }
   ]);
 });
+
+// A long document is thousands of blocks, and a selection touches a few of
+// them. Only those are looked at: looking at every block of a 1.4 MB document
+// took half a second each time the selection changed. These say that the
+// answer is the same wherever in a long page the selection is, and wherever
+// its ends fall: inside a block's text, or between two blocks.
+
+const manyBlocks = (count) => Array.from({ length: count }, (_, index) =>
+  // As the renderer writes them: a line apart.
+  block(index * 100, index * 100 + 50, `Block ${index} has <em>some</em> text.`)).join('\n');
+
+const whole = (index) => {
+  const text = `Block ${index} has some text.`;
+  return { blockStart: index * 100, blockEnd: index * 100 + 50, displayLocation: 0, displayLength: text.length };
+};
+
+test('a selection in one block of many is that block alone', () => {
+  const { window, preview, blocks } = page(manyBlocks(60));
+  const text = blocks[37].firstChild;                          // "Block 37 has "
+  select(window, text, 6, text, 8);
+
+  assert.equal(window.getSelection().toString(), '37');
+  assert.deepEqual(plain(preview.selectedDisplayRanges()), [
+    { blockStart: 3700, blockEnd: 3750, displayLocation: 6, displayLength: 2 }
+  ]);
+});
+
+test('a selection across several blocks of many is those blocks, in order', () => {
+  const { window, preview, blocks } = page(manyBlocks(60));
+  const first = blocks[20].firstChild;                         // "Block 20 has "
+  const last = blocks[23].lastChild;                           // " text."
+  select(window, first, 9, last, 5);
+
+  assert.deepEqual(plain(preview.selectedDisplayRanges()), [
+    { blockStart: 2000, blockEnd: 2050, displayLocation: 9, displayLength: 14, continuesPastText: true },
+    { ...whole(21), continuesPastText: true },
+    { ...whole(22), continuesPastText: true },
+    { blockStart: 2300, blockEnd: 2350, displayLocation: 0, displayLength: 22 }
+  ]);
+});
+
+test('the first and the last block of many can be selected', () => {
+  const { window, preview, blocks } = page(manyBlocks(60));
+
+  select(window, blocks[0].firstChild, 0, blocks[0].firstChild, 5);
+  assert.deepEqual(plain(preview.selectedDisplayRanges()), [
+    { blockStart: 0, blockEnd: 50, displayLocation: 0, displayLength: 5 }
+  ]);
+
+  select(window, blocks[59].lastChild, 1, blocks[59].lastChild, 5);
+  assert.deepEqual(plain(preview.selectedDisplayRanges()), [
+    { blockStart: 5900, blockEnd: 5950, displayLocation: 18, displayLength: 4 }
+  ]);
+});
+
+// A selection made by the keyboard, or by Select All, can begin and end
+// between blocks: at a child of the article, and not in any block's text.
+test('a selection that begins and ends between blocks is the blocks between', () => {
+  const { window, document, preview, blocks } = page(manyBlocks(60));
+  const article = document.querySelector('article');
+  const children = Array.from(article.childNodes);
+
+  select(window, article, children.indexOf(blocks[30]), article, children.indexOf(blocks[32]) + 1);
+
+  assert.deepEqual(
+    plain(preview.selectedDisplayRanges()).map(({ blockStart, displayLocation, displayLength }) =>
+      ({ blockStart, displayLocation, displayLength })),
+    [30, 31, 32].map((index) => ({ blockStart: index * 100, displayLocation: 0, displayLength: whole(index).displayLength }))
+  );
+});
+
+// Between two blocks is the line the renderer puts there, which is text of a
+// kind, and a selection can begin or end in it.
+test('a selection that begins and ends in the space between blocks is the blocks between', () => {
+  const { window, preview, blocks } = page(manyBlocks(60));
+  const before = blocks[40].previousSibling;
+  const after = blocks[41].nextSibling;
+  assert.equal(before.nodeType, window.Node.TEXT_NODE);
+  assert.equal(after.nodeType, window.Node.TEXT_NODE);
+
+  select(window, before, 0, after, 1);
+
+  assert.deepEqual(
+    plain(preview.selectedDisplayRanges()).map(({ blockStart, displayLocation, displayLength }) =>
+      ({ blockStart, displayLocation, displayLength })),
+    [40, 41].map((index) => ({ blockStart: index * 100, displayLocation: 0, displayLength: whole(index).displayLength }))
+  );
+});
+
+test('everything selected is every block', () => {
+  const { window, document, preview } = page(manyBlocks(60));
+  const article = document.querySelector('article');
+  select(window, article, 0, article, article.childNodes.length);
+
+  const ranges = plain(preview.selectedDisplayRanges());
+
+  assert.equal(ranges.length, 60);
+  assert.deepEqual(ranges.map((range) => range.blockStart), Array.from({ length: 60 }, (_, index) => index * 100));
+  assert.ok(ranges.every((range) => range.displayLocation === 0 && range.displayLength > 20));
+});
+
+test('a selection that touches no block reports no ranges', () => {
+  const { window, preview, blocks } = page(manyBlocks(60));
+  const between = blocks[10].nextSibling;                      // the line between two blocks
+  select(window, between, 0, between, 1);
+
+  assert.deepEqual(plain(preview.selectedDisplayRanges()), []);
+});
+

@@ -94,6 +94,56 @@
     return end > start ? { start, end } : null;
   };
 
+  // The blocks a selection can have anything of: from the first that does not
+  // end before the selection begins, to the last that does not begin after it
+  // ends. Each is found by halving the page, a dozen looks for three thousand
+  // blocks, and the blocks come in the order the page has them.
+  //
+  // Every block of the page used to be looked at, each time the selection
+  // changed, and every piece of text in it asked whether the selection
+  // touched it. That is quick to ask once, and was asked tens of thousands of
+  // times: half a second for a 1.4 MB document, twice for each change, so
+  // that a selection being dragged ran a second behind the pointer.
+  const blocksTouchedBy = (selection, blocks) => {
+    let first = blocks.length;
+    let last = -1;
+    for (let rangeIndex = 0; rangeIndex < selection.rangeCount; rangeIndex += 1) {
+      const range = selection.getRangeAt(rangeIndex);
+
+      // The first block whose end is not before the selection's start.
+      let low = 0;
+      let high = blocks.length;
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        const block = blocks[middle];
+        if (range.comparePoint(block, block.childNodes.length) < 0) {
+          low = middle + 1;
+        } else {
+          high = middle;
+        }
+      }
+      const from = low;
+
+      // The first block after that whose start is after the selection's end.
+      high = blocks.length;
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        if (range.comparePoint(blocks[middle], 0) > 0) {
+          high = middle;
+        } else {
+          low = middle + 1;
+        }
+      }
+      const to = low - 1;
+
+      if (from <= to) {
+        first = Math.min(first, from);
+        last = Math.max(last, to);
+      }
+    }
+    return first <= last ? blocks.slice(first, last + 1) : [];
+  };
+
   const selectedDisplayRanges = () => {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
@@ -102,7 +152,14 @@
 
     const selectedRanges = [];
     const blocks = Array.from(document.querySelectorAll('[data-source-start][data-source-end]'));
-    for (const block of blocks) {
+    const touched = blocksTouchedBy(selection, blocks);
+    // A selection that is one stretch of the page has every block between
+    // its first and its last whole, and goes on past each of them. Nothing in
+    // those needs asking whether the selection touches it, which is what
+    // takes the time: a selection across a thousand blocks was 171 ms each
+    // time it changed, and a whole 1.4 MB document two seconds.
+    const isOneStretch = selection.rangeCount === 1;
+    for (const [index, block] of touched.entries()) {
       const blockStart = Number(block.getAttribute('data-source-start'));
       const blockEnd = Number(block.getAttribute('data-source-end'));
       if (!Number.isFinite(blockStart) || !Number.isFinite(blockEnd) || blockEnd <= blockStart) {
@@ -110,6 +167,20 @@
       }
 
       const textNodes = window.markdownPreview.acceptedTextNodesInBlock(block);
+      if (isOneStretch && index > 0 && index < touched.length - 1) {
+        const length = textNodes.length > 0 ? textNodes[textNodes.length - 1].end : 0;
+        if (length > 0) {
+          selectedRanges.push({
+            blockStart,
+            blockEnd,
+            displayLocation: 0,
+            displayLength: length,
+            continuesPastText: true
+          });
+        }
+        continue;
+      }
+
       const blockContents = document.createRange();
       blockContents.selectNodeContents(block);
       for (let rangeIndex = 0; rangeIndex < selection.rangeCount; rangeIndex += 1) {

@@ -373,7 +373,7 @@ enum PreviewSelectionBridge {
         source: String,
         definitions: MarkdownLinkDefinitions? = nil
     ) -> [MarkdownSelectionRange] {
-        let mapped = mappedRanges(fromDisplayRangeResult: result, source: source, definitions: definitions)
+        let mapped = mappedEnds(fromDisplayRangeResult: result, source: source, definitions: definitions)
         guard let enclosing = enclosingRange(of: mapped.map(\.range)) else { return [] }
         return [startingWithItsLine(enclosing, spanning: mapped, in: source as NSString)]
     }
@@ -473,58 +473,120 @@ enum PreviewSelectionBridge {
         // Each block is read on its own, but a reference in it is a link only
         // by a definition elsewhere in the document.
         let definitions = givenDefinitions ?? MarkdownLinkDefinitions(source: source)
-        return displayRanges.compactMap { displayRange -> MappedRange? in
-            guard displayRange.blockStart >= 0,
-                  displayRange.blockEnd <= sourceLength,
-                  displayRange.blockEnd > displayRange.blockStart else {
-                return nil
-            }
-
-            let blockRange = NSRange(
-                location: displayRange.blockStart,
-                length: displayRange.blockEnd - displayRange.blockStart
-            )
-            let blockSource = nsSource.substring(with: blockRange) as NSString
-            let mapping = MarkdownPreviewTextOffsetMapping(sourceText: blockSource as String, definitions: definitions)
-            let localDisplayRange = MarkdownSelectionRange(
-                location: displayRange.displayLocation,
-                length: displayRange.displayLength
-            )
-            guard let localSourceRange = mapping.sourceRange(forDisplayRange: localDisplayRange),
-                  localSourceRange.length > 0 else {
-                return nil
-            }
-
-            // A block starts where a line does, so a line of the block is a
-            // line of the source.
-            let localStart = localSourceRange.location
-            let localEnd = localStart + localSourceRange.length
-            let shown = mapping.runs.filter { $0.displayRange.length > 0 }.map(\.sourceRange)
-            func showsAnything(from lower: Int, to upper: Int) -> Bool {
-                shown.contains { $0.location < upper && $0.location + $0.length > lower }
-            }
-
-            let start = displayRange.blockStart + localStart
-            var end = displayRange.blockStart + localEnd
-            let takesTheEndOfItsLine = displayRange.continuesPastText
-                && !showsAnything(from: localEnd, to: blockSource.endOfLineText(from: localEnd))
-            // What is written between the last thing the reader can see and
-            // the end of the line, the `**` that closes bold or the address of
-            // a link, is on the line too, so it comes along with the ending.
-            //
-            // An end already at the start of a line stays where it is. The
-            // text of a code block ends with a line ending of its own, and the
-            // line after it is the closing fence.
-            if takesTheEndOfItsLine, nsSource.startOfLine(containing: end) != end {
-                end = nsSource.startOfLine(after: end) ?? sourceLength
-            }
-
-            return MappedRange(
-                range: MarkdownSelectionRange(location: start, length: end - start),
-                isFirstOnItsLine: !showsAnything(from: blockSource.startOfLine(containing: localStart), to: localStart),
-                takesTheEndOfItsLine: takesTheEndOfItsLine
-            )
+        return displayRanges.compactMap {
+            mappedRange(for: $0, in: nsSource, of: sourceLength, definitions: definitions)
         }
+    }
+
+    /// The ranges that say where a selection begins and ends in the source:
+    /// the first of what the page reported that maps to anything, and the
+    /// last. A selection is one stretch of the source from the one to the
+    /// other, and the blocks between decide nothing about it.
+    ///
+    /// Each range mapped is a block read, and every block reported used to
+    /// be: a third of a second for a selection across a thousand blocks, and
+    /// over a second for a 1.4 MB document selected whole, on the main actor,
+    /// each time the selection changed.
+    ///
+    /// That the first and the last are the ends holds for what the page
+    /// reports, which is a range for each block the selection touches, in the
+    /// order the blocks come. Anything else is mapped whole, as before.
+    private static func mappedEnds(
+        fromDisplayRangeResult result: Any?,
+        source: String,
+        definitions givenDefinitions: MarkdownLinkDefinitions?
+    ) -> [MappedRange] {
+        let displayRanges = displayRanges(from: result)
+        let comeInOrder = zip(displayRanges, displayRanges.dropFirst()).allSatisfy { earlier, later in
+            earlier.blockEnd <= later.blockStart
+        }
+        guard displayRanges.count > 2, comeInOrder else {
+            return mappedRanges(fromDisplayRangeResult: result, source: source, definitions: givenDefinitions)
+        }
+
+        let nsSource = source as NSString
+        let sourceLength = nsSource.length
+        let definitions = givenDefinitions ?? MarkdownLinkDefinitions(source: source)
+        func mapped(_ index: Int) -> MappedRange? {
+            mappedRange(for: displayRanges[index], in: nsSource, of: sourceLength, definitions: definitions)
+        }
+
+        var ends: [MappedRange] = []
+        var firstIndex = displayRanges.endIndex
+        for index in displayRanges.indices {
+            if let first = mapped(index) {
+                ends.append(first)
+                firstIndex = index
+                break
+            }
+        }
+        for index in displayRanges.indices.reversed() where index > firstIndex {
+            if let last = mapped(index) {
+                ends.append(last)
+                break
+            }
+        }
+        return ends
+    }
+
+    /// One range of a block's rendered text, as the stretch of the source it
+    /// shows, or nil if it shows none.
+    private static func mappedRange(
+        for displayRange: PreviewDisplaySelectionRange,
+        in nsSource: NSString,
+        of sourceLength: Int,
+        definitions: MarkdownLinkDefinitions
+    ) -> MappedRange? {
+        guard displayRange.blockStart >= 0,
+              displayRange.blockEnd <= sourceLength,
+              displayRange.blockEnd > displayRange.blockStart else {
+            return nil
+        }
+
+        let blockRange = NSRange(
+            location: displayRange.blockStart,
+            length: displayRange.blockEnd - displayRange.blockStart
+        )
+        let blockSource = nsSource.substring(with: blockRange) as NSString
+        let mapping = MarkdownPreviewTextOffsetMapping(sourceText: blockSource as String, definitions: definitions)
+        let localDisplayRange = MarkdownSelectionRange(
+            location: displayRange.displayLocation,
+            length: displayRange.displayLength
+        )
+        guard let localSourceRange = mapping.sourceRange(forDisplayRange: localDisplayRange),
+              localSourceRange.length > 0 else {
+            return nil
+        }
+
+        // A block starts where a line does, so a line of the block is a
+        // line of the source.
+        let localStart = localSourceRange.location
+        let localEnd = localStart + localSourceRange.length
+        let shown = mapping.runs.filter { $0.displayRange.length > 0 }.map(\.sourceRange)
+        func showsAnything(from lower: Int, to upper: Int) -> Bool {
+            shown.contains { $0.location < upper && $0.location + $0.length > lower }
+        }
+
+        let start = displayRange.blockStart + localStart
+        var end = displayRange.blockStart + localEnd
+        let takesTheEndOfItsLine = displayRange.continuesPastText
+            && !showsAnything(from: localEnd, to: blockSource.endOfLineText(from: localEnd))
+        // What is written between the last thing the reader can see and
+        // the end of the line, the `**` that closes bold or the address of
+        // a link, is on the line too, so it comes along with the ending.
+        //
+        // An end already at the start of a line stays where it is. The
+        // text of a code block ends with a line ending of its own, and the
+        // line after it is the closing fence.
+        if takesTheEndOfItsLine, nsSource.startOfLine(containing: end) != end {
+            end = nsSource.startOfLine(after: end) ?? sourceLength
+        }
+
+        return MappedRange(
+            range: MarkdownSelectionRange(location: start, length: end - start),
+            isFirstOnItsLine: !showsAnything(from: blockSource.startOfLine(containing: localStart), to: localStart),
+            takesTheEndOfItsLine: takesTheEndOfItsLine
+        )
     }
 
     static func displayRanges(from result: Any?) -> [PreviewDisplaySelectionRange] {
